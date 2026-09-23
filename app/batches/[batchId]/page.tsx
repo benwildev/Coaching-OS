@@ -5,12 +5,13 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import Icon from '@/components/Icon';
 import StatusBadge from '@/components/StatusBadge';
+import BatchFinancialTab from '@/components/BatchFinancialTab';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 import { BATCH_STATUSES } from '@/lib/validations/batch';
 import { DAY_LABELS, formatTimeRange } from '@/lib/schedule';
 
-type Tab = 'overview' | 'students' | 'subjects' | 'teachers' | 'routine' | 'room' | 'attendance' | 'history';
+type Tab = 'overview' | 'students' | 'subjects' | 'teachers' | 'routine' | 'room' | 'attendance' | 'financial' | 'history';
 
 export default function BatchDetailPage() {
   const params = useParams();
@@ -256,6 +257,7 @@ export default function BatchDetailPage() {
     { id: 'routine', label: dict.batches.tabRoutine },
     { id: 'room', label: dict.rooms.title },
     { id: 'attendance', label: dict.attendance.title },
+    { id: 'financial', label: dict.fees.batchFinancial },
     { id: 'history', label: dict.batches.tabHistory },
   ];
 
@@ -674,6 +676,8 @@ export default function BatchDetailPage() {
           </div>
         </div>
       )}
+
+      {tab === 'financial' && <BatchFinancialTab batchId={batchId} />}
 
       {/* Assign Student Modal */}
       {assignModalOpen && (

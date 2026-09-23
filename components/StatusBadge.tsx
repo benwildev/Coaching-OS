@@ -16,7 +16,10 @@ interface StatusBadgeProps {
     | 'scheduleStatus'
     | 'attendanceStatus'
     | 'sessionStatus'
-    | 'teacherStatus';
+    | 'teacherStatus'
+    | 'invoiceStatus'
+    | 'feeAssignmentStatus'
+    | 'paymentStatus';
 }
 
 // Centralized semantic status → color tokens, shared by StatusBadge and any
@@ -41,6 +44,16 @@ export const STATUS_DOT_COLOR: Record<string, string> = {
   ABSENT: 'bg-rose-500',
   LATE: 'bg-amber-500',
   EXCUSED: 'bg-indigo-500',
+  DRAFT: 'bg-slate-400',
+  ISSUED: 'bg-sky-500',
+  PARTIAL: 'bg-amber-500',
+  PAID: 'bg-emerald-500',
+  OVERDUE: 'bg-rose-500',
+  PENDING: 'bg-sky-500',
+  WAIVED: 'bg-indigo-500',
+  REFUNDED: 'bg-rose-500',
+  PARTIALLY_REFUNDED: 'bg-amber-500',
+  VOIDED: 'bg-slate-400',
 };
 
 export const STATUS_BG_COLOR: Record<string, string> = {
@@ -62,6 +75,16 @@ export const STATUS_BG_COLOR: Record<string, string> = {
   ABSENT: 'bg-rose-50 text-rose-700 border-rose-200',
   LATE: 'bg-amber-50 text-amber-700 border-amber-200',
   EXCUSED: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
+  ISSUED: 'bg-sky-50 text-sky-700 border-sky-200',
+  PARTIAL: 'bg-amber-50 text-amber-700 border-amber-200',
+  PAID: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  OVERDUE: 'bg-rose-50 text-rose-700 border-rose-200',
+  PENDING: 'bg-sky-50 text-sky-700 border-sky-200',
+  WAIVED: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  REFUNDED: 'bg-rose-50 text-rose-700 border-rose-200',
+  PARTIALLY_REFUNDED: 'bg-amber-50 text-amber-700 border-amber-200',
+  VOIDED: 'bg-slate-100 text-slate-600 border-slate-200',
 };
 
 const DOT_COLOR = STATUS_DOT_COLOR;

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Icon from '@/components/Icon';
 import StatusBadge from '@/components/StatusBadge';
 import StudentAttendanceSummary from '@/components/StudentAttendanceSummary';
+import StudentFinancialSummary from '@/components/StudentFinancialSummary';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 import { formatBdPhoneDisplay } from '@/lib/validations/student';
@@ -601,7 +602,10 @@ export default function StudentDetailPage() {
             )}
           </div>
 
-          {/* Section 5b: Attendance */}
+          {/* Section 5b: Financial Summary */}
+          <StudentFinancialSummary studentId={studentId} />
+
+          {/* Section 5c: Attendance */}
           <StudentAttendanceSummary studentId={studentId} />
 
           {/* Section 6: Documents & Identity */}

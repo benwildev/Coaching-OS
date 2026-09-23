@@ -1,111 +1,98 @@
 'use client';
-import { useMemo, useState } from 'react';
-import ChartCard from '@/components/ChartCard';
-import Chip from '@/components/Chip';
-import KpiCard from '@/components/KpiCard';
-import { scopeOf, kpisFor } from '@/lib/charts';
-import { DATA, ROSTER, clsName, FEES } from '@/lib/data';
-import { tkShort } from '@/lib/format';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import Icon from '@/components/Icon';
+import FeesSubNav from '@/components/FeesSubNav';
 import { useApp } from '@/lib/store';
+import { DICTIONARY, formatBDT } from '@/lib/i18n';
 
-export default function FeesPage() {
-  const { cls, range, showToast } = useApp();
-  const [tab, setTab] = useState<'dues' | 'payments' | 'structure'>('dues');
-  const [q, setQ] = useState('');
-  const sc = useMemo(() => scopeOf(cls), [cls]);
-  const kpis = useMemo(() => kpisFor(sc, range), [sc, range]);
-  const feesKpi = kpis.find((k: any) => k.id === 'fees');
-  const outstandingKpi = kpis.find((k: any) => k.id === 'outstanding');
+interface Dashboard {
+  todayCollection: number;
+  monthCollection: number;
+  outstandingDue: number;
+  overdueAmount: number;
+  invoicesIssuedThisMonth: number;
+  paymentsCountToday: number;
+}
 
-  const dues = ROSTER.students.filter((s: any) => (cls === 'all' || s.cls === cls) && s.dueMonths.length > 0 && (!q || s.name.toLowerCase().includes(q.toLowerCase())));
-  const payments = ROSTER.payments.filter((p: any) => cls === 'all' || p.cls === cls).slice(0, 60);
+function Tile({ label, value, icon, tone }: { label: string; value: string; icon: string; tone: string }) {
+  return (
+    <div className="kpi h-full bg-white border border-[#d8e1ee] rounded-2xl p-4 flex flex-col gap-2.5 shadow-[0_1px_2px_rgba(0,31,77,.05)]">
+      <div className="flex items-center gap-2">
+        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${tone}`}>
+          <Icon name={icon} size={15} />
+        </span>
+        <span className="text-[12.5px] font-semibold text-[#55637a] leading-tight">{label}</span>
+      </div>
+      <div className="dsp font-bold text-[#00296b] text-[22px] leading-none">{value}</div>
+    </div>
+  );
+}
+
+export default function FeesOverviewPage() {
+  const { lang } = useApp();
+  const dict = DICTIONARY[lang];
+  const [data, setData] = useState<Dashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/fees/dashboard')
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d.success) setData(d.dashboard);
+      })
+      .catch(() => {})
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
-    <div className="max-w-[1400px] mx-auto flex flex-col gap-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[feesKpi, outstandingKpi, kpis.find((k: any) => k.id === 'students'), kpis.find((k: any) => k.id === 'admissions')].map((k: any) => (
-          <KpiCard key={k.id} kpi={k} variant="exec" />
-        ))}
+    <div className="max-w-[1400px] mx-auto flex flex-col gap-5">
+      <div>
+        <h1 className="text-2xl md:text-3xl font-extrabold text-[#063b78] tracking-tight">{dict.fees.title}</h1>
+        <p className="text-[13.5px] text-[#64748b] mt-0.5 font-medium">{dict.fees.subtitle}</p>
       </div>
 
-      <ChartCard title="Dues ageing" subtitle={`Outstanding by how overdue it is · ${clsName(cls)}`}>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {DATA.aging.map((a: any) => (
-            <div key={a.id} className="border border-[#edf1f7] rounded-xl p-3">
-              <div className="text-[11.5px] text-[#55637a]">{a.label}</div>
-              <div className="dsp text-lg font-extrabold text-[#00296b]">{tkShort(a.amount)}</div>
-            </div>
-          ))}
-        </div>
-      </ChartCard>
+      <FeesSubNav />
 
-      <div className="card">
-        <div className="flex border-b border-[#edf1f7] px-4">
-          <button className="tab" aria-selected={tab === 'dues'} onClick={() => setTab('dues')}>Dues</button>
-          <button className="tab" aria-selected={tab === 'payments'} onClick={() => setTab('payments')}>Payments</button>
-          <button className="tab" aria-selected={tab === 'structure'} onClick={() => setTab('structure')}>Fee structure</button>
+      {loading ? (
+        <div className="card p-12 rounded-2xl bg-white border border-[#dce5f0] text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-3 border-solid border-[#063b78] border-r-transparent align-[-0.125em]" />
         </div>
-        <div className="p-4">
-          {tab === 'dues' && (
-            <>
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search student…" className="tb w-full max-w-xs mb-3" />
-              <div className="overflow-x-auto scroll">
-                <table className="tbl">
-                  <thead><tr><th>Student</th><th>Guardian</th><th>Months due</th><th>Amount</th><th></th></tr></thead>
-                  <tbody>
-                    {dues.slice(0, 40).map((s: any) => (
-                      <tr key={s.id} className="trow">
-                        <td className="text-left font-bold text-[#00296b]">{s.name}<div className="text-[11px] text-[#8795ab] font-normal">{s.batchName}</div></td>
-                        <td className="text-left">{s.guardian}<div className="text-[11px] text-[#8795ab]">{s.phone}</div></td>
-                        <td>{s.dueMonths.join(', ')}</td>
-                        <td>{'৳' + (s.fee * s.dueMonths.length).toLocaleString('en-IN')}</td>
-                        <td>
-                          <button className="tb" onClick={() => showToast('Reminder sent (demo)')}>Remind</button>
-                        </td>
-                      </tr>
-                    ))}
-                    {dues.length === 0 && <tr><td colSpan={5} className="text-center text-[#55637a] py-8">No outstanding dues.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-          {tab === 'payments' && (
-            <div className="overflow-x-auto scroll">
-              <table className="tbl">
-                <thead><tr><th>Receipt</th><th>Student</th><th>Purpose</th><th>Amount</th><th>Method</th><th>Date</th></tr></thead>
-                <tbody>
-                  {payments.map((p: any) => (
-                    <tr key={p.receipt} className="trow">
-                      <td className="text-left font-mono text-[12px]">{p.receipt}</td>
-                      <td className="text-left">{p.name}</td>
-                      <td className="text-left">{p.purpose}</td>
-                      <td>{'৳' + p.amount.toLocaleString('en-IN')}</td>
-                      <td className="capitalize">{p.method}</td>
-                      <td>{p.date}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {tab === 'structure' && (
-            <div className="overflow-x-auto scroll">
-              <table className="tbl">
-                <thead><tr><th>Class</th><th>Science</th><th>Business Studies</th><th>Humanities</th></tr></thead>
-                <tbody>
-                  {DATA.classes.map((c: any) => (
-                    <tr key={c.id} className="trow">
-                      <td className="text-left font-bold text-[#00296b]">{c.name}</td>
-                      <td>{'৳' + FEES[c.id]}</td>
-                      <td>{'৳' + (FEES[c.id] - 400)}</td>
-                      <td>{'৳' + (FEES[c.id] - 400)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <Tile label={dict.fees.todayCollection} value={formatBDT(data?.todayCollection ?? 0, lang)} icon="banknote" tone="bg-[#e9eef7] text-[#00296b]" />
+          <Tile label={dict.fees.monthCollection} value={formatBDT(data?.monthCollection ?? 0, lang)} icon="chart" tone="bg-[#e6effa] text-[#00509d]" />
+          <Tile label={dict.fees.outstandingDue} value={formatBDT(data?.outstandingDue ?? 0, lang)} icon="wallet" tone="bg-[#fff6cc] text-[#7a5200]" />
+          <Tile label={dict.fees.overdueAmount} value={formatBDT(data?.overdueAmount ?? 0, lang)} icon="alert" tone="bg-rose-50 text-rose-600" />
+          <Tile label={dict.fees.invoicesIssued} value={String(data?.invoicesIssuedThisMonth ?? 0)} icon="file" tone="bg-[#e9eef7] text-[#00296b]" />
+          <Tile label={dict.fees.paymentsCount} value={String(data?.paymentsCountToday ?? 0)} icon="check" tone="bg-emerald-50 text-emerald-600" />
+        </div>
+      )}
+
+      <div className="card p-5 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs">
+        <div className="text-[12px] font-bold text-[#55637a] uppercase tracking-wide mb-3">{dict.fees.quickLinks}</div>
+        <div className="flex flex-wrap gap-2.5">
+          <Link href="/fees/invoices/new" className="primary">
+            <Icon name="plus" size={16} />
+            <span>{dict.fees.newInvoice}</span>
+          </Link>
+          <Link href="/fees/structures/new" className="tb">
+            <Icon name="plus" size={15} />
+            <span>{dict.fees.newStructure}</span>
+          </Link>
+          <Link href="/fees/reports/due" className="tb">
+            <Icon name="alert" size={15} />
+            <span>{dict.fees.viewDue}</span>
+          </Link>
+          <Link href="/fees/reports/collection" className="tb">
+            <Icon name="chart" size={15} />
+            <span>{dict.fees.viewCollection}</span>
+          </Link>
         </div>
       </div>
     </div>
