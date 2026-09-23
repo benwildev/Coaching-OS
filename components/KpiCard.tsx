@@ -1,4 +1,3 @@
-import Icon from './Icon';
 import Counter from './Counter';
 
 const TONES: Record<string, string> = { teal: 'bg-[#e9eef7] text-[#00296b]', cyan: 'bg-[#e6effa] text-[#00509d]', gold: 'bg-[#ffd500] text-[#00296b]', pink: 'bg-[#fff6cc] text-[#7a5200]' };

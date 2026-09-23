@@ -1,100 +1,148 @@
 'use client';
+
 import { useState } from 'react';
-import Icon from '@/components/Icon';
-import { DATA } from '@/lib/data';
-import { useApp } from '@/lib/store';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function LoginPage() {
-  const { showToast } = useApp();
   const router = useRouter();
-  const [mode, setMode] = useState<'otp' | 'password'>('otp');
-  const [phone, setPhone] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [email, setEmail] = useState('');
-  const [pass, setPass] = useState('');
-  const [show, setShow] = useState(false);
-  const [err, setErr] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lang, setLang] = useState<'bn' | 'en'>('bn');
 
-  const sendOtp = () => {
-    if (phone.replace(/\D/g, '').length < 11) { setErr('Enter a valid mobile number.'); return; }
-    setErr('');
-    setOtpSent(true);
-    showToast('Demo OTP sent: 123456');
-  };
-  const verify = () => {
-    if (otp !== '123456') { setErr('Incorrect code. Try 123456 for this demo.'); return; }
-    showToast('Signed in');
-    router.push('/');
-  };
-  const passwordLogin = () => {
-    if (!email || pass.length < 4) { setErr('Enter your email and password.'); return; }
-    showToast('Signed in');
-    router.push('/');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!identifier || !password) {
+      setError(lang === 'bn' ? 'ইমেইল/ফোন এবং পাসওয়ার্ড পূরণ করুন।' : 'Please enter your email/phone and password.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || (lang === 'bn' ? 'লগইন ব্যর্থ হয়েছে।' : 'Login failed.'));
+      }
+
+      router.push('/dashboard');
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed');
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center">
-      <div className="w-full max-w-sm card p-6">
-        <div className="flex items-center gap-2.5 mb-6">
-          <span className="w-10 h-10 rounded-xl bg-[#ffd500] text-[#00296b] flex items-center justify-center font-extrabold dsp">A</span>
-          <div>
-            <div className="dsp font-bold text-[#00296b]">{DATA.org.short}</div>
-            <div className="text-[11px] text-[#55637a]">{DATA.org.campus}</div>
+    <div className="min-h-screen bg-[#f5f8fc] flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8">
+      {/* Language Switcher Pill */}
+      <div className="absolute top-6 right-6 flex items-center bg-white border border-[#dce5f0] rounded-full p-1 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setLang('bn')}
+          className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+            lang === 'bn' ? 'bg-[#063b78] text-white' : 'text-[#64748b] hover:text-[#063b78]'
+          }`}
+        >
+          বাংলা
+        </button>
+        <button
+          type="button"
+          onClick={() => setLang('en')}
+          className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+            lang === 'en' ? 'bg-[#063b78] text-white' : 'text-[#64748b] hover:text-[#063b78]'
+          }`}
+        >
+          English
+        </button>
+      </div>
+
+      <div className="max-w-md w-full">
+        {/* Brand Header */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#ffd200] text-[#063b78] font-black text-3xl shadow-sm mb-3">
+            A
+          </div>
+          <h1 className="text-2xl font-black text-[#063b78] tracking-tight">
+            {lang === 'bn' ? 'কোচিং ওএস লগইন' : 'Coaching OS Sign In'}
+          </h1>
+          <p className="text-xs text-[#64748b] mt-1 font-medium">
+            {lang === 'bn'
+              ? 'বাংলাদেশ কোচিং সেন্টার ব্যবস্থাপনা সিস্টেম'
+              : 'Bangladesh Coaching Center Management Platform'}
+          </p>
+        </div>
+
+        {/* Login Box */}
+        <div className="card p-7 sm:p-8 bg-white border border-[#dce5f0] rounded-2xl shadow-sm">
+          {error && (
+            <div className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="fld">
+              <label>{lang === 'bn' ? 'ইমেইল অথবা মোবাইল নম্বর' : 'Email or Mobile Number'}</label>
+              <input
+                type="text"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder={lang === 'bn' ? '01712000000 অথবা email@domain.com' : '01712000000 or email@domain.com'}
+                autoComplete="username"
+                required
+              />
+            </div>
+
+            <div className="fld">
+              <label>{lang === 'bn' ? 'পাসওয়ার্ড' : 'Password'}</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="primary w-full justify-center text-sm py-2.5 mt-2"
+            >
+              {loading
+                ? (lang === 'bn' ? 'যাচাই করা হচ্ছে…' : 'Signing in…')
+                : (lang === 'bn' ? 'প্রবেশ করুন →' : 'Sign in to Dashboard →')}
+            </button>
+          </form>
+
+          <div className="mt-6 pt-5 border-t border-[#edf1f7] text-center">
+            <span className="text-xs text-[#64748b]">
+              {lang === 'bn' ? 'নতুন কোচিং সেন্টার চালু করতে চান?' : 'Setting up a new Coaching Center?'}{' '}
+            </span>
+            <Link
+              href="/setup"
+              className="text-xs font-bold text-[#063b78] hover:underline"
+            >
+              {lang === 'bn' ? 'সেটআপ শুরু করুন' : 'Run Setup Wizard'}
+            </Link>
           </div>
         </div>
 
-        <div className="flex gap-1.5 mb-5">
-          <button className="chip" aria-pressed={mode === 'otp'} onClick={() => { setMode('otp'); setErr(''); }}>Mobile + OTP</button>
-          <button className="chip" aria-pressed={mode === 'password'} onClick={() => { setMode('password'); setErr(''); }}>Email + password</button>
+        <div className="text-center mt-6 text-[11px] text-[#64748b]">
+          Asia/Dhaka (GMT+6) · Bangladesh Standard Security Standard
         </div>
-
-        {mode === 'otp' ? (
-          <div className="flex flex-col gap-3">
-            {!otpSent ? (
-              <>
-                <div className="fld">
-                  <label>Mobile number</label>
-                  <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" />
-                </div>
-                {err && <div className="err"><Icon name="alert" size={14} />{err}</div>}
-                <button className="primary justify-center" onClick={sendOtp}>Send code</button>
-              </>
-            ) : (
-              <>
-                <div className="fld">
-                  <label>Enter the 6-digit code</label>
-                  <input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="123456" maxLength={6} />
-                </div>
-                {err && <div className="err"><Icon name="alert" size={14} />{err}</div>}
-                <button className="primary justify-center" onClick={verify}>Verify & sign in</button>
-                <button className="text-[12.5px] text-[#55637a] hover:underline" onClick={() => setOtpSent(false)}>Change number</button>
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <div className="fld">
-              <label>Email</label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@alokito.example" />
-            </div>
-            <div className="fld">
-              <label>Password</label>
-              <div className="relative">
-                <input value={pass} onChange={(e) => setPass(e.target.value)} type={show ? 'text' : 'password'} />
-                <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-[#55637a]" onClick={() => setShow(!show)}>
-                  <Icon name={show ? 'eyeoff' : 'eye'} size={16} />
-                </button>
-              </div>
-            </div>
-            {err && <div className="err"><Icon name="alert" size={14} />{err}</div>}
-            <button className="primary justify-center" onClick={passwordLogin}>Sign in</button>
-            <button className="text-[12.5px] text-[#55637a] hover:underline" onClick={() => showToast('Password reset link sent (demo)')}>Forgot password?</button>
-          </div>
-        )}
-
-        <div className="text-[11px] text-[#8795ab] mt-5 text-center">Demo only — any 6-digit code works if you type 123456.</div>
       </div>
     </div>
   );
