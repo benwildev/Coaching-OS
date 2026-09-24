@@ -248,3 +248,62 @@ button:disabled {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ==========================================
+   QUESTION PAPER — print layout (A4 portrait)
+   Only the .print-paper sheet is printed; all
+   application chrome is removed.
+   ========================================== */
+.print-paper {
+  background: #ffffff;
+  color: #000000;
+  font-family: 'Noto Sans Bengali', 'Roboto', serif;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.print-paper .pp-question {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.print-paper .pp-section {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm 14mm 16mm 14mm;
+  }
+  html, body {
+    background: #ffffff !important;
+    height: auto;
+  }
+  aside, header, nav, .no-print {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  body > * , main > * {
+    background: #ffffff !important;
+  }
+  .print-paper {
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
+    font-size: 12pt;
+  }
+  .print-paper * {
+    color: #000000 !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+.print-only {
+  display: none;
+}

@@ -19,7 +19,11 @@ interface StatusBadgeProps {
     | 'teacherStatus'
     | 'invoiceStatus'
     | 'feeAssignmentStatus'
-    | 'paymentStatus';
+    | 'paymentStatus'
+    | 'examStatus'
+    | 'questionStatus'
+    | 'paperStatus'
+    | 'materialStatus';
 }
 
 // Centralized semantic status → color tokens, shared by StatusBadge and any
@@ -44,6 +48,10 @@ export const STATUS_DOT_COLOR: Record<string, string> = {
   ABSENT: 'bg-rose-500',
   LATE: 'bg-amber-500',
   EXCUSED: 'bg-indigo-500',
+  SCHEDULED: 'bg-indigo-500',
+  ONGOING: 'bg-amber-500',
+  PUBLISHED: 'bg-emerald-500',
+  FINALIZED: 'bg-blue-500',
   DRAFT: 'bg-slate-400',
   ISSUED: 'bg-sky-500',
   PARTIAL: 'bg-amber-500',
@@ -75,6 +83,10 @@ export const STATUS_BG_COLOR: Record<string, string> = {
   ABSENT: 'bg-rose-50 text-rose-700 border-rose-200',
   LATE: 'bg-amber-50 text-amber-700 border-amber-200',
   EXCUSED: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  SCHEDULED: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  ONGOING: 'bg-amber-50 text-amber-700 border-amber-200',
+  PUBLISHED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  FINALIZED: 'bg-blue-50 text-blue-700 border-blue-200',
   DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
   ISSUED: 'bg-sky-50 text-sky-700 border-sky-200',
   PARTIAL: 'bg-amber-50 text-amber-700 border-amber-200',

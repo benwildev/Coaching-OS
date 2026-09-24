@@ -15,6 +15,9 @@ const NAV_ITEMS = [
   { id: 'attendance', icon: 'check', href: '/attendance' },
   { id: 'fees', icon: 'wallet', href: '/fees' },
   { id: 'exams', icon: 'award', href: '/exams' },
+  { id: 'questions', icon: 'target', href: '/questions' },
+  { id: 'questionPapers', icon: 'file', href: '/question-papers' },
+  { id: 'materials', icon: 'book', href: '/materials' },
   { id: 'teachers', icon: 'grad', href: '/teachers' },
   { id: 'communication', icon: 'message', href: '/communication' },
   { id: 'reports', icon: 'doc', href: '/reports' },
@@ -117,7 +120,10 @@ export function SidebarContent({
       <nav className="flex flex-col gap-1 overflow-y-auto scroll">
         {NAV_ITEMS.map((n) => {
           const label = (dict as any)[n.id] || n.id;
-          const isActive = pathname === n.href || (n.id === 'dashboard' && pathname === '/');
+          const isActive =
+            pathname === n.href ||
+            pathname.startsWith(`${n.href}/`) ||
+            (n.id === 'dashboard' && pathname === '/');
           return (
             <NavLink
               key={n.id}

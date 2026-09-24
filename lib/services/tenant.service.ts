@@ -1,6 +1,7 @@
 import prisma from '@/lib/db';
 import { hashPassword } from '@/lib/auth/password';
 import { recordAuditLog } from './audit.service';
+import { seedStandardSubjectsForCenter } from './academic.service';
 import type { SetupWizardInput } from '@/lib/validations/setup';
 
 export async function isSetupCompleted(): Promise<boolean> {
@@ -69,7 +70,7 @@ export async function completeInitialSetup(input: SetupWizardInput) {
   const passwordHash = hashPassword(input.ownerPassword);
 
   // 3. Perform setup inside a transactional sequence
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // A. Create Coaching Center
     const center = await tx.coachingCenter.create({
       data: {
@@ -328,5 +329,17 @@ export async function completeInitialSetup(input: SetupWizardInput) {
       owner,
       session,
     };
+  }, {
+    maxWait: 15000,
+    timeout: 60000,
   });
+
+  // Automatically seed standard NCTB curriculum subjects
+  try {
+    await seedStandardSubjectsForCenter(result.center.id);
+  } catch (err) {
+    console.error('[TenantService] Non-blocking error seeding standard subjects:', err);
+  }
+
+  return result;
 }

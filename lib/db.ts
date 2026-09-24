@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
@@ -6,9 +7,11 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 export function createPrismaClient(): PrismaClient {
-  const connectionString =
-    process.env.DATABASE_URL ||
-    'postgresql://postgres:postgres@localhost:5432/coaching_os?schema=public';
+  const connectionString = process.env.DATABASE_URL;
+
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is not set. Please ensure .env contains a valid DATABASE_URL.');
+  }
 
   const adapter = new PrismaPg({ connectionString });
   return new PrismaClient({ adapter });

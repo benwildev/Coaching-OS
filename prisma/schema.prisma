@@ -170,6 +170,7 @@ model CoachingCenter {
   exams                  Exam[]
   questions              Question[]
   studyMaterials         StudyMaterial[]
+  questionPapers         QuestionPaper[]
   notices                Notice[]
   notifications          Notification[]
   communicationTemplates CommunicationTemplate[]
@@ -211,6 +212,9 @@ model Branch {
   studentFeeAssignments StudentFeeAssignment[]
   feeInvoices      FeeInvoice[]
   payments         Payment[]
+  questions        Question[]
+  studyMaterials   StudyMaterial[]
+  questionPapers   QuestionPaper[]
 
   @@unique([coachingCenterId, code])
   @@map("branches")
@@ -251,6 +255,13 @@ model User {
   createdDiscounts FeeDiscount[]  @relation("DiscountCreatedBy")
   collectedPayments Payment[]     @relation("PaymentCollectedBy")
   refundedPayments PaymentRefund[] @relation("PaymentRefundedBy")
+  createdQuestions Question[]     @relation("QuestionCreatedBy")
+  updatedQuestions Question[]     @relation("QuestionUpdatedBy")
+  createdStudyMaterials StudyMaterial[] @relation("StudyMaterialCreatedBy")
+  updatedStudyMaterials StudyMaterial[] @relation("StudyMaterialUpdatedBy")
+  createdQuestionPapers QuestionPaper[] @relation("QuestionPaperCreatedBy")
+  updatedQuestionPapers QuestionPaper[] @relation("QuestionPaperUpdatedBy")
+  finalizedQuestionPapers QuestionPaper[] @relation("QuestionPaperFinalizedBy")
 
   @@unique([coachingCenterId, email])
   @@index([coachingCenterId, phone])
@@ -336,6 +347,8 @@ model AcademicSession {
   feeStructures    FeeStructure[]
   studentFeeAssignments StudentFeeAssignment[]
   exams            Exam[]
+  questions        Question[]
+  questionPapers   QuestionPaper[]
 
   @@unique([coachingCenterId, name])
   @@map("academic_sessions")
@@ -358,6 +371,8 @@ model AcademicProgram {
   enrollments      StudentEnrollment[]
   batches          Batch[]
   exams            Exam[]
+  questions        Question[]
+  questionPapers   QuestionPaper[]
 
   @@unique([coachingCenterId, code])
   @@map("academic_programs")
@@ -384,6 +399,8 @@ model AcademicClass {
   feeStructures     FeeStructure[]
   exams             Exam[]
   studyMaterials    StudyMaterial[]
+  questions         Question[]
+  questionPapers    QuestionPaper[]
 
   @@unique([academicProgramId, code])
   @@map("academic_classes")
@@ -405,6 +422,10 @@ model AcademicGroup {
   courses          Course[]
   enrollments      StudentEnrollment[]
   batches          Batch[]
+  exams            Exam[]
+  questions        Question[]
+  studyMaterials   StudyMaterial[]
+  questionPapers   QuestionPaper[]
 
   @@unique([academicClassId, code])
   @@map("academic_groups")
@@ -447,6 +468,7 @@ model Subject {
   examSubjects     ExamSubject[]
   questions        Question[]
   studyMaterials   StudyMaterial[]
+  questionPapers   QuestionPaper[]
 
   @@unique([academicClassId, code])
   @@map("subjects")
@@ -462,6 +484,9 @@ model SubjectPaper {
 
   subject     Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   courseSubjects CourseSubject[]
+  questions      Question[]
+  studyMaterials StudyMaterial[]
+  questionPapers QuestionPaper[]
 
   @@unique([subjectId, paperNumber])
   @@map("subject_papers")
@@ -745,6 +770,7 @@ model Batch {
   attendanceSessions AttendanceSession[]
   exams             Exam[]
   studentFeeAssignments StudentFeeAssignment[]
+  studyMaterials    StudyMaterial[]
 
   @@unique([coachingCenterId, code])
   @@index([coachingCenterId, branchId])
@@ -1264,25 +1290,34 @@ model Exam {
   academicSessionId String
   academicProgramId String
   academicClassId   String
+  academicGroupId   String?
   batchId           String?
   title             String          // e.g. "Weekly Test 11 - Chemistry & Biology"
   banglaTitle       String?
   examType          String          // WEEKLY, MONTHLY, MODEL_TEST, TERM_FINAL
+  status            String          @default("DRAFT") // DRAFT, SCHEDULED, ONGOING, COMPLETED, PUBLISHED, CANCELLED
   startDate         DateTime
   endDate           DateTime?
   totalMarks        Decimal         @default(100) @db.Decimal(5, 2)
   passMarks         Decimal         @default(40) @db.Decimal(5, 2)
+  publishedAt       DateTime?
   createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @default(now()) @updatedAt
 
   coachingCenter    CoachingCenter  @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
   branch            Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
   academicSession   AcademicSession @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
   academicProgram   AcademicProgram @relation(fields: [academicProgramId], references: [id], onDelete: Cascade)
   academicClass     AcademicClass   @relation(fields: [academicClassId], references: [id], onDelete: Cascade)
+  academicGroup     AcademicGroup?  @relation(fields: [academicGroupId], references: [id], onDelete: SetNull)
   batch             Batch?          @relation(fields: [batchId], references: [id], onDelete: SetNull)
   examSubjects      ExamSubject[]
   examStudents      ExamStudent[]
 
+  @@index([coachingCenterId, branchId])
+  @@index([coachingCenterId, status])
+  @@index([coachingCenterId, academicSessionId])
+  @@index([coachingCenterId, batchId])
   @@map("exams")
 }
 
@@ -1321,19 +1356,22 @@ model Result {
   id            String      @id @default(uuid())
   examSubjectId String
   studentId     String
-  marksObtained Decimal     @db.Decimal(5, 2)
+  marksObtained Decimal?    @db.Decimal(5, 2)
   highestMarks  Decimal?    @db.Decimal(5, 2)
   grade         String?     // A+, A, A-, B, C, D, F
   gpa           Decimal?    @db.Decimal(3, 2) // 5.00
   isPassed      Boolean     @default(true)
+  status        String      @default("PRESENT") // PRESENT, ABSENT, EXCUSED
   rank          Int?
   remarks       String?
   createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @default(now()) @updatedAt
 
   examSubject   ExamSubject @relation(fields: [examSubjectId], references: [id], onDelete: Cascade)
   student       Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([examSubjectId, studentId])
+  @@index([studentId])
   @@map("results")
 }
 
@@ -1342,48 +1380,177 @@ model Result {
 // ==========================================
 
 model Question {
-  id               String           @id @default(uuid())
-  coachingCenterId String
-  subjectId        String
-  questionText     String           @db.Text
-  type             String           // MCQ, CQ, SHORT
-  marks            Decimal          @default(1) @db.Decimal(4, 2)
-  difficulty       String?          // EASY, MEDIUM, HARD
+  id                 String           @id @default(uuid())
+  coachingCenterId   String
+  branchId           String?          // null = available centre-wide
+  academicSessionId  String?
+  academicProgramId  String?
+  academicClassId    String?
+  academicGroupId    String?
+  subjectId          String
+  subjectPaperId     String?
+  chapter            String?          // chapter / topic
+  questionText       String           @db.Text
+  banglaQuestionText String?          @db.Text
+  type               String           // MCQ, TRUE_FALSE, SHORT, WRITTEN, CQ, FILL_BLANK
+  marks              Decimal          @default(1) @db.Decimal(4, 2)
+  difficulty         String?          @default("MEDIUM") // EASY, MEDIUM, HARD
+  answer             String?          @db.Text
+  banglaAnswer       String?          @db.Text
+  explanation        String?          @db.Text
+  banglaExplanation  String?          @db.Text
+  status             String           @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  createdById        String?
+  updatedById        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @default(now()) @updatedAt
 
-  coachingCenter   CoachingCenter   @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
-  subject          Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  options          QuestionOption[]
+  coachingCenter     CoachingCenter   @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch             Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  academicSession    AcademicSession? @relation(fields: [academicSessionId], references: [id], onDelete: SetNull)
+  academicProgram    AcademicProgram? @relation(fields: [academicProgramId], references: [id], onDelete: SetNull)
+  academicClass      AcademicClass?   @relation(fields: [academicClassId], references: [id], onDelete: SetNull)
+  academicGroup      AcademicGroup?   @relation(fields: [academicGroupId], references: [id], onDelete: SetNull)
+  subject            Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectPaper       SubjectPaper?    @relation(fields: [subjectPaperId], references: [id], onDelete: SetNull)
+  createdBy          User?            @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy          User?            @relation("QuestionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  options            QuestionOption[]
+  paperItems         QuestionPaperItem[]
 
+  @@index([coachingCenterId, subjectId])
+  @@index([coachingCenterId, status])
+  @@index([coachingCenterId, difficulty])
+  @@index([coachingCenterId, type])
+  @@index([coachingCenterId, academicClassId])
   @@map("questions")
 }
 
 model QuestionOption {
-  id         String   @id @default(uuid())
-  questionId String
-  optionText String
-  isCorrect  Boolean  @default(false)
+  id               String   @id @default(uuid())
+  questionId       String
+  optionText       String
+  banglaOptionText String?
+  order            Int      @default(0)
+  isCorrect        Boolean  @default(false)
 
-  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  question         Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
+  @@index([questionId, order])
   @@map("question_options")
 }
 
+// A printable paper composed from Question Bank questions. Each item keeps a
+// snapshot of the question content so later edits to the live Question never
+// alter a finalized paper.
+model QuestionPaper {
+  id                 String           @id @default(uuid())
+  coachingCenterId   String
+  branchId           String?
+  academicSessionId  String?
+  academicProgramId  String?
+  academicClassId    String?
+  academicGroupId    String?
+  subjectId          String
+  subjectPaperId     String?
+  title              String
+  banglaTitle        String?
+  examType           String?          // WEEKLY, MONTHLY, MODEL_TEST, ...
+  examDate           DateTime?
+  durationMinutes    Int              @default(60)
+  totalMarks         Decimal          @db.Decimal(6, 2)
+  instructions       String?          @db.Text
+  banglaInstructions String?          @db.Text
+  status             String           @default("DRAFT") // DRAFT, FINALIZED, ARCHIVED
+  finalizedAt        DateTime?
+  finalizedById      String?
+  createdById        String?
+  updatedById        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @default(now()) @updatedAt
+
+  coachingCenter     CoachingCenter   @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch             Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  academicSession    AcademicSession? @relation(fields: [academicSessionId], references: [id], onDelete: SetNull)
+  academicProgram    AcademicProgram? @relation(fields: [academicProgramId], references: [id], onDelete: SetNull)
+  academicClass      AcademicClass?   @relation(fields: [academicClassId], references: [id], onDelete: SetNull)
+  academicGroup      AcademicGroup?   @relation(fields: [academicGroupId], references: [id], onDelete: SetNull)
+  subject            Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectPaper       SubjectPaper?    @relation(fields: [subjectPaperId], references: [id], onDelete: SetNull)
+  createdBy          User?            @relation("QuestionPaperCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy          User?            @relation("QuestionPaperUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  finalizedBy        User?            @relation("QuestionPaperFinalizedBy", fields: [finalizedById], references: [id], onDelete: SetNull)
+  items              QuestionPaperItem[]
+
+  @@index([coachingCenterId, subjectId])
+  @@index([coachingCenterId, status])
+  @@map("question_papers")
+}
+
+model QuestionPaperItem {
+  id                         String        @id @default(uuid())
+  questionPaperId            String
+  questionId                 String?       // null if the source question was later removed
+  order                      Int
+  questionTypeSnapshot       String
+  questionTextSnapshot       String        @db.Text
+  banglaQuestionTextSnapshot String?       @db.Text
+  marksSnapshot              Decimal       @db.Decimal(4, 2)
+  difficultySnapshot         String?
+  optionsSnapshot            Json?         // [{ text, banglaText, order, isCorrect }] for MCQ / TRUE_FALSE
+  answerSnapshot             String?       @db.Text // staff preview only, never printed
+  explanationSnapshot        String?       @db.Text // staff preview only, never printed
+  createdAt                  DateTime      @default(now())
+
+  questionPaper              QuestionPaper @relation(fields: [questionPaperId], references: [id], onDelete: Cascade)
+  question                   Question?     @relation(fields: [questionId], references: [id], onDelete: SetNull)
+
+  @@unique([questionPaperId, questionId])
+  @@unique([questionPaperId, order])
+  @@index([questionId])
+  @@map("question_paper_items")
+}
+
 model StudyMaterial {
-  id               String         @id @default(uuid())
-  coachingCenterId String
-  academicClassId  String
-  subjectId        String
-  title            String
-  description      String?
-  fileUrl          String
-  type             String         @default("PDF") // PDF, LECTURE_SHEET, VIDEO
+  id                String          @id @default(uuid())
+  coachingCenterId  String
+  branchId          String?
+  academicClassId   String
+  academicGroupId   String?
+  subjectId         String
+  subjectPaperId    String?
+  batchId           String?         // null = every batch of the class
+  title             String
+  banglaTitle       String?
+  description       String?         @db.Text
+  banglaDescription String?         @db.Text
+  fileUrl           String?         // file / resource URL — binary files are never stored in the DB
+  thumbnailUrl      String?
+  type              String          @default("PDF") // PDF, VIDEO, IMAGE, DOCUMENT, NOTE, LINK
+  status            String          @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  publishedAt       DateTime?
+  createdById       String?
+  updatedById       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @default(now()) @updatedAt
 
-  coachingCenter   CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
-  academicClass    AcademicClass  @relation(fields: [academicClassId], references: [id], onDelete: Cascade)
-  subject          Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  coachingCenter    CoachingCenter  @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch            Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  academicClass     AcademicClass   @relation(fields: [academicClassId], references: [id], onDelete: Cascade)
+  academicGroup     AcademicGroup?  @relation(fields: [academicGroupId], references: [id], onDelete: SetNull)
+  subject           Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectPaper      SubjectPaper?   @relation(fields: [subjectPaperId], references: [id], onDelete: SetNull)
+  batch             Batch?          @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  createdBy         User?           @relation("StudyMaterialCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy         User?           @relation("StudyMaterialUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
+  @@index([coachingCenterId, subjectId])
+  @@index([coachingCenterId, status])
+  @@index([coachingCenterId, type])
+  @@index([coachingCenterId, academicClassId])
   @@map("study_materials")
 }
+
 
 // ==========================================
 // COMMUNICATION & NOTIFICATIONS

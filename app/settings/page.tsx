@@ -43,6 +43,18 @@ export default function SettingsPage() {
   const [newProgramModal, setNewProgramModal] = useState(false);
   const [newProgram, setNewProgram] = useState({ name: '', banglaName: '', code: '', description: '' });
 
+  // Subjects State
+  const [newSubjectModal, setNewSubjectModal] = useState(false);
+  const [newSubject, setNewSubject] = useState({
+    academicClassId: '',
+    academicGroupId: '',
+    name: '',
+    banglaName: '',
+    code: '',
+  });
+  const [seedingLoading, setSeedingLoading] = useState(false);
+  const [expandedClassId, setExpandedClassId] = useState<string | null>(null);
+
   // Rooms State
   const [rooms, setRooms] = useState<any[]>([]);
   const [roomBranches, setRoomBranches] = useState<any[]>([]);
@@ -255,6 +267,62 @@ export default function SettingsPage() {
     }
   };
 
+  const createSubjectInSettings = async () => {
+    if (!newSubject.academicClassId || !newSubject.name.trim() || !newSubject.code.trim()) {
+      showToast('Class, Subject Name, and Code are required');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/subjects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSubject),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('Subject created successfully!');
+        setNewSubjectModal(false);
+        setNewSubject({
+          academicClassId: '',
+          academicGroupId: '',
+          name: '',
+          banglaName: '',
+          code: '',
+        });
+        fetchAcademic();
+      } else {
+        showToast(data.error || 'Failed to create subject');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Error creating subject');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const seedAllSubjects = async () => {
+    setSeedingLoading(true);
+    try {
+      const res = await fetch('/api/subjects/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(`Standard subjects populated! (${data.createdCount} created)`);
+        fetchAcademic();
+      } else {
+        showToast(data.error || 'Failed to seed subjects');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Error seeding subjects');
+    } finally {
+      setSeedingLoading(false);
+    }
+  };
+
   const createRoom = async () => {
     if (!newRoom.branchId || !newRoom.name || !newRoom.code) {
       showToast('Branch, name and code are required');
@@ -440,13 +508,40 @@ export default function SettingsPage() {
               title="Configured Academic Programs"
               subtitle="Coaching programs (SSC, HSC, Admission, etc.)"
               filter={
-                <button
-                  type="button"
-                  onClick={() => setNewProgramModal(true)}
-                  className="primary text-xs h-9 px-3"
-                >
-                  + Add Program
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={seedingLoading}
+                    onClick={seedAllSubjects}
+                    className="tb text-xs h-9 px-3 border border-[#dce5f0] text-[#063b78] hover:bg-[#eef3fa]"
+                  >
+                    {seedingLoading ? 'Seeding…' : '⚡ Populate Standard NCTB Subjects'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const firstClass = programs[0]?.classes[0];
+                      setNewSubject({
+                        academicClassId: firstClass?.id || '',
+                        academicGroupId: '',
+                        name: '',
+                        banglaName: '',
+                        code: '',
+                      });
+                      setNewSubjectModal(true);
+                    }}
+                    className="tb text-xs h-9 px-3 border border-[#063b78] text-[#063b78] hover:bg-[#eef3fa]"
+                  >
+                    + Add Subject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewProgramModal(true)}
+                    className="primary text-xs h-9 px-3"
+                  >
+                    + Add Program
+                  </button>
+                </div>
               }
             >
               <div className="divide-y divide-[#edf1f7] mt-2">
@@ -467,16 +562,82 @@ export default function SettingsPage() {
                       <span className="text-xs text-[#64748b] font-semibold">{p.classes.length} classes</span>
                     </div>
 
-                    {/* Classes under program */}
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {p.classes.map((c: any) => (
-                        <div
-                          key={c.id}
-                          className="px-2.5 py-1 rounded-lg border border-[#dce5f0] bg-[#f8fafc] text-xs text-[#092f63] font-semibold"
-                        >
-                          {c.name} {c.banglaName ? `(${c.banglaName})` : ''}
-                        </div>
-                      ))}
+                    {/* Classes and Subjects under program */}
+                    <div className="flex flex-col gap-2 pt-1">
+                      {p.classes.map((c: any) => {
+                        const isExpanded = expandedClassId === c.id;
+                        return (
+                          <div
+                            key={c.id}
+                            className="rounded-xl border border-[#dce5f0] bg-[#f8fafc] p-2.5 flex flex-col gap-2"
+                          >
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-[#092f63] font-bold">
+                                  {c.name} {c.banglaName ? `(${c.banglaName})` : ''}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#eef3fa] text-[#063b78]">
+                                  {c.subjects?.length || 0} subjects
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setNewSubject({
+                                      academicClassId: c.id,
+                                      academicGroupId: '',
+                                      name: '',
+                                      banglaName: '',
+                                      code: '',
+                                    });
+                                    setNewSubjectModal(true);
+                                  }}
+                                  className="text-[11px] font-bold text-[#063b78] hover:underline px-2 py-1"
+                                >
+                                  + Add Subject
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedClassId(isExpanded ? null : c.id)}
+                                  className="text-[11px] font-semibold text-[#64748b] hover:text-[#092f63] px-2 py-1 rounded-md border border-[#dce5f0] bg-white cursor-pointer"
+                                >
+                                  {isExpanded ? 'Hide' : 'View Subjects'} ({c.subjects?.length || 0})
+                                </button>
+                              </div>
+                            </div>
+
+                            {isExpanded && (
+                              <div className="pt-2 border-t border-[#edf2f7]">
+                                {c.subjects?.length === 0 ? (
+                                  <div className="text-xs text-[#64748b] italic py-1">
+                                    No subjects added yet. Click &quot;+ Add Subject&quot; or &quot;⚡ Populate Standard NCTB Subjects&quot;.
+                                  </div>
+                                ) : (
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
+                                    {c.subjects.map((sub: any) => (
+                                      <div
+                                        key={sub.id}
+                                        className="p-1.5 rounded-lg border border-[#e2e8f0] bg-white text-[11px]"
+                                      >
+                                        <div className="font-bold text-[#092f63] truncate">{sub.name}</div>
+                                        {sub.banglaName && (
+                                          <div className="text-[10px] text-[#64748b] font-bangla truncate">
+                                            {sub.banglaName}
+                                          </div>
+                                        )}
+                                        <div className="text-[9px] font-mono text-[#063b78] font-bold">
+                                          {sub.code}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -554,6 +715,64 @@ export default function SettingsPage() {
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNewProgramModal(false)} className="tb">Cancel</button>
                     <button type="button" onClick={createProgram} disabled={loading} className="primary">Create Program</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Modal for New Subject */}
+            {newSubjectModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                <div className="card p-6 bg-white max-w-md w-full shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-extrabold text-base text-[#063b78]">Add Subject</h3>
+                    <button onClick={() => setNewSubjectModal(false)} className="text-[#64748b] hover:text-black">✕</button>
+                  </div>
+
+                  <div className="fld">
+                    <label>Target Academic Class *</label>
+                    <select
+                      value={newSubject.academicClassId}
+                      onChange={(e) => setNewSubject({ ...newSubject, academicClassId: e.target.value })}
+                    >
+                      <option value="">Select Class</option>
+                      {programs.flatMap((p) => p.classes).map((c: any) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} {c.banglaName ? `(${c.banglaName})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="fld">
+                    <label>Subject Name (English) *</label>
+                    <input
+                      placeholder="e.g. Higher Mathematics"
+                      value={newSubject.name}
+                      onChange={(e) => setNewSubject({ ...newSubject, name: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="fld">
+                    <label>নাম (বাংলায়)</label>
+                    <input
+                      placeholder="যেমন: উচ্চতর গণিত"
+                      value={newSubject.banglaName}
+                      onChange={(e) => setNewSubject({ ...newSubject, banglaName: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="fld">
+                    <label>Subject Code *</label>
+                    <input
+                      placeholder="e.g. HMATH"
+                      value={newSubject.code}
+                      onChange={(e) => setNewSubject({ ...newSubject, code: e.target.value.toUpperCase() })}
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setNewSubjectModal(false)} className="tb">Cancel</button>
+                    <button type="button" onClick={createSubjectInSettings} disabled={loading} className="primary">Create Subject</button>
                   </div>
                 </div>
               </div>

@@ -10,7 +10,10 @@ export const tkFull = (lakh: number) => '৳' + Math.round(lakh * 100000).toLoca
 export const tkShort = (lakh: number) =>
   lakh >= 100 ? '৳' + (lakh / 100).toFixed(2) + ' Cr' : '৳' + lakh.toFixed(lakh >= 10 ? 1 : 2) + ' L';
 
-export const niceMax = (v: number) => {
+/** Money: taka in. ≥1 lakh → "৳4.82 L", otherwise full "৳48,200". */
+export const tkCompact = (taka: number) => (Math.abs(taka) >= 100000 ? tkShort(taka / 100000) : '৳' + Math.round(taka).toLocaleString('en-IN'));
+
+export const niceMax =(v: number) => {
   const p = Math.pow(10, Math.floor(Math.log10(v || 1)));
   for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
   return 10 * p;
