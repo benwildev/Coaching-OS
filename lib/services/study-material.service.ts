@@ -4,12 +4,56 @@ import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
 import { recordAuditLog } from './audit.service';
 import { resolveAcademicContext } from './academic.service';
 import { assertTeacherSubjectAccess, getTeacherAuthorizedSubjectIds } from './exam-result.service';
+import { notifyStudentGuardians } from './guardian-notify.service';
 import {
   checkMaterialResource,
   type CreateMaterialInput,
   type MaterialFilterParams,
   type UpdateMaterialInput,
 } from '@/lib/validations/study-material';
+
+/**
+ * Notifies guardians of students in a published material's scope (its batch,
+ * or every student of its class/group when it's not batch-bound) —
+ * AGENTS.md §13: never notify the whole coaching center for a material.
+ */
+async function notifyMaterialPublished(
+  coachingCenterId: string,
+  material: { id: string; title: string; branchId: string | null; academicClassId: string; academicGroupId: string | null; batchId: string | null; subjectId: string },
+  actorId?: string
+) {
+  const [subject, batch] = await Promise.all([
+    prisma.subject.findUnique({ where: { id: material.subjectId }, select: { name: true } }),
+    material.batchId ? prisma.batch.findUnique({ where: { id: material.batchId }, select: { name: true } }) : null,
+  ]);
+
+  const studentIds = material.batchId
+    ? (await prisma.studentBatch.findMany({ where: { coachingCenterId, batchId: material.batchId, status: 'ACTIVE' }, select: { studentId: true } })).map((r) => r.studentId)
+    : (
+        await prisma.studentEnrollment.findMany({
+          where: {
+            coachingCenterId,
+            status: 'ENROLLED',
+            academicClassId: material.academicClassId,
+            ...(material.academicGroupId ? { academicGroupId: material.academicGroupId } : {}),
+          },
+          select: { studentId: true },
+        })
+      ).map((r) => r.studentId);
+
+  for (const studentId of studentIds) {
+    await notifyStudentGuardians({
+      coachingCenterId,
+      branchId: material.branchId,
+      studentId,
+      event: 'MATERIAL_PUBLISHED',
+      vars: { subjectName: subject?.name, batchName: batch?.name },
+      triggeredById: actorId,
+      sourceType: 'StudyMaterial',
+      sourceId: material.id,
+    });
+  }
+}
 
 export interface MaterialScope {
   coachingCenterId: string;
@@ -230,6 +274,7 @@ export async function createMaterial(scope: MaterialScope, input: CreateMaterial
       entityId: created.id,
       details: { from: null, to: 'PUBLISHED' },
     });
+    await notifyMaterialPublished(coachingCenterId, created, user.userId);
   }
 
   return getMaterialById(scope, created.id);
@@ -284,6 +329,11 @@ export async function updateMaterial(scope: MaterialScope, materialId: string, i
       entityId: materialId,
       details: { from: existing.status, to: 'PUBLISHED' },
     });
+    await notifyMaterialPublished(
+      coachingCenterId,
+      { id: materialId, title: input.title, branchId: ctx.branchId, academicClassId: ctx.academicClassId, academicGroupId: ctx.academicGroupId, batchId: ctx.batchId, subjectId: ctx.subjectId },
+      user.userId
+    );
   }
 
   return getMaterialById(scope, materialId);
@@ -340,6 +390,10 @@ export async function transitionMaterialStatus(
     details: { from: m.status, to: target },
   });
 
+  if (target === 'PUBLISHED') {
+    await notifyMaterialPublished(coachingCenterId, m, user.userId);
+  }
+
   return { id: materialId, status: target };
 }
 
@@ -379,7 +433,7 @@ export interface PortalMaterialParams {
  */
 export async function getStudentPortalMaterials(
   coachingCenterId: string,
-  user: SessionUser,
+  user: SessionUser | null,
   studentId: string,
   params: PortalMaterialParams = {}
 ) {
@@ -411,7 +465,11 @@ export async function getStudentPortalMaterials(
     },
   });
   if (!student) throw new Error('STUDENT_NOT_FOUND');
-  assertBranchAccess(user, student.branchId);
+  // A staff caller (SessionUser) is branch-scoped and must pass the check;
+  // a real portal caller has already proven ownership of studentId via
+  // their own session, so branch scoping (a staff-access concern) doesn't
+  // apply to them.
+  if (user) assertBranchAccess(user, student.branchId);
 
   const classIds = new Set<string>();
   const groupIds = new Set<string>();

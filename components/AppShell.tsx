@@ -1,4 +1,5 @@
 'use client';
+import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import MobileNav from './MobileNav';
@@ -6,6 +7,14 @@ import { useApp } from '@/lib/store';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { toast } = useApp();
+  const pathname = usePathname();
+
+  // The student/guardian portal has its own layout/shell (components/portal)
+  // and its own auth — it must never inherit the staff sidebar/topbar.
+  if (pathname?.startsWith('/portal')) {
+    return <>{children}</>;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f5f8fd]">
       <Sidebar />

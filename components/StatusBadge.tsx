@@ -23,7 +23,9 @@ interface StatusBadgeProps {
     | 'examStatus'
     | 'questionStatus'
     | 'paperStatus'
-    | 'materialStatus';
+    | 'materialStatus'
+    | 'noticeStatus'
+    | 'communicationLogStatus';
 }
 
 // Centralized semantic status → color tokens, shared by StatusBadge and any
@@ -62,6 +64,11 @@ export const STATUS_DOT_COLOR: Record<string, string> = {
   REFUNDED: 'bg-rose-500',
   PARTIALLY_REFUNDED: 'bg-amber-500',
   VOIDED: 'bg-slate-400',
+  QUEUED: 'bg-sky-500',
+  SENT: 'bg-emerald-500',
+  DELIVERED: 'bg-emerald-500',
+  FAILED: 'bg-rose-500',
+  SKIPPED: 'bg-slate-400',
 };
 
 export const STATUS_BG_COLOR: Record<string, string> = {
@@ -97,6 +104,11 @@ export const STATUS_BG_COLOR: Record<string, string> = {
   REFUNDED: 'bg-rose-50 text-rose-700 border-rose-200',
   PARTIALLY_REFUNDED: 'bg-amber-50 text-amber-700 border-amber-200',
   VOIDED: 'bg-slate-100 text-slate-600 border-slate-200',
+  QUEUED: 'bg-sky-50 text-sky-700 border-sky-200',
+  SENT: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  DELIVERED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  FAILED: 'bg-rose-50 text-rose-700 border-rose-200',
+  SKIPPED: 'bg-slate-100 text-slate-600 border-slate-200',
 };
 
 const DOT_COLOR = STATUS_DOT_COLOR;

@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
+import { notifyStudentGuardians } from './guardian-notify.service';
 import type { PaymentCreateInput, PaymentRefundInput } from '@/lib/validations/payment';
 import type { Prisma } from '@prisma/client';
 
@@ -140,6 +141,22 @@ export async function createPayment(
     });
 
     return { payment, invoice: updatedInvoice };
+  });
+
+  const student = await prisma.student.findUnique({ where: { id: invoice.studentId }, select: { name: true } });
+  await notifyStudentGuardians({
+    coachingCenterId,
+    branchId: invoice.branchId,
+    studentId: invoice.studentId,
+    event: 'FEE_PAYMENT_RECEIVED',
+    vars: {
+      studentName: student?.name,
+      amount: n(result.payment.amount).toFixed(2),
+      paymentDate: result.payment.paymentDate.toISOString().slice(0, 10),
+    },
+    triggeredById: actorId,
+    sourceType: 'Payment',
+    sourceId: result.payment.id,
   });
 
   return result;

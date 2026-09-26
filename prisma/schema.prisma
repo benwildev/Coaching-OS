@@ -23,6 +23,16 @@ enum RoleCode {
   TEACHER
 }
 
+enum PortalAccountType {
+  STUDENT
+  GUARDIAN
+}
+
+enum PortalAccountStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum AttendanceStatus {
   PRESENT
   ABSENT
@@ -175,8 +185,10 @@ model CoachingCenter {
   notifications          Notification[]
   communicationTemplates CommunicationTemplate[]
   communicationLogs      CommunicationLog[]
+  notificationPreferences NotificationPreference[]
   subscriptions          Subscription[]
   studentIdSequences     StudentIdSequence[]
+  portalAccounts         PortalAccount[]
 
   @@map("coaching_centers")
 }
@@ -215,6 +227,8 @@ model Branch {
   questions        Question[]
   studyMaterials   StudyMaterial[]
   questionPapers   QuestionPaper[]
+  notices          Notice[]
+  communicationLogs CommunicationLog[]
 
   @@unique([coachingCenterId, code])
   @@map("branches")
@@ -262,6 +276,11 @@ model User {
   createdQuestionPapers QuestionPaper[] @relation("QuestionPaperCreatedBy")
   updatedQuestionPapers QuestionPaper[] @relation("QuestionPaperUpdatedBy")
   finalizedQuestionPapers QuestionPaper[] @relation("QuestionPaperFinalizedBy")
+  createdNotices   Notice[]        @relation("NoticeCreatedBy")
+  updatedNotices   Notice[]        @relation("NoticeUpdatedBy")
+  createdCommunicationTemplates CommunicationTemplate[] @relation("CommunicationTemplateCreatedBy")
+  triggeredCommunicationLogs CommunicationLog[] @relation("CommunicationLogTriggeredBy")
+  notificationPreferences NotificationPreference[]
 
   @@unique([coachingCenterId, email])
   @@index([coachingCenterId, phone])
@@ -349,6 +368,7 @@ model AcademicSession {
   exams            Exam[]
   questions        Question[]
   questionPapers   QuestionPaper[]
+  notices          Notice[]
 
   @@unique([coachingCenterId, name])
   @@map("academic_sessions")
@@ -373,6 +393,7 @@ model AcademicProgram {
   exams            Exam[]
   questions        Question[]
   questionPapers   QuestionPaper[]
+  notices          Notice[]
 
   @@unique([coachingCenterId, code])
   @@map("academic_programs")
@@ -401,6 +422,7 @@ model AcademicClass {
   studyMaterials    StudyMaterial[]
   questions         Question[]
   questionPapers    QuestionPaper[]
+  notices           Notice[]
 
   @@unique([academicProgramId, code])
   @@map("academic_classes")
@@ -426,6 +448,7 @@ model AcademicGroup {
   questions        Question[]
   studyMaterials   StudyMaterial[]
   questionPapers   QuestionPaper[]
+  notices          Notice[]
 
   @@unique([academicClassId, code])
   @@map("academic_groups")
@@ -585,6 +608,10 @@ model Student {
   payments         Payment[]
   examStudents     ExamStudent[]
   results          Result[]
+  communicationLogs CommunicationLog[]
+  portalAccount    PortalAccount?
+  auditLogs        AuditLog[]
+  notifications    Notification[]
 
   @@unique([coachingCenterId, studentIdCode])
   @@index([coachingCenterId, phone])
@@ -626,6 +653,10 @@ model Guardian {
 
   coachingCenter   CoachingCenter  @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
   studentGuardians StudentGuardian[]
+  communicationLogs CommunicationLog[]
+  portalAccount    PortalAccount?
+  auditLogs        AuditLog[]
+  notifications    Notification[]
 
   @@index([coachingCenterId, phone])
   @@map("guardians")
@@ -682,6 +713,56 @@ model StudentEnrollment {
   @@index([coachingCenterId, branchId])
   @@index([coachingCenterId, status])
   @@map("student_enrollments")
+}
+
+// ==========================================
+// PORTAL AUTHENTICATION (STUDENT & GUARDIAN)
+// ==========================================
+//
+// Portal identities are deliberately separate from staff RBAC (User/Role/
+// RoleCode) — a Student or Guardian is never a staff role. Exactly one of
+// studentId/guardianId is set (enforced by a raw-SQL CHECK constraint added
+// in this model's migration, since Prisma has no declarative CHECK).
+
+model PortalAccount {
+  id                  String              @id @default(uuid())
+  coachingCenterId    String
+  portalType          PortalAccountType
+  studentId           String?             @unique
+  guardianId          String?             @unique
+  phone               String?
+  email               String?
+  passwordHash        String?             // null until setup-password is completed
+  status              PortalAccountStatus @default(ACTIVE)
+  failedLoginAttempts Int                 @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  coachingCenter      CoachingCenter      @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  student             Student?            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  guardian            Guardian?           @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+  authTokens          PortalAuthToken[]
+
+  @@index([coachingCenterId, phone])
+  @@index([coachingCenterId, email])
+  @@map("portal_accounts")
+}
+
+model PortalAuthToken {
+  id              String        @id @default(uuid())
+  portalAccountId String
+  tokenHash       String        @unique // SHA-256 of the raw token — the raw token is never stored
+  purpose         String        // SETUP, RESET
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime      @default(now())
+
+  portalAccount   PortalAccount @relation(fields: [portalAccountId], references: [id], onDelete: Cascade)
+
+  @@index([portalAccountId, purpose])
+  @@map("portal_auth_tokens")
 }
 
 // ==========================================
@@ -771,6 +852,7 @@ model Batch {
   exams             Exam[]
   studentFeeAssignments StudentFeeAssignment[]
   studyMaterials    StudyMaterial[]
+  notices           Notice[]
 
   @@unique([coachingCenterId, code])
   @@index([coachingCenterId, branchId])
@@ -1557,35 +1639,76 @@ model StudyMaterial {
 // ==========================================
 
 model Notice {
-  id               String         @id @default(uuid())
-  coachingCenterId String
-  title            String
-  banglaTitle      String?
-  content          String         @db.Text
-  targetAudience   String         @default("ALL") // ALL, STUDENTS, GUARDIANS, TEACHERS
-  isPublished      Boolean        @default(true)
-  publishedAt      DateTime       @default(now())
+  id                String          @id @default(uuid())
+  coachingCenterId  String
+  branchId          String?
+  academicSessionId String?
+  academicProgramId String?
+  academicClassId   String?
+  academicGroupId   String?
+  batchId           String?
+  title             String
+  banglaTitle       String?
+  content           String          @db.Text
+  banglaContent     String?         @db.Text
+  targetAudience    String          @default("ALL_CENTER") // ALL_CENTER, BRANCH, CLASS, GROUP, BATCH, TEACHERS, STUDENTS, GUARDIANS, STAFF
+  status            String          @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  isPublished       Boolean         @default(false)
+  publishedAt       DateTime?
+  createdById       String?
+  updatedById       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @default(now()) @updatedAt
 
-  coachingCenter   CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  coachingCenter    CoachingCenter  @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch            Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  academicSession   AcademicSession? @relation(fields: [academicSessionId], references: [id], onDelete: SetNull)
+  academicProgram   AcademicProgram? @relation(fields: [academicProgramId], references: [id], onDelete: SetNull)
+  academicClass     AcademicClass?  @relation(fields: [academicClassId], references: [id], onDelete: SetNull)
+  academicGroup     AcademicGroup?  @relation(fields: [academicGroupId], references: [id], onDelete: SetNull)
+  batch             Batch?          @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  createdBy         User?           @relation("NoticeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy         User?           @relation("NoticeUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  communicationLogs CommunicationLog[]
 
+  @@index([coachingCenterId, status])
+  @@index([coachingCenterId, branchId])
   @@map("notices")
 }
 
+// A notification recipient is exactly one of userId (staff), studentId, or
+// guardianId (portal identities) — enforced at the app layer (see
+// notification.service.ts vs portal-notification.service.ts, which create
+// these disjointly) rather than a DB CHECK, since three-way exclusivity
+// isn't worth the same raw-SQL treatment PortalAccount's two-way check gets.
 model Notification {
   id               String         @id @default(uuid())
   coachingCenterId String
-  userId           String
+  userId           String?
+  studentId        String?
+  guardianId       String?
   title            String
   body             String
-  type             String         @default("INFO") // INFO, WARNING, SUCCESS
+  type             String         @default("INFO") // INFO, WARNING, SUCCESS, plus centralized event types (see lib/notifications/events.ts)
+  actionUrl        String?
+  sourceType       String?        // e.g. "StudentAttendance", "FeeInvoice", "Payment", "Exam", "StudyMaterial", "Notice"
+  sourceId         String?
   isRead           Boolean        @default(false)
   readAt           DateTime?
   createdAt        DateTime       @default(now())
 
   coachingCenter   CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
-  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  student          Student?       @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  guardian         Guardian?      @relation(fields: [guardianId], references: [id], onDelete: SetNull)
 
+  @@unique([userId, sourceType, sourceId, type])
+  @@unique([studentId, sourceType, sourceId, type])
+  @@unique([guardianId, sourceType, sourceId, type])
   @@index([userId, isRead])
+  @@index([studentId, isRead])
+  @@index([guardianId, isRead])
+  @@index([coachingCenterId, createdAt])
   @@map("notifications")
 }
 
@@ -1596,27 +1719,75 @@ model CommunicationTemplate {
   channel          CommunicationChannel @default(SMS)
   bodyEn           String               @db.Text
   bodyBn           String               @db.Text
-  triggerEvent     String?              // ABSENCE, FEE_DUE, RESULT_PUBLISHED
+  triggerEvent     String?              // centralized event key, see lib/notifications/events.ts (e.g. ATTENDANCE_ABSENT, FEE_PAYMENT_RECEIVED, RESULT_PUBLISHED)
+  isActive         Boolean              @default(true)
+  createdById      String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @default(now()) @updatedAt
 
   coachingCenter   CoachingCenter       @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  createdBy        User?                @relation("CommunicationTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  communicationLogs CommunicationLog[]
 
+  @@index([coachingCenterId, triggerEvent, channel])
   @@map("communication_templates")
 }
 
 model CommunicationLog {
-  id               String               @id @default(uuid())
+  id                String               @id @default(uuid())
   coachingCenterId String
+  branchId          String?
+  templateId        String?
+  noticeId          String?
+  studentId         String?
+  guardianId        String?
+  triggeredById     String?
   recipientPhone   String?
   recipientEmail   String?
   channel          CommunicationChannel @default(SMS)
-  status           String               @default("SENT") // SENT, DELIVERED, FAILED
+  event             String?              // centralized event key, see lib/notifications/events.ts
+  sourceType        String?
+  sourceId          String?
+  status           String               @default("QUEUED") // QUEUED, SENT, DELIVERED, FAILED, SKIPPED
+  provider          String?
+  providerMessageId String?
+  errorMessage      String?
   message          String               @db.Text
-  sentAt           DateTime             @default(now())
+  sentAt           DateTime?
+  createdAt         DateTime             @default(now())
   cost             Decimal?             @db.Decimal(5, 2)
 
   coachingCenter   CoachingCenter       @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch            Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  template          CommunicationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  notice            Notice?              @relation(fields: [noticeId], references: [id], onDelete: SetNull)
+  student           Student?             @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  guardian          Guardian?            @relation(fields: [guardianId], references: [id], onDelete: SetNull)
+  triggeredBy       User?                @relation("CommunicationLogTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
 
+  @@unique([guardianId, channel, event, sourceType, sourceId])
+  @@index([coachingCenterId, createdAt])
+  @@index([coachingCenterId, status])
+  @@index([coachingCenterId, sourceType, sourceId])
   @@map("communication_logs")
+}
+
+model NotificationPreference {
+  id               String         @id @default(uuid())
+  coachingCenterId String
+  userId           String
+  category         String         // ATTENDANCE, FEE, EXAM, RESULT, NOTICE, MATERIAL
+  inApp            Boolean        @default(true)
+  sms              Boolean        @default(false)
+  whatsapp         Boolean        @default(false)
+  email            Boolean        @default(false)
+  updatedAt        DateTime       @default(now()) @updatedAt
+
+  coachingCenter   CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category])
+  @@map("notification_preferences")
 }
 
 // ==========================================
@@ -1655,7 +1826,9 @@ model AuditLog {
   id               String         @id @default(uuid())
   coachingCenterId String
   userId           String?
-  action           String         // e.g. "USER_LOGIN", "SETTINGS_UPDATE", "SETUP_COMPLETE"
+  studentId        String?
+  guardianId       String?
+  action           String         // e.g. "USER_LOGIN", "SETTINGS_UPDATE", "SETUP_COMPLETE", "PORTAL_LOGIN"
   entity           String         // e.g. "CoachingCenter", "User", "AcademicProgram"
   entityId         String?
   details          Json?
@@ -1665,6 +1838,8 @@ model AuditLog {
 
   coachingCenter   CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
   user             User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  student          Student?       @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  guardian         Guardian?      @relation(fields: [guardianId], references: [id], onDelete: SetNull)
 
   @@index([coachingCenterId, action])
   @@index([coachingCenterId, createdAt])

@@ -1,6 +1,7 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
 import { getSystemSettings, updateSystemSetting } from './settings.service';
+import { notifyStudentGuardians } from './guardian-notify.service';
 import {
   getCurrentDhakaDateOnly,
   getCurrentDhakaDayOfWeek,
@@ -285,6 +286,23 @@ export async function markStudentAttendance(
     details: { sessionId, studentId, status: data.status },
   });
 
+  if (data.status === 'ABSENT' || data.status === 'LATE') {
+    const [student, batch] = await Promise.all([
+      prisma.student.findUnique({ where: { id: studentId }, select: { name: true } }),
+      prisma.batch.findUnique({ where: { id: session.batchId }, select: { name: true } }),
+    ]);
+    await notifyStudentGuardians({
+      coachingCenterId,
+      branchId: session.branchId,
+      studentId,
+      event: data.status === 'ABSENT' ? 'ATTENDANCE_ABSENT' : 'ATTENDANCE_LATE',
+      vars: { studentName: student?.name, batchName: batch?.name },
+      triggeredById: actorId,
+      sourceType: 'StudentAttendance',
+      sourceId: mark.id,
+    });
+  }
+
   return mark;
 }
 
@@ -376,7 +394,67 @@ export async function completeAttendanceSession(
     details: { isIncomplete: unmarkedCount > 0, unmarkedCount },
   });
 
+  await notifyLowAttendanceForSession(coachingCenterId, session.batchId, sessionId, marked.map((m) => m.studentId), actorId);
+
   return updated;
+}
+
+/**
+ * After a session completes, checks the students just marked in it against
+ * the running attendance threshold and notifies guardians who newly fall
+ * below it. sourceId is the session id, so re-completing the same session
+ * (blocked by SESSION_ALREADY_COMPLETED unless reopened first) never
+ * double-fires for the same completion event.
+ */
+async function notifyLowAttendanceForSession(
+  coachingCenterId: string,
+  batchId: string,
+  sessionId: string,
+  markedStudentIds: string[],
+  actorId?: string
+) {
+  if (markedStudentIds.length === 0) return;
+  const threshold = await getAttendanceThreshold(coachingCenterId);
+
+  const [batch, marks] = await Promise.all([
+    prisma.batch.findUnique({ where: { id: batchId }, select: { name: true, branchId: true } }),
+    prisma.studentAttendance.findMany({
+      where: {
+        studentId: { in: markedStudentIds },
+        attendanceSession: { coachingCenterId, status: 'COMPLETED', batchId },
+      },
+      select: { studentId: true, status: true },
+    }),
+  ]);
+
+  const byStudent = new Map<string, { present: number; absent: number; late: number }>();
+  for (const m of marks) {
+    const bucket = byStudent.get(m.studentId) || { present: 0, absent: 0, late: 0 };
+    if (m.status === 'PRESENT') bucket.present++;
+    else if (m.status === 'ABSENT') bucket.absent++;
+    else if (m.status === 'LATE') bucket.late++;
+    byStudent.set(m.studentId, bucket);
+  }
+
+  for (const studentId of markedStudentIds) {
+    const bucket = byStudent.get(studentId);
+    if (!bucket) continue;
+    const percentage = computePercentage(bucket);
+    const total = bucket.present + bucket.absent + bucket.late;
+    if (total === 0 || percentage >= threshold) continue;
+
+    const student = await prisma.student.findUnique({ where: { id: studentId }, select: { name: true } });
+    await notifyStudentGuardians({
+      coachingCenterId,
+      branchId: batch?.branchId,
+      studentId,
+      event: 'ATTENDANCE_LOW',
+      vars: { studentName: student?.name, batchName: batch?.name },
+      triggeredById: actorId,
+      sourceType: 'AttendanceSession',
+      sourceId: sessionId,
+    });
+  }
 }
 
 export async function reopenAttendanceSession(
@@ -558,6 +636,74 @@ export async function getStudentAttendanceSummary(coachingCenterId: string, stud
       batchName: m.attendanceSession.batch.name,
       subjectName: m.attendanceSession.subject?.name,
     })),
+  };
+}
+
+export interface StudentAttendanceRecordParams {
+  batchId?: string;
+  subjectId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** Paginated, filterable date-wise attendance list for one student (portal use — AGENTS.md §8). */
+export async function getStudentAttendanceRecords(coachingCenterId: string, studentId: string, params: StudentAttendanceRecordParams = {}) {
+  const memberships = await prisma.studentBatch.findMany({
+    where: { coachingCenterId, studentId, ...(params.batchId ? { batchId: params.batchId } : {}) },
+    select: { batchId: true },
+  });
+  const batchIds = Array.from(new Set(memberships.map((m) => m.batchId)));
+  const page = Math.max(1, Number(params.page) || 1);
+  const pageSize = Math.min(50, Math.max(1, Number(params.pageSize) || 20));
+  if (batchIds.length === 0) {
+    return { records: [], pagination: { page, pageSize, total: 0, totalPages: 1 } };
+  }
+
+  const where: Prisma.StudentAttendanceWhereInput = {
+    studentId,
+    attendanceSession: {
+      coachingCenterId,
+      status: 'COMPLETED',
+      batchId: { in: batchIds },
+      ...(params.subjectId ? { subjectId: params.subjectId } : {}),
+      ...(params.dateFrom || params.dateTo
+        ? { date: { ...(params.dateFrom ? { gte: new Date(params.dateFrom) } : {}), ...(params.dateTo ? { lte: new Date(params.dateTo) } : {}) } }
+        : {}),
+    },
+  };
+
+  const [total, marks] = await Promise.all([
+    prisma.studentAttendance.count({ where }),
+    prisma.studentAttendance.findMany({
+      where,
+      include: {
+        attendanceSession: {
+          select: {
+            date: true,
+            batch: { select: { id: true, name: true, banglaName: true } },
+            subject: { select: { id: true, name: true, banglaName: true } },
+          },
+        },
+      },
+      orderBy: { attendanceSession: { date: 'desc' } },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  return {
+    records: marks.map((m) => ({
+      id: m.id,
+      status: m.status,
+      date: m.attendanceSession.date,
+      inTime: m.inTime,
+      remarks: m.remarks,
+      batch: m.attendanceSession.batch,
+      subject: m.attendanceSession.subject,
+    })),
+    pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
   };
 }
 

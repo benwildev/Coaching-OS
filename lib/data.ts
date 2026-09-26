@@ -445,39 +445,6 @@ export const ATT_TODAY: Record<string, any> = (function () {
   });
 })();
 
-export const CHANNELS = [
-  { id: 'sms', label: 'SMS', icon: 'message', note: 'Every guardian · ৳0.35 per segment (demo rate)', rate: 0.35 },
-  { id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', note: 'Guardians who opted in · ৳0.80 per message (demo rate)', rate: 0.8 },
-  { id: 'email', label: 'Email', icon: 'mail', note: 'Guardians with an email address · free', rate: 0 },
-  { id: 'phone', label: 'Phone call', icon: 'phone', note: 'Adds guardians to today’s call list', rate: 0 },
-];
-
-export const TEMPLATES = [
-  { id: 'fee', label: 'Fee reminder', subject: 'Tuition fee reminder · {months}', en: "Dear {guardian}, {student}'s tuition fee of {amount} for {months} is due. Please pay by bKash, Nagad or at the front desk. – Alokito Coaching, Dhanmondi", bn: 'সম্মানিত অভিভাবক, {student}-এর {months} মাসের বেতন {amount} বকেয়া আছে। অনুগ্রহ করে বিকাশ, নগদ বা অফিসে পরিশোধ করুন। – আলোকিত কোচিং' },
-  { id: 'absent', label: 'Absence alert', subject: '{student} was absent today', en: 'Dear {guardian}, {student} was absent from {batch} today ({date}). Please contact us if this is unexpected. – Alokito Coaching', bn: 'সম্মানিত অভিভাবক, আজ ({date}) {student} {batch} ক্লাসে অনুপস্থিত ছিল। প্রয়োজনে আমাদের সাথে যোগাযোগ করুন। – আলোকিত কোচিং' },
-  { id: 'result', label: 'Result published', subject: '{exam} results', en: 'Dear {guardian}, {student} scored {marks} in {exam} (grade {grade}). Ask us for the full answer script review. – Alokito Coaching', bn: '' },
-  { id: 'exam', label: 'Exam reminder', subject: 'Reminder: {exam} on {examDate}', en: 'Reminder: {exam} is on {examDate}. Please make sure {student} arrives 15 minutes early with a calculator and admit card. – Alokito Coaching', bn: '' },
-  { id: 'notice', label: 'General notice', subject: 'Notice from Alokito Coaching', en: 'Dear {guardian}, [write your notice here]. – Alokito Coaching, Dhanmondi', bn: '' },
-];
-
-export const MSG_LOG = [
-  { id: 'm1', when: '21 Sep · 2:05 PM', channel: 'sms', template: 'Fee reminder', audience: 'Guardians with dues · Class 9–12', sent: 91, delivered: 88, read: null, by: 'Rehana Parvin', cost: 63.7 },
-  { id: 'm2', when: '21 Sep · 12:40 PM', channel: 'whatsapp', template: 'Result published', audience: 'Class 9 Science · Weekly Test 11', sent: 94, delivered: 92, read: 81, by: 'Md. Kamrul Hasan', cost: 75.2 },
-  { id: 'm3', when: '21 Sep · 10:20 AM', channel: 'sms', template: 'Absence alert (automatic)', audience: 'Absent in morning batches', sent: 9, delivered: 9, read: null, by: 'System', cost: 6.3 },
-  { id: 'm4', when: '20 Sep · 6:30 PM', channel: 'email', template: 'August progress report', audience: 'All guardians with email', sent: 371, delivered: 362, read: 204, by: 'Farhana Rahman', cost: 0 },
-  { id: 'm5', when: '19 Sep · 5:10 PM', channel: 'whatsapp', template: 'Exam reminder', audience: 'Class 10 · SSC Model Test 03', sent: 148, delivered: 146, read: 139, by: 'Shirin Akter', cost: 118.4 },
-  { id: 'm6', when: '18 Sep · 11:00 AM', channel: 'sms', template: 'General notice', audience: 'All guardians · schedule change', sent: 640, delivered: 628, read: null, by: 'Farhana Rahman', cost: 448 },
-  { id: 'm7', when: '15 Sep · 4:45 PM', channel: 'sms', template: 'Fee reminder', audience: 'Guardians with dues · Class 9–12', sent: 142, delivered: 139, read: null, by: 'Rehana Parvin', cost: 99.4 },
-];
-
-export const CALL_LOG = [
-  { id: 'c1', when: '21 Sep · 1:15 PM', guardian: 'Rokeya Begum', student: 'Ayaan Kabir', reason: 'Fees 3 months overdue', outcome: 'Promised to pay', note: 'Will pay by bKash on 25 Sep', by: 'Rehana Parvin' },
-  { id: 'c2', when: '21 Sep · 12:50 PM', guardian: 'Md. Faruk Hasan', student: 'Anika Tasnim', reason: 'Fees 3 months overdue', outcome: 'No answer', note: '', by: 'Rehana Parvin' },
-  { id: 'c3', when: '20 Sep · 5:30 PM', guardian: 'Sujit Roy', student: 'Joy Roy', reason: 'Fees 4 months overdue', outcome: 'Reached', note: 'Father travelling; mother will visit on Monday', by: 'Farhana Rahman' },
-  { id: 'c4', when: '20 Sep · 4:10 PM', guardian: 'Md. Habibur Hasan', student: 'Rakibul Hasan', reason: 'Attendance 58%', outcome: 'Reached', note: 'Student unwell last week; returning Sunday', by: 'Tariqul Islam' },
-];
-export const OUTCOMES = ['Reached', 'Promised to pay', 'No answer', 'Call back later', 'Wrong number'];
-
 export const STAFF = [
   { id: 'u1', name: 'Farhana Rahman', role: 'Owner', phone: '01700-000101', status: 'Active', last: 'Online now' },
   { id: 'u2', name: 'Mahmudul Karim', role: 'Centre manager', phone: '01700-000102', status: 'Active', last: 'Today, 3:52 PM' },

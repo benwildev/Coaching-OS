@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Icon from './Icon';
+import NotificationBell from './NotificationBell';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 
@@ -86,6 +87,8 @@ export default function TopBar() {
         </div>
 
         <div className="grow" />
+
+        <NotificationBell />
 
         {/* Language Switcher Button */}
         <div className="flex items-center bg-white border border-[#dce5f0] rounded-xl p-0.5 shadow-2xs">

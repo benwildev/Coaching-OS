@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
+import { notifyStudentGuardians } from './guardian-notify.service';
 import {
   ALLOWED_STATUS_TRANSITIONS,
   EXAM_STATUS,
@@ -107,6 +108,58 @@ export async function listExams(coachingCenterId: string, params: ExamFilterPara
       completed: stats[3],
     },
   };
+}
+
+/**
+ * Exams relevant to one student (via ExamStudent enrollment), for the
+ * portal "My Exams" list. DRAFT exams are never announced to students, so
+ * they're excluded regardless of the isStudentPortal flag.
+ */
+export async function getStudentExams(coachingCenterId: string, studentId: string, isStudentPortal: boolean = true) {
+  const exams = await prisma.exam.findMany({
+    where: {
+      coachingCenterId,
+      examStudents: { some: { studentId } },
+      status: isStudentPortal ? { not: 'DRAFT' } : undefined,
+    },
+    orderBy: { startDate: 'desc' },
+    include: {
+      academicSession: { select: { id: true, name: true } },
+      batch: { select: { id: true, name: true, banglaName: true } },
+      examSubjects: {
+        orderBy: { examDate: 'asc' },
+        select: {
+          id: true,
+          examDate: true,
+          startTime: true,
+          durationMinutes: true,
+          totalMarks: true,
+          subject: { select: { id: true, name: true, banglaName: true, code: true } },
+        },
+      },
+    },
+  });
+
+  return exams.map((exam) => ({
+    id: exam.id,
+    title: exam.title,
+    banglaTitle: exam.banglaTitle,
+    examType: exam.examType,
+    status: exam.status,
+    startDate: exam.startDate,
+    endDate: exam.endDate,
+    publishedAt: exam.publishedAt,
+    session: exam.academicSession?.name ?? null,
+    batch: exam.batch,
+    subjects: exam.examSubjects.map((es) => ({
+      id: es.id,
+      examDate: es.examDate,
+      startTime: es.startTime,
+      durationMinutes: es.durationMinutes,
+      totalMarks: Number(es.totalMarks),
+      subject: es.subject,
+    })),
+  }));
 }
 
 /**
@@ -493,6 +546,30 @@ export async function updateExam(
     details: input as Record<string, unknown>,
   });
 
+  // Only the exam DATE actually matters to guardians — and only once the
+  // exam is already SCHEDULED (a DRAFT edit hasn't been announced yet).
+  if (existing.status === EXAM_STATUS.SCHEDULED && input.startDate) {
+    const newStart = new Date(input.startDate);
+    if (!existing.startDate || newStart.getTime() !== existing.startDate.getTime()) {
+      const examStudents = await prisma.examStudent.findMany({
+        where: { examId },
+        include: { student: { select: { id: true, name: true } } },
+      });
+      for (const es of examStudents) {
+        await notifyStudentGuardians({
+          coachingCenterId,
+          branchId: existing.branchId,
+          studentId: es.studentId,
+          event: 'EXAM_UPDATED',
+          vars: { studentName: es.student.name, examName: updated.title, examDate: newStart.toISOString().slice(0, 10) },
+          triggeredById: actorId,
+          sourceType: 'Exam',
+          sourceId: examId,
+        });
+      }
+    }
+  }
+
   return updated;
 }
 
@@ -511,7 +588,7 @@ export async function transitionExamStatus(
     where: { id: examId, coachingCenterId },
     include: {
       examSubjects: true,
-      examStudents: true,
+      examStudents: { include: { student: { select: { id: true, name: true } } } },
     },
   });
 
@@ -567,6 +644,27 @@ export async function transitionExamStatus(
       reason: reason || null,
     },
   });
+
+  if (targetStatus === EXAM_STATUS.SCHEDULED || targetStatus === EXAM_STATUS.CANCELLED) {
+    const event = targetStatus === EXAM_STATUS.SCHEDULED ? 'EXAM_SCHEDULED' : 'EXAM_CANCELLED';
+    const examDate = exam.examSubjects.find((s) => s.examDate)?.examDate ?? exam.startDate;
+    for (const es of exam.examStudents) {
+      await notifyStudentGuardians({
+        coachingCenterId,
+        branchId: exam.branchId,
+        studentId: es.studentId,
+        event,
+        vars: {
+          studentName: es.student.name,
+          examName: exam.title,
+          examDate: examDate ? examDate.toISOString().slice(0, 10) : '',
+        },
+        triggeredById: actorId,
+        sourceType: 'Exam',
+        sourceId: examId,
+      });
+    }
+  }
 
   return updated;
 }

@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
+import { notifyStudentGuardians } from './guardian-notify.service';
 import { EXAM_STATUS } from '@/lib/validations/exam';
 import type { ResultEntryInput, ResultFilterParams } from '@/lib/validations/result';
 import type { SessionUser } from '@/lib/auth/session';
@@ -541,7 +542,7 @@ export async function verifyAndPublishExam(
   const rankMap = calculateCompetitionRanking(studentTotalMarks);
 
   // Apply ranks and publish inside transaction
-  return prisma.$transaction(
+  const result = await prisma.$transaction(
     async (tx) => {
       // Update ranks on results records
       for (const [studentId, rank] of rankMap.entries()) {
@@ -582,6 +583,21 @@ export async function verifyAndPublishExam(
     },
     { maxWait: 10000, timeout: 45000 }
   );
+
+  for (const es of exam.examStudents) {
+    await notifyStudentGuardians({
+      coachingCenterId,
+      branchId: exam.branchId,
+      studentId: es.studentId,
+      event: 'RESULT_PUBLISHED',
+      vars: { studentName: es.student.name, examName: exam.title, resultDate: new Date().toISOString().slice(0, 10) },
+      triggeredById: actorId,
+      sourceType: 'Exam',
+      sourceId: examId,
+    });
+  }
+
+  return result;
 }
 
 /**

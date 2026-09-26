@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { DATA, RANGES } from './data';
 import type { SessionUser } from '@/lib/auth/session';
 
@@ -57,6 +58,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [currentCenter, setCurrentCenter] = useState<CenterInfo | null>(null);
   const tt = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
+  const pathname = usePathname();
+  const isPortalRoute = !!pathname?.startsWith('/portal');
 
   const fetchAuthInfo = useCallback(async () => {
     try {
@@ -77,8 +80,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Portal pages have their own session (PortalProvider) — never fire the
+    // staff session check there.
+    if (isPortalRoute) return;
     fetchAuthInfo();
-  }, [fetchAuthInfo]);
+  }, [fetchAuthInfo, isPortalRoute]);
 
   useEffect(() => {
     try {

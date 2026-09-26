@@ -3,6 +3,8 @@ import prisma from '@/lib/db';
 export interface AuditLogParams {
   coachingCenterId: string;
   userId?: string | null;
+  studentId?: string | null;
+  guardianId?: string | null;
   action: string;
   entity: string;
   entityId?: string | null;
@@ -17,6 +19,8 @@ export async function recordAuditLog(params: AuditLogParams): Promise<void> {
       data: {
         coachingCenterId: params.coachingCenterId,
         userId: params.userId,
+        studentId: params.studentId,
+        guardianId: params.guardianId,
         action: params.action,
         entity: params.entity,
         entityId: params.entityId,

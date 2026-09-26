@@ -8,6 +8,7 @@ import StatusBadge from '@/components/StatusBadge';
 import StudentAttendanceSummary from '@/components/StudentAttendanceSummary';
 import StudentFinancialSummary from '@/components/StudentFinancialSummary';
 import StudentAcademicPerformance from '@/components/StudentAcademicPerformance';
+import PortalAccessCard from '@/components/PortalAccessCard';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 import { formatBdPhoneDisplay } from '@/lib/validations/student';
@@ -561,6 +562,8 @@ export default function StudentDetailPage() {
                           {sg.preferredChannel}
                         </span>
                       </div>
+
+                      <PortalAccessCard guardianId={g.id} compact />
                     </div>
                   </div>
                 );
@@ -602,6 +605,9 @@ export default function StudentDetailPage() {
               <p className="text-[13px] text-[#64748b] italic">{dict.profile.noBatches}</p>
             )}
           </div>
+
+          {/* Section 5a: Portal Access */}
+          <PortalAccessCard studentId={studentId} />
 
           {/* Section 5b: Financial Summary */}
           <StudentFinancialSummary studentId={studentId} />

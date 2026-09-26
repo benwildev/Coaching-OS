@@ -6,7 +6,7 @@ import Icon from './Icon';
 import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
 
-const NAV_ITEMS = [
+const NAV_ITEMS: { id: string; icon: string; href: string; staffOnly?: boolean }[] = [
   { id: 'dashboard', icon: 'chart', href: '/dashboard' },
   { id: 'students', icon: 'user', href: '/students' },
   { id: 'courses', icon: 'book', href: '/courses' },
@@ -19,7 +19,9 @@ const NAV_ITEMS = [
   { id: 'questionPapers', icon: 'file', href: '/question-papers' },
   { id: 'materials', icon: 'book', href: '/materials' },
   { id: 'teachers', icon: 'grad', href: '/teachers' },
-  { id: 'communication', icon: 'message', href: '/communication' },
+  { id: 'notifications', icon: 'bell', href: '/notifications' },
+  { id: 'notices', icon: 'pin', href: '/notices' },
+  { id: 'communication', icon: 'message', href: '/communication', staffOnly: true },
   { id: 'reports', icon: 'doc', href: '/reports' },
   { id: 'settings', icon: 'sliders', href: '/settings' },
 ];
@@ -118,7 +120,7 @@ export function SidebarContent({
 
       {/* Navigation List */}
       <nav className="flex flex-col gap-1 overflow-y-auto scroll">
-        {NAV_ITEMS.map((n) => {
+        {NAV_ITEMS.filter((n) => !n.staffOnly || userRole !== 'TEACHER').map((n) => {
           const label = (dict as any)[n.id] || n.id;
           const isActive =
             pathname === n.href ||

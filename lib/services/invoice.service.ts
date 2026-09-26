@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
+import { notifyStudentGuardians } from './guardian-notify.service';
 import type { InvoiceCreateInput, InvoiceUpdateInput } from '@/lib/validations/invoice';
 import type { Prisma } from '@prisma/client';
 
@@ -255,6 +256,19 @@ export async function createInvoice(coachingCenterId: string, input: InvoiceCrea
     entityId: invoice.id,
     details: { invoiceNumber: invoice.invoiceNumber, studentId: input.studentId, totalAmount },
   });
+
+  if (invoice.status !== 'DRAFT') {
+    await notifyStudentGuardians({
+      coachingCenterId,
+      branchId,
+      studentId: input.studentId,
+      event: 'FEE_INVOICE_CREATED',
+      vars: { studentName: student.name, invoiceNumber: invoice.invoiceNumber, amount: totalAmount.toFixed(2) },
+      triggeredById: actorId,
+      sourceType: 'FeeInvoice',
+      sourceId: invoice.id,
+    });
+  }
 
   return invoice;
 }

@@ -241,8 +241,8 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
     }),
     prisma.communicationLog.findMany({
       where: { coachingCenterId: cc },
-      select: { id: true, channel: true, message: true, sentAt: true, status: true },
-      orderBy: { sentAt: 'desc' },
+      select: { id: true, channel: true, message: true, createdAt: true, status: true },
+      orderBy: { createdAt: 'desc' },
       take: 4,
     }),
     getTodaysClasses(cc),
@@ -590,7 +590,7 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
       amount: null,
       title: `${c.channel === 'EMAIL' ? 'Email' : c.channel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} ${c.status.toLowerCase()}`,
       sub: c.message.length > 70 ? c.message.slice(0, 70) + '…' : c.message,
-      at: c.sentAt,
+      at: c.createdAt,
     })),
   ]
     .sort((a, b) => b.at.getTime() - a.at.getTime())
