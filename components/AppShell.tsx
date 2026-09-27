@@ -11,7 +11,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // The login, setup, and student/guardian portal pages have their own full-screen
   // layouts and must never inherit the staff sidebar/topbar.
-  if (pathname === '/login' || pathname?.startsWith('/setup') || pathname?.startsWith('/portal')) {
+  if (pathname === '/login' || pathname === '/forgot-password' || pathname?.startsWith('/setup') || pathname?.startsWith('/portal')) {
     return <>{children}</>;
   }
 

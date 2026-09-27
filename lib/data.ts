@@ -466,7 +466,7 @@ export function defaultSettings() {
     fees: { monthly, dueDay: '10', lateFee: '100', sibling: '10', merit: '50', lateAuto: true, partial: false },
     comms: { senderId: 'ALOKITO', whatsapp: '01700-000199', waConnected: true, emailFrom: 'office@alokito.example', autoAbsence: true, autoResult: true, quiet: true, bnDefault: false, reminders: { r3: true, r0: true, r5: true, r15: false } },
     region: { lang: 'en', date: '21 Sep 2026', nums: 'lakh', week: 'Saturday' },
-    security: { twoStep: true, otpOnly: true, timeout: '30 minutes' },
+    security: { twoStep: true, timeout: '30 minutes' },
     perms,
   };
 }

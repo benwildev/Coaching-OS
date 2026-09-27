@@ -5,16 +5,21 @@ import type { PortalSessionUser } from '@/lib/auth/portal-session';
 import { recordAuditLog } from './audit.service';
 import type { Prisma } from '@prisma/client';
 
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_MINUTES = 15;
 const SETUP_TOKEN_HOURS = 48;
 const RESET_TOKEN_HOURS = 1;
 
-type PortalAccountWithIdentity = Prisma.PortalAccountGetPayload<{
-  include: { student: { select: { id: true; name: true; banglaName: true } }; guardian: { select: { id: true; name: true; banglaName: true } } };
-}>;
+// Sign-in itself lives in unified-auth.service.ts (the single /login path);
+// this module owns portal identity shaping, setup/reset tokens and the
+// guardian→student IDOR guard.
 
-function toSessionUser(account: PortalAccountWithIdentity): PortalSessionUser {
+export const portalIdentityInclude = {
+  student: { select: { id: true, name: true, banglaName: true } },
+  guardian: { select: { id: true, name: true, banglaName: true } },
+} satisfies Prisma.PortalAccountInclude;
+
+type PortalAccountWithIdentity = Prisma.PortalAccountGetPayload<{ include: typeof portalIdentityInclude }>;
+
+export function toPortalSessionUser(account: PortalAccountWithIdentity): PortalSessionUser {
   const name = account.portalType === 'STUDENT' ? account.student?.name : account.guardian?.name;
   return {
     portalAccountId: account.id,
@@ -24,82 +29,6 @@ function toSessionUser(account: PortalAccountWithIdentity): PortalSessionUser {
     coachingCenterId: account.coachingCenterId,
     name: name || '',
   };
-}
-
-const identityInclude = {
-  student: { select: { id: true, name: true, banglaName: true } },
-  guardian: { select: { id: true, name: true, banglaName: true } },
-} satisfies Prisma.PortalAccountInclude;
-
-/**
- * Finds a PortalAccount by phone, email, or (for students) Student ID code.
- * Mirrors authenticateUser's global findFirst-by-identifier pattern in
- * user.service.ts for consistency — the same cross-tenant-identifier
- * collision model the existing staff login already accepts.
- */
-export async function findAccountByIdentifier(identifier: string): Promise<PortalAccountWithIdentity | null> {
-  const raw = identifier.trim();
-  const normalizedEmail = raw.toLowerCase();
-
-  const byContact = await prisma.portalAccount.findFirst({
-    where: { OR: [{ email: normalizedEmail }, { phone: raw }] },
-    include: identityInclude,
-  });
-  if (byContact) return byContact;
-
-  // Student ID code login (e.g. "ACC-26-00001")
-  const student = await prisma.student.findFirst({ where: { studentIdCode: raw }, select: { id: true } });
-  if (!student) return null;
-  return prisma.portalAccount.findFirst({ where: { studentId: student.id }, include: identityInclude });
-}
-
-export interface AuthenticateResult {
-  session: PortalSessionUser;
-  accountId: string;
-}
-
-/**
- * Verifies credentials and applies the lockout policy. Never throws for
- * "wrong password" (returns null) — only throws for account-state issues
- * that the caller maps to a distinct message (locked/disabled/no password
- * set yet).
- */
-export async function authenticatePortalAccount(identifier: string, plainPassword: string): Promise<AuthenticateResult | null> {
-  const account = await findAccountByIdentifier(identifier);
-  if (!account) return null;
-
-  if (account.status === 'DISABLED') throw new Error('PORTAL_ACCOUNT_DISABLED');
-  if (account.lockedUntil && account.lockedUntil.getTime() > Date.now()) throw new Error('PORTAL_ACCOUNT_LOCKED');
-  if (!account.passwordHash) throw new Error('PORTAL_PASSWORD_NOT_SET');
-
-  const isValid = verifyPassword(plainPassword, account.passwordHash);
-  if (!isValid) {
-    const attempts = account.failedLoginAttempts + 1;
-    const lockedUntil = attempts >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000) : null;
-    await prisma.portalAccount.update({
-      where: { id: account.id },
-      data: { failedLoginAttempts: attempts, lockedUntil },
-    });
-    if (lockedUntil) {
-      await recordAuditLog({
-        coachingCenterId: account.coachingCenterId,
-        studentId: account.studentId,
-        guardianId: account.guardianId,
-        action: 'PORTAL_ACCOUNT_LOCKED',
-        entity: 'PortalAccount',
-        entityId: account.id,
-        details: { attempts },
-      });
-    }
-    return null;
-  }
-
-  await prisma.portalAccount.update({
-    where: { id: account.id },
-    data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
-  });
-
-  return { session: toSessionUser(account), accountId: account.id };
 }
 
 function hashToken(rawToken: string): string {
@@ -166,10 +95,21 @@ export async function provisionPortalAccount(params: {
   return { account: { id: account.id, portalType: account.portalType }, setupToken: rawToken, expiresAt };
 }
 
-/** Always returns the same generic outcome — never reveals whether an account exists (AGENTS.md §9). */
-export async function requestPasswordReset(identifier: string): Promise<void> {
-  const account = await findAccountByIdentifier(identifier);
-  if (!account || account.status === 'DISABLED') return;
+/**
+ * Self-service reset request from the unified /forgot-password page.
+ * Always returns the same generic outcome — never reveals whether (or what
+ * kind of) account owns the email. A token is issued only when the email
+ * identifies exactly ONE active portal account across all tenants; an
+ * ambiguous email issues nothing (the centre can issue a link instead).
+ */
+export async function requestPasswordReset(rawEmail: string): Promise<void> {
+  const email = rawEmail.trim().toLowerCase();
+  const accounts = await prisma.portalAccount.findMany({
+    where: { email: { equals: email, mode: 'insensitive' }, status: 'ACTIVE' },
+    take: 2,
+  });
+  if (accounts.length !== 1) return;
+  const account = accounts[0];
 
   const rawToken = generateRawToken();
   const expiresAt = new Date(Date.now() + RESET_TOKEN_HOURS * 60 * 60 * 1000);

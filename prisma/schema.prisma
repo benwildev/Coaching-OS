@@ -189,7 +189,6 @@ model CoachingCenter {
   subscriptions          Subscription[]
   studentIdSequences     StudentIdSequence[]
   portalAccounts         PortalAccount[]
-  staffLoginOtps         StaffLoginOtp[]
 
   @@map("coaching_centers")
 }
@@ -250,6 +249,9 @@ model User {
   banglaName       String?
   avatar           String?
   status           UserStatus     @default(ACTIVE)
+  // Sign-in lockout (same policy as PortalAccount): 5 failures → 15 minutes.
+  failedLoginAttempts Int         @default(0)
+  lockedUntil      DateTime?
   lastLoginAt      DateTime?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
@@ -282,7 +284,6 @@ model User {
   createdCommunicationTemplates CommunicationTemplate[] @relation("CommunicationTemplateCreatedBy")
   triggeredCommunicationLogs CommunicationLog[] @relation("CommunicationLogTriggeredBy")
   notificationPreferences NotificationPreference[]
-  loginOtps        StaffLoginOtp[]
 
   @@unique([coachingCenterId, email])
   @@index([coachingCenterId, phone])
@@ -750,29 +751,6 @@ model PortalAccount {
   @@index([coachingCenterId, phone])
   @@index([coachingCenterId, email])
   @@map("portal_accounts")
-}
-
-// One-time login code for STAFF users (Mobile + OTP sign-in). Bound to a
-// single User; only an HMAC of the code is stored. Expires quickly, is
-// consumed atomically exactly once, and caps verification attempts.
-// Portal (student/guardian) identities never use this table.
-model StaffLoginOtp {
-  id               String         @id @default(uuid())
-  coachingCenterId String
-  userId           String
-  phone            String
-  codeHash         String
-  expiresAt        DateTime
-  attempts         Int            @default(0)
-  consumedAt       DateTime?
-  createdAt        DateTime       @default(now())
-
-  coachingCenter   CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
-  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([phone, createdAt])
-  @@index([userId, createdAt])
-  @@map("staff_login_otps")
 }
 
 model PortalAuthToken {

@@ -29,7 +29,7 @@ export default function PortalShell({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!loadingUser && !portalUser) {
-      router.replace('/portal/login');
+      router.replace('/login');
     }
   }, [loadingUser, portalUser, router]);
 
@@ -37,7 +37,7 @@ export default function PortalShell({ children }: { children: React.ReactNode })
 
   const handleLogout = async () => {
     await fetch('/api/portal/auth/logout', { method: 'POST' });
-    router.push('/portal/login');
+    router.push('/login');
     router.refresh();
   };
 

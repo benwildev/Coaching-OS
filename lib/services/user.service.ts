@@ -1,7 +1,6 @@
 import prisma from '@/lib/db';
-import { hashPassword, verifyPassword } from '@/lib/auth/password';
+import { hashPassword } from '@/lib/auth/password';
 import { recordAuditLog } from './audit.service';
-import { randomBytes } from 'node:crypto';
 import type { Prisma, RoleCode, UserStatus } from '@prisma/client';
 
 export async function getUsersByTenant(coachingCenterId: string) {
@@ -174,50 +173,4 @@ export function toStaffIdentity(user: UserWithRoles): StaffIdentity | null {
     coachingCenterId: user.coachingCenterId,
     branchId: user.branchId,
   };
-}
-
-// A valid salt:hash of a random secret, verified against when no account
-// matches so "unknown identifier" costs the same scrypt time as "wrong password".
-const DUMMY_HASH = hashPassword(randomBytes(16).toString('hex'));
-
-/**
- * Canonical staff password authentication.
- *  - Email is unique only per tenant, so every account matching the
- *    identifier is checked; exactly one password match authenticates. Zero
- *    or several (ambiguous across tenants) → failure, never an arbitrary pick.
- *  - The password is verified BEFORE the account status is revealed, so an
- *    attacker without the password cannot learn that an account exists or
- *    is inactive.
- * Returns null for any credential failure (caller responds generically);
- * throws ACCOUNT_INACTIVE only for a correct password on a non-active account.
- */
-export async function authenticateUser(identifier: string, plainPassword: string): Promise<StaffIdentity | null> {
-  const raw = identifier.trim();
-  if (!raw || !plainPassword) return null;
-
-  const candidates = await prisma.user.findMany({
-    where: { OR: [{ email: raw.toLowerCase() }, { phone: raw }] },
-    include: staffIdentityInclude,
-    take: 10,
-  });
-
-  if (candidates.length === 0) {
-    verifyPassword(plainPassword, DUMMY_HASH);
-    return null;
-  }
-
-  const verified = candidates.filter((u) => verifyPassword(plainPassword, u.passwordHash));
-  if (verified.length !== 1) {
-    if (verified.length > 1) console.warn('[auth] Ambiguous staff login: identifier + password match accounts in multiple tenants');
-    return null;
-  }
-
-  const user = verified[0];
-  if (user.status !== 'ACTIVE') throw new Error('ACCOUNT_INACTIVE');
-
-  const identity = toStaffIdentity(user);
-  if (!identity) return null;
-
-  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-  return identity;
 }

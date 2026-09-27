@@ -8,8 +8,8 @@ import { createInvoice } from '../lib/services/invoice.service';
 import { createPayment } from '../lib/services/payment.service';
 import { verifyAndPublishExam } from '../lib/services/exam-result.service';
 import { resolveMaterialScope, transitionMaterialStatus } from '../lib/services/study-material.service';
+import { authenticateByEmail } from '../lib/services/unified-auth.service';
 import {
-  authenticatePortalAccount,
   provisionPortalAccount,
   completeSetupOrReset,
 } from '../lib/services/portal-auth.service';
@@ -128,7 +128,7 @@ async function run() {
       data: { coachingCenterId: cc, branchId: branch.id, academicSessionId: session.id, academicProgramId: program.id, academicClassId: academicClass.id, name: `${TAG} Batch`, code: `${TAG}-BATCH`, status: 'ACTIVE' },
     });
 
-    const studentA = await prisma.student.create({ data: { coachingCenterId: cc, branchId: branch.id, studentIdCode: `${TAG}-STUA`, name: `${TAG} Student A` } });
+    const studentA = await prisma.student.create({ data: { coachingCenterId: cc, branchId: branch.id, studentIdCode: `${TAG}-STUA`, name: `${TAG} Student A`, email: `${TAG.toLowerCase()}-stua@verify.local` } });
     studentIds.push(studentA.id);
     const studentB = await prisma.student.create({ data: { coachingCenterId: cc, branchId: branch.id, studentIdCode: `${TAG}-STUB`, name: `${TAG} Student B` } });
     studentIds.push(studentB.id);
@@ -139,7 +139,7 @@ async function run() {
       await prisma.studentBatch.create({ data: { coachingCenterId: cc, studentId: s.id, batchId: batch.id, status: 'ACTIVE' } });
     }
 
-    const guardian = await prisma.guardian.create({ data: { coachingCenterId: cc, name: `${TAG} Guardian`, relationship: 'Father', phone: '01700000010', preferredChannel: 'SMS' } });
+    const guardian = await prisma.guardian.create({ data: { coachingCenterId: cc, name: `${TAG} Guardian`, relationship: 'Father', phone: '01700000010', email: `${TAG.toLowerCase()}-guardian@verify.local`, preferredChannel: 'SMS' } });
     guardianIds.push(guardian.id);
     await prisma.studentGuardian.create({ data: { studentId: studentA.id, guardianId: guardian.id, relationship: 'Father', isPrimary: true, canReceiveNotifications: true, preferredChannel: 'SMS' } });
     await prisma.studentGuardian.create({ data: { studentId: studentB.id, guardianId: guardian.id, relationship: 'Father', isPrimary: false, canReceiveNotifications: true, preferredChannel: 'SMS' } });
@@ -157,9 +157,9 @@ async function run() {
 
     // ---------- 7. Student login success ----------
     console.log('\n--- 7-8. Student login + session identity ---');
-    const studentLogin = await authenticatePortalAccount(studentA.studentIdCode, 'StudentPass123');
-    assert(studentLogin, 'student login returned a session');
-    const studentSession: PortalSessionUser = studentLogin!.session;
+    const studentLogin = await authenticateByEmail(studentA.email!, 'StudentPass123');
+    assert(studentLogin.ok && studentLogin.kind === 'PORTAL', 'student login returned a portal session');
+    const studentSession: PortalSessionUser = studentLogin.portal;
     assert(studentSession.portalType === 'STUDENT' && studentSession.studentId === studentA.id, 'student session identity is correct');
     ok('Student login success + session identity correct');
 
@@ -279,9 +279,9 @@ async function run() {
 
     // ---------- 14-15. Guardian login + multiple children ----------
     console.log('\n--- 14-17. Guardian login + multi-child access ---');
-    const guardianLogin = await authenticatePortalAccount(guardian.phone, 'GuardianPass123');
-    assert(guardianLogin, 'guardian login returned a session');
-    const guardianSession: PortalSessionUser = guardianLogin!.session;
+    const guardianLogin = await authenticateByEmail(guardian.email!, 'GuardianPass123');
+    assert(guardianLogin.ok && guardianLogin.kind === 'PORTAL', 'guardian login returned a portal session');
+    const guardianSession: PortalSessionUser = guardianLogin.portal;
     assert(guardianSession.portalType === 'GUARDIAN' && guardianSession.guardianId === guardian.id, 'guardian session identity is correct');
     ok('Guardian login success + session identity correct');
 
@@ -348,11 +348,9 @@ async function run() {
     console.log('\n--- 23. Disabled portal account ---');
     const studentAccount = await prisma.portalAccount.findUniqueOrThrow({ where: { studentId: studentA.id } });
     await prisma.portalAccount.update({ where: { id: studentAccount.id }, data: { status: 'DISABLED' } });
-    await expectThrow(
-      () => authenticatePortalAccount(studentA.studentIdCode, 'StudentPass123'),
-      'PORTAL_ACCOUNT_DISABLED',
-      'A disabled portal account is rejected at login'
-    );
+    const disabledLogin = await authenticateByEmail(studentA.email!, 'StudentPass123');
+    assert(!disabledLogin.ok && disabledLogin.reason === 'ACCOUNT_INACTIVE', 'disabled portal account rejected');
+    ok('A disabled portal account is rejected at login');
     await prisma.portalAccount.update({ where: { id: studentAccount.id }, data: { status: 'ACTIVE' } });
   } finally {
     // ---------- Cleanup ----------

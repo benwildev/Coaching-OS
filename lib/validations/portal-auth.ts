@@ -1,13 +1,5 @@
 import { z } from 'zod';
 
-export const portalLoginSchema = z.object({
-  // Optional: when omitted (unified sign-in form) the verified account's own type is used.
-  portalType: z.enum(['STUDENT', 'GUARDIAN']).optional(),
-  identifier: z.string().trim().min(1, 'Identifier is required'),
-  password: z.string().min(1, 'Password is required'),
-});
-export type PortalLoginInput = z.infer<typeof portalLoginSchema>;
-
 const passwordPolicy = z
   .string()
   .min(8, 'Password must be at least 8 characters')
@@ -18,11 +10,6 @@ export const setupPasswordSchema = z.object({
   password: passwordPolicy,
 });
 export type SetupPasswordInput = z.infer<typeof setupPasswordSchema>;
-
-export const forgotPasswordSchema = z.object({
-  identifier: z.string().trim().min(1, 'Identifier is required'),
-});
-export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 
 export const resetPasswordSchema = z.object({
   token: z.string().trim().min(1, 'Token is required'),

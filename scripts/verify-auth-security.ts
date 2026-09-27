@@ -1,28 +1,29 @@
 import 'dotenv/config';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import prisma from '../lib/db';
 import { completeInitialSetup } from '../lib/services/tenant.service';
 import { hashPassword } from '../lib/auth/password';
 import { provisionPortalAccount, completeSetupOrReset } from '../lib/services/portal-auth.service';
-import { issueStaffLoginOtp } from '../lib/services/staff-otp.service';
 import { SESSION_COOKIE_NAME } from '../lib/auth/session';
 import { PORTAL_SESSION_COOKIE_NAME } from '../lib/auth/portal-session';
 import type { RoleCode } from '@prisma/client';
 
 /**
- * Authentication security verification over real HTTP against a running
+ * Unified sign-in security verification over real HTTP against a running
  * PRODUCTION build (`npm run build && npm run start`):
  *
  *   AUTH_BASE_URL=http://localhost:3000 npx tsx scripts/verify-auth-security.ts
  *
- * In production the OTP request endpoint issues nothing (no SMS provider),
- * so OTP expiry/reuse/attempt tests obtain a challenge through the
- * server-side service and then submit it over HTTP. Builds two throwaway
- * tenants and deletes them in `finally`.
+ * There is one sign-in endpoint (/api/auth/login, email + password) for
+ * every account type. Builds two throwaway tenants and deletes them in
+ * `finally`.
  */
 
 const BASE = process.env.AUTH_BASE_URL || 'http://localhost:3000';
 const TAG = `AUTHVERIFY-${Date.now()}`;
 const PW = 'CorrectHorse9';
+const WRONG = 'WrongPass999';
 let passed = 0;
 
 function ok(label: string) {
@@ -35,25 +36,45 @@ function assert(cond: unknown, label: string): asserts cond {
 
 interface Resp {
   status: number;
+  location: string | null;
   body: Record<string, unknown>;
   cookies: Record<string, { value: string; attrs: string }>;
 }
-async function post(path: string, payload: unknown): Promise<Resp> {
-  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), redirect: 'manual' });
-  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+async function request(method: 'GET' | 'POST', path: string, opts: { payload?: unknown; cookie?: string } = {}): Promise<Resp> {
+  const headers: Record<string, string> = {};
+  if (opts.payload !== undefined) headers['Content-Type'] = 'application/json';
+  if (opts.cookie) headers.Cookie = opts.cookie;
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers,
+    body: opts.payload !== undefined ? JSON.stringify(opts.payload) : undefined,
+    redirect: 'manual',
+  });
+  const text = await res.text();
+  let body: Record<string, unknown> = {};
+  try {
+    body = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    body = { _text: text.slice(0, 200) };
+  }
   const cookies: Resp['cookies'] = {};
   for (const c of res.headers.getSetCookie()) {
     const [pair, ...attrs] = c.split(';');
     const i = pair.indexOf('=');
     cookies[pair.slice(0, i).trim()] = { value: pair.slice(i + 1), attrs: attrs.join(';').toLowerCase() };
   }
-  return { status: res.status, body, cookies };
+  return { status: res.status, location: res.headers.get('location'), body, cookies };
 }
+const post = (path: string, payload: unknown, cookie?: string) => request('POST', path, { payload, cookie });
+const get = (path: string, cookie?: string) => request('GET', path, { cookie });
+const login = (email: string, password: string) => post('/api/auth/login', { email, password });
+
 function jwtPayload(token: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
 }
-const staffLogin = (identifier: string, password: string) => post('/api/auth/login', { identifier, password, mode: 'password' });
-const otpLogin = (phone: string, otp: string) => post('/api/auth/login', { identifier: phone, otp, mode: 'otp' });
+const sets = (r: Resp, name: string) => !!r.cookies[name]?.value;
+const clears = (r: Resp, name: string) => !!r.cookies[name] && !r.cookies[name].value;
+const cookieOf = (r: Resp, name: string) => `${name}=${r.cookies[name].value}`;
 
 async function tenant(code: string, name: string) {
   return completeInitialSetup({
@@ -64,9 +85,17 @@ async function tenant(code: string, name: string) {
   } as Parameters<typeof completeInitialSetup>[0]);
 }
 
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) return sourceFiles(full);
+    return /\.(ts|tsx)$/.test(name) ? [full] : [];
+  });
+}
+
 async function main() {
   console.log('========================================================');
-  console.log(`AUTHENTICATION SECURITY VERIFICATION — ${BASE}`);
+  console.log(`UNIFIED SIGN-IN SECURITY VERIFICATION — ${BASE}`);
   console.log('========================================================');
   if (!(await fetch(`${BASE}/login`).catch(() => null))) throw new Error(`App not reachable at ${BASE}`);
 
@@ -79,177 +108,272 @@ async function main() {
     centerA = a.center.id;
     const b = await tenant(codeB, `${TAG} B`);
     centerB = b.center.id;
-    const roles = await prisma.role.findMany({ where: { coachingCenterId: centerA } });
-    const roleId = (c: RoleCode) => roles.find((r) => r.code === c)!.id;
-    const uniquePhone = (n: number) => `017${(Date.now() + n).toString().slice(-8)}`;
-    const mkUser = (email: string, role: RoleCode | null, opts: { status?: 'ACTIVE' | 'INACTIVE'; phone?: string; cc?: string; password?: string } = {}) =>
-      prisma.user.create({
+    const aRoles = await prisma.role.findMany({ where: { coachingCenterId: centerA } });
+    const bRoles = await prisma.role.findMany({ where: { coachingCenterId: centerB } });
+    const mkUser = (email: string, role: RoleCode | null, opts: { status?: 'ACTIVE' | 'INACTIVE'; cc?: 'A' | 'B'; password?: string } = {}) => {
+      const inB = opts.cc === 'B';
+      const roles = inB ? bRoles : aRoles;
+      return prisma.user.create({
         data: {
-          coachingCenterId: opts.cc ?? centerA!,
-          branchId: opts.cc ? null : a.branch.id,
+          coachingCenterId: inB ? centerB! : centerA!,
+          branchId: inB ? b.branch.id : a.branch.id,
           email,
-          phone: opts.phone ?? null,
           passwordHash: hashPassword(opts.password ?? PW),
           name: `${TAG} ${email}`,
           status: opts.status ?? 'ACTIVE',
-          ...(role ? { roleAssignments: { create: { roleId: roleId(role), branchId: a.branch.id } } } : {}),
+          ...(role ? { roleAssignments: { create: { roleId: roles.find((r) => r.code === role)!.id } } } : {}),
         },
       });
+    };
     const e = (n: string) => `${n}-${codeA.toLowerCase()}@verify.local`;
     const admin = await mkUser(e('admin'), 'ADMIN');
     const staff = await mkUser(e('staff'), 'STAFF');
     const teacher = await mkUser(e('teacher'), 'TEACHER');
+    await prisma.teacher.create({ data: { coachingCenterId: centerA, branchId: a.branch.id, userId: teacher.id, teacherCode: `${TAG}-T1`, name: `${TAG} Teacher`, phone: '01700000001' } });
     const inactive = await mkUser(e('inactive'), 'STAFF', { status: 'INACTIVE' });
     const noRole = await mkUser(e('norole'), null);
-    const otpPhone = uniquePhone(11);
-    const otpUser = await mkUser(e('otp'), 'STAFF', { phone: otpPhone });
+    const lockUser = await mkUser(e('lockme'), 'STAFF');
     // Cross-tenant: same email in A and B with different passwords, plus an identical-credentials pair.
-    const shared = `shared-${codeA.toLowerCase()}@verify.local`;
+    const shared = e('shared');
     const sharedA = await mkUser(shared, 'ADMIN', { password: 'TenantAPass1' });
-    const bRoles = await prisma.role.findMany({ where: { coachingCenterId: centerB } });
-    const sharedB = await prisma.user.create({
-      data: { coachingCenterId: centerB, email: shared, passwordHash: hashPassword('TenantBPass1'), name: `${TAG} sharedB`, roleAssignments: { create: { roleId: bRoles.find((r) => r.code === 'STAFF')!.id } } },
-    });
-    const twin = `twin-${codeA.toLowerCase()}@verify.local`;
+    const sharedB = await mkUser(shared, 'STAFF', { cc: 'B', password: 'TenantBPass1' });
+    const twin = e('twin');
     await mkUser(twin, 'STAFF', { password: 'SamePass123' });
-    await prisma.user.create({ data: { coachingCenterId: centerB, email: twin, passwordHash: hashPassword('SamePass123'), name: `${TAG} twinB`, roleAssignments: { create: { roleId: bRoles.find((r) => r.code === 'STAFF')!.id } } } });
-    // Portal identities
-    const student = await prisma.student.create({ data: { coachingCenterId: centerA, branchId: a.branch.id, studentIdCode: `${TAG}-S1`, name: `${TAG} Student` } });
-    const guardian = await prisma.guardian.create({ data: { coachingCenterId: centerA, name: `${TAG} Guardian`, relationship: 'Father', phone: uniquePhone(22) } });
+    await mkUser(twin, 'STAFF', { cc: 'B', password: 'SamePass123' });
+
+    // Portal identities (tenant A): student + guardian with two children, one unrelated student.
+    const mkStudent = (suffix: string, email: string | null, cc: 'A' | 'B' = 'A') =>
+      prisma.student.create({
+        data: { coachingCenterId: cc === 'A' ? centerA! : centerB!, branchId: cc === 'A' ? a.branch.id : b.branch.id, studentIdCode: `${TAG}-${suffix}`, name: `${TAG} Student ${suffix}`, email },
+      });
+    const student = await mkStudent('S1', e('student'));
+    const sibling = await mkStudent('S2', null);
+    const unrelated = await mkStudent('S3', null);
+    const guardian = await prisma.guardian.create({ data: { coachingCenterId: centerA, name: `${TAG} Guardian`, relationship: 'Father', phone: '01700000002', email: e('guardian') } });
     await prisma.studentGuardian.create({ data: { studentId: student.id, guardianId: guardian.id, relationship: 'Father', isPrimary: true } });
+    await prisma.studentGuardian.create({ data: { studentId: sibling.id, guardianId: guardian.id, relationship: 'Father', isPrimary: false } });
     const sp = await provisionPortalAccount({ coachingCenterId: centerA, studentId: student.id, actorUserId: a.owner.id });
     await completeSetupOrReset(sp.setupToken, 'StudentPass123');
     const gp = await provisionPortalAccount({ coachingCenterId: centerA, guardianId: guardian.id, actorUserId: a.owner.id });
     await completeSetupOrReset(gp.setupToken, 'GuardianPass123');
-    ok('Fixtures: 2 tenants, OWNER/ADMIN/STAFF/TEACHER, inactive, role-less, cross-tenant pairs, student + guardian portal accounts');
+    // Staff email reused by a tenant-B student portal account: different password → each resolves
+    // its own account; the identical-password variant is ambiguous and must be refused.
+    const mixed = await mkStudent('MIX', staff.email, 'B');
+    const mp = await provisionPortalAccount({ coachingCenterId: centerB, studentId: mixed.id, actorUserId: b.owner.id });
+    await completeSetupOrReset(mp.setupToken, 'PortalSidePass1');
+    const mixedStaff = await mkUser(e('mixedtwin'), 'STAFF');
+    const mixedTwin = await mkStudent('MIXT', mixedStaff.email, 'B');
+    const mtp = await provisionPortalAccount({ coachingCenterId: centerB, studentId: mixedTwin.id, actorUserId: b.owner.id });
+    await completeSetupOrReset(mtp.setupToken, PW);
+    ok('Fixtures: 2 tenants, OWNER/ADMIN/STAFF/TEACHER, inactive, role-less, cross-tenant + staff/portal email collisions, student, guardian (2 children) + unrelated student');
 
-    // ---- 1-4, 20-22: valid logins + session identity/tenant/role ----
+    // ---- 1-4, 17, 18: staff roles ----
+    const staffCookies: Record<string, string> = {};
     for (const [label, email, role, id] of [
       ['OWNER', a.owner.email, 'OWNER', a.owner.id],
       ['ADMIN', admin.email, 'ADMIN', admin.id],
       ['STAFF', staff.email, 'STAFF', staff.id],
       ['TEACHER', teacher.email, 'TEACHER', teacher.id],
     ] as const) {
-      const r = await staffLogin(email, PW);
+      const r = await login(email, PW);
       assert(r.status === 200 && r.body.success === true, `${label} login (got ${r.status} ${JSON.stringify(r.body)})`);
+      assert(r.body.accountType === role && r.body.redirectTo === '/dashboard', `${label} redirect → /dashboard (got ${JSON.stringify(r.body)})`);
+      assert(sets(r, SESSION_COOKIE_NAME) && !sets(r, PORTAL_SESSION_COOKIE_NAME) && clears(r, PORTAL_SESSION_COOKIE_NAME), `${label} gets only the staff session (portal session cleared)`);
       const c = r.cookies[SESSION_COOKIE_NAME];
-      assert(c && !r.cookies[PORTAL_SESSION_COOKIE_NAME], `${label} gets only the staff session cookie`);
       const p = jwtPayload(c.value);
-      assert(p.userId === id && p.coachingCenterId === centerA && p.role === role, `${label} session identity/tenant/role`);
+      assert(p.userId === id && p.coachingCenterId === centerA && p.role === role && !('portalType' in p), `${label} session identity/tenant/role`);
       assert(!('password' in p) && !('passwordHash' in p) && !('otp' in p), 'no secrets in JWT');
       assert(c.attrs.includes('httponly') && c.attrs.includes('samesite=lax') && c.attrs.includes('path=/') && c.attrs.includes('max-age='), `${label} cookie attributes (${c.attrs})`);
       assert(c.attrs.includes('secure'), 'Secure cookie in production');
-      ok(`${label} valid password → success; session carries correct user, tenant and role`);
+      const dash = await get('/dashboard', cookieOf(r, SESSION_COOKIE_NAME));
+      assert(dash.status === 200, `${label} can open /dashboard (got ${dash.status})`);
+      staffCookies[label] = cookieOf(r, SESSION_COOKIE_NAME);
+      ok(`${[1, 2, 3, 4][['OWNER', 'ADMIN', 'STAFF', 'TEACHER'].indexOf(label)]}. ${label} email/password → staff session, correct identity, redirect /dashboard`);
     }
-    ok('20-22. Session identity, tenant and role verified for all four staff roles');
+    const teacherComm = await get('/api/communication/logs', staffCookies.TEACHER);
+    assert(teacherComm.status === 403 || teacherComm.status === 404, `TEACHER still restricted by role guards (got ${teacherComm.status})`);
 
-    // ---- 5-9 ----
-    const wrong = await staffLogin(staff.email, 'WrongPass999');
-    assert(wrong.status === 401 && !wrong.cookies[SESSION_COOKIE_NAME], 'wrong password 401, no cookie');
-    ok('5. Wrong password → denied');
-    const empty = await staffLogin(staff.email, '');
-    assert(empty.status === 400 && !empty.cookies[SESSION_COOKIE_NAME], `empty password → 400 (got ${empty.status})`);
-    ok('6. Empty password → denied');
-    const short = await staffLogin(staff.email, 'abc');
-    assert(short.status === 400, `short password → 400 (got ${short.status})`);
-    ok('7. Short password → denied by validation');
-    const inactiveRight = await staffLogin(inactive.email, PW);
-    const inactiveWrong = await staffLogin(inactive.email, 'WrongPass999');
-    assert(inactiveRight.status === 403 && !inactiveRight.cookies[SESSION_COOKIE_NAME], `inactive user denied (got ${inactiveRight.status})`);
+    // ---- 5, 6: portal ----
+    const stu = await login(student.email!, 'StudentPass123');
+    assert(stu.status === 200 && stu.body.accountType === 'STUDENT' && stu.body.redirectTo === '/portal/student', `student login (got ${stu.status} ${JSON.stringify(stu.body)})`);
+    assert(sets(stu, PORTAL_SESSION_COOKIE_NAME) && !sets(stu, SESSION_COOKIE_NAME) && clears(stu, SESSION_COOKIE_NAME), 'student gets only the portal session (staff session cleared)');
+    const sjwt = jwtPayload(stu.cookies[PORTAL_SESSION_COOKIE_NAME].value);
+    assert(sjwt.portalType === 'STUDENT' && sjwt.studentId === student.id && sjwt.coachingCenterId === centerA && !('role' in sjwt), 'student portal identity, no staff role');
+    assert(stu.cookies[PORTAL_SESSION_COOKIE_NAME].attrs.includes('httponly') && stu.cookies[PORTAL_SESSION_COOKIE_NAME].attrs.includes('secure'), 'portal cookie attributes');
+    const stuCookie = cookieOf(stu, PORTAL_SESSION_COOKIE_NAME);
+    ok('5. STUDENT email/password → portal session (studentId from account), redirect /portal/student');
+    const grd = await login(guardian.email!, 'GuardianPass123');
+    assert(grd.status === 200 && grd.body.accountType === 'GUARDIAN' && grd.body.redirectTo === '/portal/guardian', `guardian login (got ${grd.status} ${JSON.stringify(grd.body)})`);
+    const gjwt = jwtPayload(grd.cookies[PORTAL_SESSION_COOKIE_NAME].value);
+    assert(gjwt.portalType === 'GUARDIAN' && gjwt.guardianId === guardian.id && !gjwt.studentId, 'guardian identity (no child chosen at login)');
+    const grdCookie = cookieOf(grd, PORTAL_SESSION_COOKIE_NAME);
+    const kids = await get('/api/portal/guardian/children', grdCookie);
+    const kidIds = ((kids.body.children as { student: { id: string } }[] | undefined) ?? []).map((k) => k.student.id).sort();
+    assert(kids.status === 200 && JSON.stringify(kidIds) === JSON.stringify([student.id, sibling.id].sort()), `guardian sees both linked children after login (got ${kids.status} ${JSON.stringify(kidIds)})`);
+    ok('6. GUARDIAN email/password → portal session, redirect /portal/guardian, both linked children available after login');
+
+    // ---- 7-10 ----
+    const wrong = await login(staff.email, WRONG);
+    assert(wrong.status === 401 && !sets(wrong, SESSION_COOKIE_NAME) && !sets(wrong, PORTAL_SESSION_COOKIE_NAME), 'wrong password 401, no session');
+    const wrongPortal = await login(student.email!, WRONG);
+    assert(wrongPortal.status === 401 && JSON.stringify(wrongPortal.body) === JSON.stringify(wrong.body), 'portal wrong password identical response');
+    ok('7. Wrong password (staff and portal) → identical generic 401, no session');
+    const unknown = await login(`nobody-${codeA.toLowerCase()}@verify.local`, PW);
+    assert(unknown.status === 401 && JSON.stringify(unknown.body) === JSON.stringify(wrong.body) && !sets(unknown, SESSION_COOKIE_NAME), 'unknown email identical to wrong password');
+    ok('8. Unknown email → same generic 401 as a wrong password');
+    const inactiveRight = await login(inactive.email, PW);
+    const inactiveWrong = await login(inactive.email, WRONG);
+    assert(inactiveRight.status === 403 && !sets(inactiveRight, SESSION_COOKIE_NAME), `inactive staff denied (got ${inactiveRight.status})`);
     assert(inactiveWrong.status === 401 && JSON.stringify(inactiveWrong.body) === JSON.stringify(wrong.body), 'inactive status never revealed without the correct password');
-    ok('8. Inactive user → denied (status only disclosed after correct password)');
-    const unknown = await staffLogin(`nobody-${codeA.toLowerCase()}@verify.local`, PW);
-    assert(unknown.status === 401 && JSON.stringify(unknown.body) === JSON.stringify(wrong.body), 'unknown user response identical to wrong password');
-    ok('9. Unknown email → denied with the same generic response as a wrong password');
-    const roleless = await staffLogin(noRole.email, PW);
-    assert(roleless.status === 401, `user with no role assignment denied (got ${roleless.status})`);
-    ok('9b. User with no role assignment → denied (no default STAFF role)');
-
-    // ---- 10: cross-tenant ----
-    const asA = await staffLogin(shared, 'TenantAPass1');
-    const asB = await staffLogin(shared, 'TenantBPass1');
-    assert(asA.status === 200 && jwtPayload(asA.cookies[SESSION_COOKIE_NAME].value).userId === sharedA.id, 'tenant-A password → tenant-A account');
-    assert(asB.status === 200 && jwtPayload(asB.cookies[SESSION_COOKIE_NAME].value).coachingCenterId === centerB && jwtPayload(asB.cookies[SESSION_COOKIE_NAME].value).userId === sharedB.id, 'tenant-B password → tenant-B account');
-    const twinLogin = await staffLogin(twin, 'SamePass123');
-    assert(twinLogin.status === 401, `identical credentials in two tenants → denied, never an arbitrary pick (got ${twinLogin.status})`);
-    ok('10. Cross-tenant: each password resolves only its own tenant account; ambiguous identity denied');
-
-    // ---- 11-14: OTP ----
-    const req = await post('/api/auth/otp/request', { phone: otpPhone });
-    assert(req.status === 503 && req.body.error === 'OTP_UNAVAILABLE' && !('devCode' in req.body), `production OTP request issues nothing (got ${req.status})`);
-    assert((await prisma.staffLoginOtp.count({ where: { userId: otpUser.id } })) === 0, 'no challenge created in production');
-    for (const target of [otpPhone, '01700000000', '01799999999']) {
-      const r = await otpLogin(target, '123456');
-      assert(r.status === 401 && !r.cookies[SESSION_COOKIE_NAME], `123456 rejected for ${target}`);
-    }
-    ok('11. Hardcoded 123456 → denied (production issues no codes; no fixed code exists)');
-    const c1 = await issueStaffLoginOtp(otpPhone, { requireDelivery: false });
-    assert(c1.issued, 'challenge issued server-side');
-    const badCode = c1.code === '000000' ? '111111' : '000000';
-    assert((await otpLogin(otpPhone, badCode)).status === 401, 'invalid OTP denied');
-    const good = await otpLogin(otpPhone, c1.code);
-    assert(good.status === 200 && jwtPayload(good.cookies[SESSION_COOKIE_NAME].value).userId === otpUser.id, 'correct OTP → exactly the bound user');
-    ok('12. Invalid OTP → denied; correct OTP authenticates only the account it was issued to');
-    const reuse = await otpLogin(otpPhone, c1.code);
-    assert(reuse.status === 401, `reused OTP denied (got ${reuse.status})`);
-    ok('14. Reused OTP → denied (single-use)');
-    const c2 = await issueStaffLoginOtp(otpPhone, { requireDelivery: false });
-    assert(c2.issued, 'second challenge');
-    await prisma.staffLoginOtp.update({ where: { id: c2.challengeId }, data: { expiresAt: new Date(Date.now() - 1000) } });
-    assert((await otpLogin(otpPhone, c2.code)).status === 401, 'expired OTP denied');
-    ok('13. Expired OTP → denied');
-    const c3 = await issueStaffLoginOtp(otpPhone, { requireDelivery: false });
-    assert(c3.issued, 'third challenge');
-    const wrongC3 = c3.code === '999999' ? '888888' : '999999';
-    for (let i = 0; i < 5; i++) await otpLogin(otpPhone, wrongC3);
-    assert((await otpLogin(otpPhone, c3.code)).status === 401, 'correct code refused after 5 wrong attempts');
-    ok('13b. OTP attempts limited (5 wrong guesses lock the challenge)');
-    const c4 = await issueStaffLoginOtp(otpPhone, { requireDelivery: false });
-    const c5 = await issueStaffLoginOtp(otpPhone, { requireDelivery: false });
-    assert(c4.issued && c5.issued, 'two more challenges');
-    assert((await otpLogin(otpPhone, c4.code)).status === 401, 'superseded code invalid once a newer one is issued');
-    const limited = await issueStaffLoginOtp(otpPhone, { requireDelivery: false });
-    assert(!limited.issued && limited.reason === 'RATE_LIMITED', 'issue rate limit (5 per 15 min)');
-    const stored = await prisma.staffLoginOtp.findMany({ where: { userId: otpUser.id } });
-    assert(stored.every((row) => /^[0-9a-f]{64}$/.test(row.codeHash) && row.codeHash !== c1.code), 'only HMACs stored');
-    ok('13c. Newer code supersedes older; issue rate-limited; codes stored only as HMAC');
-
-    // ---- 15-16: reset tokens (portal — staff has no self-service reset) ----
-    const reset = await provisionPortalAccount({ coachingCenterId: centerA, studentId: student.id, actorUserId: a.owner.id });
-    const first = await post('/api/portal/auth/setup-password', { token: reset.setupToken, password: 'NewStudentPass1' });
-    assert(first.status === 200 && !first.cookies[PORTAL_SESSION_COOKIE_NAME] && !first.cookies[SESSION_COOKIE_NAME], `reset token works once and does not sign anyone in (got ${first.status})`);
-    ok('15. Reset token works once (no automatic sign-in)');
-    const second = await post('/api/portal/auth/setup-password', { token: reset.setupToken, password: 'AnotherPass22' });
-    assert(second.status >= 400, `reused reset token denied (got ${second.status})`);
-    const race = await provisionPortalAccount({ coachingCenterId: centerA, studentId: student.id, actorUserId: a.owner.id });
-    const racePw = [1, 2, 3].map((n) => `RacePass${n}xx`);
-    const both = await Promise.all(racePw.map((password) => post('/api/portal/auth/setup-password', { token: race.setupToken, password })));
-    assert(both.filter((r) => r.status === 200).length === 1, `concurrent reuse: exactly one succeeds (got ${both.map((r) => r.status)})`);
-    const winningPw = racePw[both.findIndex((r) => r.status === 200)];
-    const loginNew = await post('/api/portal/auth/login', { identifier: student.studentIdCode, password: 'AnotherPass22' });
-    assert(loginNew.status === 401, 'password from the rejected reuse was not stored');
-    ok('16. Reset token reuse denied (incl. concurrent double-submit)');
-
-    // ---- 17-19: separation ----
-    const studentCreds = { id: student.studentIdCode, pw: winningPw };
-    const stuOnStaff = await staffLogin(studentCreds.id, studentCreds.pw);
-    assert(stuOnStaff.status === 401 && !stuOnStaff.cookies[SESSION_COOKIE_NAME] && !stuOnStaff.cookies[PORTAL_SESSION_COOKIE_NAME], `student rejected by staff endpoint (got ${stuOnStaff.status})`);
-    ok('18. Student cannot authenticate through the staff endpoint');
-    const grdOnStaff = await staffLogin(guardian.phone, 'GuardianPass123');
-    assert(grdOnStaff.status === 401 && !grdOnStaff.cookies[SESSION_COOKIE_NAME] && !grdOnStaff.cookies[PORTAL_SESSION_COOKIE_NAME], 'guardian rejected by staff endpoint');
-    ok('19. Guardian cannot authenticate through the staff endpoint');
-    const stuPortal = await post('/api/portal/auth/login', { identifier: studentCreds.id, password: studentCreds.pw });
-    const pc = stuPortal.cookies[PORTAL_SESSION_COOKIE_NAME];
-    assert(stuPortal.status === 200 && pc && !stuPortal.cookies[SESSION_COOKIE_NAME], 'portal login sets only the portal cookie');
-    const pp = jwtPayload(pc.value);
-    assert(pp.portalType === 'STUDENT' && pp.studentId === student.id && pp.coachingCenterId === centerA && !('role' in pp) && !('password' in pp), 'portal JWT identity, no staff role');
-    assert(pc.attrs.includes('httponly') && pc.attrs.includes('secure'), 'portal cookie attributes');
-    const grdTyped = await post('/api/portal/auth/login', { identifier: guardian.phone, password: 'GuardianPass123', portalType: 'STUDENT' });
-    assert(grdTyped.status === 401, 'explicit portalType mismatch still rejected');
+    const roleless = await login(noRole.email, PW);
+    assert(roleless.status === 401 && !sets(roleless, SESSION_COOKIE_NAME), `role-less user denied (got ${roleless.status})`);
+    ok('9. Inactive staff → denied (status disclosed only after correct password); role-less user → denied');
     await prisma.portalAccount.update({ where: { id: gp.account.id }, data: { status: 'DISABLED' } });
-    const disabled = await post('/api/portal/auth/login', { identifier: guardian.phone, password: 'GuardianPass123' });
-    assert(disabled.status === 403 && !disabled.cookies[PORTAL_SESSION_COOKIE_NAME], `disabled portal account denied (got ${disabled.status})`);
-    ok('17. Portal auth remains separate (own endpoint, own cookie, no staff role); disabled portal account denied');
+    const disabled = await login(guardian.email!, 'GuardianPass123');
+    const disabledWrong = await login(guardian.email!, WRONG);
+    assert(disabled.status === 403 && !sets(disabled, PORTAL_SESSION_COOKIE_NAME), `disabled portal account denied (got ${disabled.status})`);
+    assert(disabledWrong.status === 401 && JSON.stringify(disabledWrong.body) === JSON.stringify(wrong.body), 'disabled status never revealed without the password');
+    await prisma.portalAccount.update({ where: { id: gp.account.id }, data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null } });
+    ok('10. Disabled portal account → denied');
+
+    // ---- 11, 12: lockout ----
+    for (let i = 0; i < 5; i++) await login(lockUser.email, WRONG);
+    const locked = await prisma.user.findUniqueOrThrow({ where: { id: lockUser.id } });
+    assert(locked.failedLoginAttempts === 5 && locked.lockedUntil && locked.lockedUntil.getTime() > Date.now() + 14 * 60 * 1000, 'staff locked ~15 minutes after 5 failures');
+    const whileLocked = await login(lockUser.email, PW);
+    assert(whileLocked.status === 401 && JSON.stringify(whileLocked.body) === JSON.stringify(wrong.body) && !sets(whileLocked, SESSION_COOKIE_NAME), `correct password refused while locked, generic response (got ${whileLocked.status})`);
+    for (let i = 0; i < 5; i++) await login(student.email!, WRONG);
+    const stuLocked = await login(student.email!, 'StudentPass123');
+    assert(stuLocked.status === 401 && !sets(stuLocked, PORTAL_SESSION_COOKIE_NAME), 'portal account locked after 5 failures');
+    ok('11. Lockout: 5 failures lock staff and portal accounts for 15 minutes; correct password refused meanwhile');
+    await prisma.user.update({ where: { id: lockUser.id }, data: { lockedUntil: new Date(Date.now() - 1000) } });
+    await prisma.portalAccount.update({ where: { id: sp.account.id }, data: { lockedUntil: new Date(Date.now() - 1000) } });
+    const afterExpiry = await login(lockUser.email, PW);
+    assert(afterExpiry.status === 200 && sets(afterExpiry, SESSION_COOKIE_NAME), `login works once lock expired (got ${afterExpiry.status})`);
+    const reset = await prisma.user.findUniqueOrThrow({ where: { id: lockUser.id } });
+    assert(reset.failedLoginAttempts === 0 && reset.lockedUntil === null, 'counter reset on success');
+    const stuAfter = await login(student.email!, 'StudentPass123');
+    assert(stuAfter.status === 200, 'portal login works once lock expired');
+    await prisma.user.update({ where: { id: lockUser.id }, data: { failedLoginAttempts: 4, lockedUntil: new Date(Date.now() - 1000) } });
+    await login(lockUser.email, WRONG);
+    const fresh = await prisma.user.findUniqueOrThrow({ where: { id: lockUser.id } });
+    assert(fresh.failedLoginAttempts === 1 && fresh.lockedUntil === null, 'an expired lock starts a fresh count (no instant re-lock)');
+    ok('12. Lockout expiration: sign-in allowed again, counters reset');
+
+    // ---- 13, 14: IDOR ----
+    const own = await get(`/api/portal/student/profile?studentId=${unrelated.id}`, stuCookie);
+    assert(own.status === 200 && (own.body.student as { id: string }).id === student.id, `student profile ignores ?studentId= (got ${own.status})`);
+    const stuRes = await get(`/api/portal/student/results?studentId=${unrelated.id}`, stuCookie);
+    assert(stuRes.status === 200 && !JSON.stringify(stuRes.body).includes(unrelated.id), 'student results never expose another student');
+    const stuAsGuardian = await get(`/api/portal/guardian/children/${unrelated.id}`, stuCookie);
+    assert(stuAsGuardian.status === 403, `student cannot use guardian routes (got ${stuAsGuardian.status})`);
+    ok('13. Student IDOR: ?studentId= ignored; studentId always from the session');
+    const linked = await get(`/api/portal/guardian/children/${sibling.id}`, grdCookie);
+    assert(linked.status === 200, `guardian reads a linked child (got ${linked.status})`);
+    for (const path of ['', '/results', '/attendance', '/fees']) {
+      const r = await get(`/api/portal/guardian/children/${unrelated.id}${path}`, grdCookie);
+      assert(r.status === 403 && !JSON.stringify(r.body).includes(unrelated.name), `guardian blocked from unrelated child ${path || 'profile'} (got ${r.status})`);
+    }
+    ok('14. Guardian unrelated-child access → 403 on profile/results/attendance/fees');
+
+    // ---- 15: cross-tenant ----
+    const asA = await login(shared, 'TenantAPass1');
+    const asB = await login(shared, 'TenantBPass1');
+    assert(asA.status === 200 && jwtPayload(asA.cookies[SESSION_COOKIE_NAME].value).userId === sharedA.id, 'tenant-A password → tenant-A account');
+    const bJwt = jwtPayload(asB.cookies[SESSION_COOKIE_NAME].value);
+    assert(asB.status === 200 && bJwt.userId === sharedB.id && bJwt.coachingCenterId === centerB, 'tenant-B password → tenant-B account');
+    const twinLogin = await login(twin, 'SamePass123');
+    assert(twinLogin.status === 401 && JSON.stringify(twinLogin.body) === JSON.stringify(wrong.body) && !JSON.stringify(twinLogin.body).includes(TAG), 'identical credentials in two tenants → generic denial, no tenant names');
+    const staffSide = await login(staff.email, PW);
+    const portalSide = await login(staff.email, 'PortalSidePass1');
+    assert(staffSide.status === 200 && staffSide.body.accountType === 'STAFF', 'shared email + staff password → staff account');
+    assert(portalSide.status === 200 && portalSide.body.accountType === 'STUDENT' && jwtPayload(portalSide.cookies[PORTAL_SESSION_COOKIE_NAME].value).coachingCenterId === centerB, 'shared email + portal password → that portal account');
+    const mixedAmbiguous = await login(mixedStaff.email, PW);
+    assert(mixedAmbiguous.status === 401 && !sets(mixedAmbiguous, SESSION_COOKIE_NAME) && !sets(mixedAmbiguous, PORTAL_SESSION_COOKIE_NAME), 'same email + same password on staff and portal accounts → denied');
+    const crossRead = await get(`/api/students/${student.id}`, cookieOf(asB, SESSION_COOKIE_NAME));
+    assert(crossRead.status === 404, `tenant-B staff cannot read tenant-A student (got ${crossRead.status})`);
+    ok('15. Cross-tenant: password selects only its own account; ambiguous (tenant or account-type) → denied; tenant data isolated');
+
+    // ---- session separation ----
+    const portalOnStaff = await get('/api/students', stuCookie);
+    assert(portalOnStaff.status === 401, `portal session rejected by staff API (got ${portalOnStaff.status})`);
+    const staffOnPortal = await get('/api/portal/student/profile', staffCookies.ADMIN);
+    assert(staffOnPortal.status === 401, `staff session rejected by portal API (got ${staffOnPortal.status})`);
+    ok('Staff and portal sessions stay separate: neither is accepted by the other side');
+
+    // ---- 16: logout ----
+    const out = await post('/api/auth/logout', {}, staffCookies.OWNER);
+    assert(out.status === 200 && clears(out, SESSION_COOKIE_NAME), 'staff logout clears the session cookie');
+    const noCookie = await get('/api/auth/me');
+    assert(noCookie.body.authenticated === false, `no session after logout (got ${JSON.stringify(noCookie.body)})`);
+    const pout = await post('/api/portal/auth/logout', {}, stuCookie);
+    assert(pout.status === 200 && clears(pout, PORTAL_SESSION_COOKIE_NAME), 'portal logout clears the portal cookie');
+    const dashAfter = await get('/dashboard');
+    assert(dashAfter.status === 307 && dashAfter.location?.endsWith('/login'), `/dashboard without session → /login (got ${dashAfter.status} ${dashAfter.location})`);
+    ok('16. Logout (staff and portal) clears the session; protected pages send the user to /login');
+
+    // ---- 17, 18 summary ----
+    const me = await get('/api/auth/me', staffCookies.TEACHER);
+    const meUser = me.body.user as { userId?: string; role?: string } | null;
+    assert(me.status === 200 && me.body.authenticated === true && meUser?.userId === teacher.id && meUser.role === 'TEACHER', `session identity served back by /api/auth/me (got ${me.status})`);
+    const pme = await get('/api/portal/auth/me', grdCookie);
+    const pmeUser = pme.body.user as { guardianId?: string; portalType?: string } | null;
+    assert(pme.status === 200 && pmeUser?.guardianId === guardian.id && pmeUser.portalType === 'GUARDIAN', `portal identity served back by /api/portal/auth/me (got ${pme.status})`);
+    ok('17. Session identity: each session resolves to exactly the authenticated account');
+    ok('18. Redirects: OWNER/ADMIN/STAFF/TEACHER → /dashboard, STUDENT → /portal/student, GUARDIAN → /portal/guardian (asserted above)');
+
+    // ---- 19: no OTP ----
+    const otpReq = await post('/api/auth/otp/request', { phone: '01700000000' });
+    assert(otpReq.status === 404 || otpReq.status === 405, `OTP request endpoint removed (got ${otpReq.status})`);
+    for (const payload of [
+      { identifier: staff.email, otp: '123456', mode: 'otp' },
+      { email: staff.email, otp: '123456' },
+      { email: staff.email, password: '123456' },
+      { identifier: '01700000000', password: PW },
+    ]) {
+      const r = await post('/api/auth/login', payload);
+      assert((r.status === 400 || r.status === 401) && !sets(r, SESSION_COOKIE_NAME) && !sets(r, PORTAL_SESSION_COOKIE_NAME), `no OTP/phone path (${JSON.stringify(payload)} → ${r.status})`);
+    }
+    const table = await prisma.$queryRaw<{ t: string | null }[]>`SELECT to_regclass('public.staff_login_otps')::text AS t`;
+    assert(table[0]?.t === null, 'staff_login_otps table dropped');
+    const legacyPortalApi = await post('/api/portal/auth/login', { identifier: student.email, password: 'StudentPass123' });
+    assert(legacyPortalApi.status === 404 || legacyPortalApi.status === 405, `separate portal login API removed (got ${legacyPortalApi.status})`);
+    const legacyPage = await get('/portal/login');
+    assert(legacyPage.status === 307 && legacyPage.location?.endsWith('/login'), `/portal/login redirects to /login (got ${legacyPage.status} ${legacyPage.location})`);
+    const legacyForgot = await get('/portal/forgot-password');
+    assert(legacyForgot.status === 307 && legacyForgot.location?.endsWith('/forgot-password'), `/portal/forgot-password redirects (got ${legacyForgot.status})`);
+    for (const path of ['/admin/login', '/teacher/login', '/student/login', '/guardian/login']) {
+      assert((await get(path)).status === 404, `${path} does not exist`);
+    }
+    ok('19. No OTP: endpoint gone, 123456/phone rejected, table dropped; one login route (legacy /portal/login → /login)');
+
+    // ---- 20, 21: source scans ----
+    const root = join(__dirname, '..');
+    const files = ['app', 'lib', 'components'].flatMap((d) => sourceFiles(join(root, d)));
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8');
+      const rel = f.slice(root.length + 1);
+      if (/StaffLoginOtp|staffLoginOtp|AUTH_DEV_OTP_ECHO|OTP_UNAVAILABLE|otp\/request|one-time-code|['"`]123456['"`]/.test(src)) offenders.push(`${rel}: OTP artefact`);
+      if (/demo (password|credential)/i.test(src)) offenders.push(`${rel}: demo credentials`);
+      if (/(app[\\/]api|lib[\\/](auth|services))/.test(rel) && /password(Hash)?\s*[:=]\s*['"][^'"]+['"]/.test(src)) offenders.push(`${rel}: hardcoded password`);
+    }
+    const authSrc = readFileSync(join(root, 'lib/services/unified-auth.service.ts'), 'utf8');
+    if (/findFirst/.test(authSrc)) offenders.push('unified-auth.service.ts uses findFirst');
+    assert(offenders.length === 0, `source scan: ${offenders.join('; ')}`);
+    ok('20. No hardcoded credentials / demo passwords / fixed codes in app, lib, components');
+    const blank = await post('/api/auth/login', {});
+    const garbage = await login(`x${Date.now()}@nowhere.invalid`, 'anything-at-all');
+    assert(blank.status === 400 && garbage.status === 401 && !sets(garbage, SESSION_COOKIE_NAME) && !sets(garbage, PORTAL_SESSION_COOKIE_NAME), 'no fallback account');
+    ok('21. No first-user fallback: empty/unknown credentials never produce a session; lookup considers every candidate');
+
+    // ---- forgot password ----
+    const fps = await Promise.all([staff.email, student.email!, `nobody-${codeA.toLowerCase()}@verify.local`].map((email) => post('/api/auth/forgot-password', { email })));
+    assert(fps.every((r) => r.status === 200 && JSON.stringify(r.body) === JSON.stringify(fps[0].body)), 'forgot-password response identical for staff/portal/unknown');
+    assert(String(fps[0].body.message).startsWith('If an account exists'), 'generic message');
+    const tokens = await prisma.portalAuthToken.count({ where: { portalAccountId: sp.account.id, purpose: 'RESET' } });
+    assert(tokens === 1, `portal reset token issued (got ${tokens})`);
+    ok('Forgot password: one generic response for every email; portal reset token issued via existing mechanism');
 
     // ---- error handling ----
     const bad = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{not json' });
@@ -263,6 +387,7 @@ async function main() {
       prisma.coachingCenter.count({ where: { name: { startsWith: TAG } } }),
       prisma.user.count({ where: { name: { startsWith: TAG } } }),
       prisma.student.count({ where: { studentIdCode: { startsWith: TAG } } }),
+      prisma.guardian.count({ where: { name: { startsWith: TAG } } }),
     ]);
     if (left.some((n) => n > 0)) console.error('✘ Leftover test data:', left);
     else console.log('✔ All temporary test data removed');

@@ -39,7 +39,7 @@ function SetupPasswordContent() {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || t.invalidToken);
       setDone(true);
-      setTimeout(() => router.push('/portal/login'), 1800);
+      setTimeout(() => router.push('/login'), 1800);
     } catch (err: any) {
       setError(err.message || t.invalidToken);
     } finally {
@@ -90,7 +90,7 @@ function SetupPasswordContent() {
         )}
 
         <div className="mt-6 pt-5 border-t border-[#edf1f7] text-center">
-          <Link href="/portal/login" className="text-xs font-bold text-[#063b78] hover:underline">
+          <Link href="/login" className="text-xs font-bold text-[#063b78] hover:underline">
             {t.backToLogin}
           </Link>
         </div>

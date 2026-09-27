@@ -272,7 +272,7 @@ async function seedStudent() {
 
   console.log('\n=========================================');
   console.log('STUDENT PORTAL ACCOUNT READY!');
-  console.log('Portal URL: /portal/login or /login');
+  console.log('Sign-in URL: /login (email + password)');
   console.log('Student ID Code: ACC-26-00001');
   console.log('Student Email: student@alokito.edu.bd');
   console.log('Student Phone: 01711000001');
