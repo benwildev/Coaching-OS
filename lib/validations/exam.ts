@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasBangla, hasEnglish } from '../format';
 
 export const EXAM_STATUS = {
   DRAFT: 'DRAFT',
@@ -47,8 +48,21 @@ export type ExamSubjectInput = z.infer<typeof examSubjectInputSchema>;
 
 export const createExamSchema = z
   .object({
-    title: z.string().min(2, 'Exam title must be at least 2 characters').max(150),
-    banglaTitle: z.string().max(150).optional().or(z.literal('')),
+    title: z
+      .string()
+      .min(2, 'Exam title must be at least 2 characters')
+      .max(150)
+      .refine((val) => !hasBangla(val), {
+        message: 'Exam title (English) must be in English. Bangla characters are not allowed.',
+      }),
+    banglaTitle: z
+      .string()
+      .max(150)
+      .optional()
+      .or(z.literal(''))
+      .refine((val) => !val || !hasEnglish(val), {
+        message: 'Exam title (Bangla) must be in Bangla. English letters are not allowed.',
+      }),
     examType: z.string().min(1, 'Exam type is required').default('WEEKLY'),
     academicSessionId: z.string().min(1, 'Academic session is required'),
     academicProgramId: z.string().min(1, 'Academic program is required'),

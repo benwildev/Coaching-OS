@@ -1,13 +1,33 @@
 import { z } from 'zod';
+import { hasBangla, hasEnglish } from '../format';
 
 export const BATCH_STATUSES = ['PLANNED', 'ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED'] as const;
 export const STUDENT_BATCH_STATUSES = ['ACTIVE', 'TRANSFERRED', 'DROPPED'] as const;
 export const BATCH_TEACHER_STATUSES = ['ACTIVE', 'ENDED'] as const;
 
 export const batchSchema = z.object({
-  name: z.string().min(2, 'Batch name is required').max(150),
-  banglaName: z.string().max(150).optional().or(z.literal('')),
-  code: z.string().min(2, 'Batch code is required').max(40),
+  name: z
+    .string()
+    .min(2, 'Batch name is required')
+    .max(150)
+    .refine((val) => !hasBangla(val), {
+      message: 'Batch name (English) must be in English. Bangla characters are not allowed.',
+    }),
+  banglaName: z
+    .string()
+    .max(150)
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasEnglish(val), {
+      message: 'Batch name (Bangla) must be in Bangla. English letters are not allowed.',
+    }),
+  code: z
+    .string()
+    .min(2, 'Batch code is required')
+    .max(40)
+    .refine((val) => !hasBangla(val), {
+      message: 'Batch code must be in English alphanumeric characters.',
+    }),
   description: z.string().max(2000).optional().or(z.literal('')),
   branchId: z.string().min(1, 'Branch is required'),
   academicSessionId: z.string().min(1, 'Academic session is required'),

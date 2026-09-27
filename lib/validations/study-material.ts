@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasBangla, hasEnglish } from '../format';
 
 export const MATERIAL_TYPES = ['PDF', 'VIDEO', 'IMAGE', 'DOCUMENT', 'NOTE', 'LINK'] as const;
 export const MATERIAL_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
@@ -11,6 +12,16 @@ const optionalText = z
   .trim()
   .optional()
   .nullable()
+  .transform((v) => (v ? v : null));
+
+const optionalBanglaText = z
+  .string()
+  .trim()
+  .optional()
+  .nullable()
+  .refine((v) => !v || !hasEnglish(v), {
+    message: 'Bangla field must not contain English characters (বাংলায় লিখুন)',
+  })
   .transform((v) => (v ? v : null));
 
 /** http(s) URL or a site-relative path (e.g. "/uploads/..."). Nothing else. */
@@ -42,10 +53,16 @@ export function checkMaterialResource(m: {
 }
 
 const materialFieldsSchema = z.object({
-  title: z.string().trim().min(1, 'Title is required'),
-  banglaTitle: optionalText,
+  title: z
+    .string()
+    .trim()
+    .min(1, 'Title is required')
+    .refine((v) => !hasBangla(v), {
+      message: 'Material title (English) must be in English. Bangla characters are not allowed.',
+    }),
+  banglaTitle: optionalBanglaText,
   description: optionalText,
-  banglaDescription: optionalText,
+  banglaDescription: optionalBanglaText,
   academicClassId: z.string().trim().min(1, 'Class is required'),
   academicGroupId: optionalText,
   subjectId: z.string().trim().min(1, 'Subject is required'),

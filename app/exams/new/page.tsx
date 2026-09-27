@@ -7,6 +7,9 @@ import Icon from '@/components/Icon';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, toBanglaNumeral } from '@/lib/i18n';
 import { EXAM_TYPES } from '@/lib/validations/exam';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface SubjectOption {
   id: string;
@@ -242,6 +245,14 @@ export default function NewExamPage() {
       showToast(lang === 'bn' ? 'বিষয়ের নাম ও কোড আবশ্যক' : 'Subject name and code are required');
       return;
     }
+    if (hasBangla(newSubjectForm.name)) {
+      showToast(lang === 'bn' ? 'বিষয়ের নাম ইংরেজিতে লিখুন' : 'Subject name must be in English');
+      return;
+    }
+    if (newSubjectForm.banglaName && hasEnglish(newSubjectForm.banglaName)) {
+      showToast(lang === 'bn' ? 'বিষয়ের বাংলা নাম শুধুমাত্র বাংলায় লিখুন' : 'Subject Bangla name must not contain English characters');
+      return;
+    }
 
     setCreatingSubject(true);
     try {
@@ -379,6 +390,14 @@ export default function NewExamPage() {
   const validateStep1 = () => {
     if (!title.trim()) {
       showToast(lang === 'bn' ? 'অনুগ্রহ করে পরীক্ষার নাম দিন' : 'Please provide exam title');
+      return false;
+    }
+    if (hasBangla(title)) {
+      showToast(lang === 'bn' ? 'পরীক্ষার নাম ইংরেজিতে লিখুন' : 'Exam title must be in English');
+      return false;
+    }
+    if (banglaTitle && hasEnglish(banglaTitle)) {
+      showToast(lang === 'bn' ? 'পরীক্ষার বাংলা নাম শুধুমাত্র বাংলায় লিখুন' : 'Exam Bangla title must not contain English characters');
       return false;
     }
     if (!academicSessionId) {
@@ -566,10 +585,10 @@ export default function NewExamPage() {
               <label className="block text-[12px] font-bold text-[#092f63] mb-1.5">
                 {lang === 'bn' ? 'পরীক্ষার নাম (English) *' : 'Exam Title (English) *'}
               </label>
-              <input
-                type="text"
+              <EnglishInput
+                required
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(val) => setTitle(val)}
                 placeholder="e.g. HSC Model Test 2026 - Paper 1"
                 className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] focus:border-[#063b78] focus:outline-none"
               />
@@ -579,10 +598,9 @@ export default function NewExamPage() {
               <label className="block text-[12px] font-bold text-[#092f63] mb-1.5">
                 {lang === 'bn' ? 'পরীক্ষার নাম (বাংলা)' : 'Bangla Title (বাংলা)'}
               </label>
-              <input
-                type="text"
+              <BanglaInput
                 value={banglaTitle}
-                onChange={(e) => setBanglaTitle(e.target.value)}
+                onChange={(val) => setBanglaTitle(val)}
                 placeholder="যেমন: এইচএসসি মডেল টেস্ট ২০২৬"
                 className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] focus:border-[#063b78] focus:outline-none"
               />
@@ -1398,12 +1416,11 @@ export default function NewExamPage() {
                 <label className="block text-[12px] font-bold text-[#092f63] mb-1">
                   {lang === 'bn' ? 'বিষয়ের নাম (English) *' : 'Subject Name (English) *'}
                 </label>
-                <input
-                  type="text"
+                <EnglishInput
                   required
                   placeholder="e.g. Higher Mathematics 1st Paper"
                   value={newSubjectForm.name}
-                  onChange={(e) => setNewSubjectForm({ ...newSubjectForm, name: e.target.value })}
+                  onChange={(val) => setNewSubjectForm({ ...newSubjectForm, name: val })}
                   className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2 text-[13px] text-[#092f63] focus:border-[#063b78] focus:outline-none"
                 />
               </div>
@@ -1412,11 +1429,10 @@ export default function NewExamPage() {
                 <label className="block text-[12px] font-bold text-[#092f63] mb-1">
                   {lang === 'bn' ? 'বিষয়ের নাম (বাংলা)' : 'Bangla Name (বাংলা)'}
                 </label>
-                <input
-                  type="text"
+                <BanglaInput
                   placeholder="যেমন: উচ্চতর গণিত ১ম পত্র"
                   value={newSubjectForm.banglaName}
-                  onChange={(e) => setNewSubjectForm({ ...newSubjectForm, banglaName: e.target.value })}
+                  onChange={(val) => setNewSubjectForm({ ...newSubjectForm, banglaName: val })}
                   className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2 text-[13px] text-[#092f63] focus:border-[#063b78] focus:outline-none"
                 />
               </div>

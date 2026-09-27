@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasBangla, hasEnglish } from '../format';
 
 export const NOTICE_AUDIENCES = [
   'ALL_CENTER',
@@ -24,11 +25,27 @@ const optionalText = z
   .nullable()
   .transform((v) => (v ? v : null));
 
+const optionalBanglaText = z
+  .string()
+  .trim()
+  .optional()
+  .nullable()
+  .refine((v) => !v || !hasEnglish(v), {
+    message: 'Bangla field must not contain English characters (বাংলায় লিখুন)',
+  })
+  .transform((v) => (v ? v : null));
+
 const noticeFieldsSchema = z.object({
-  title: z.string().trim().min(1, 'Title is required'),
-  banglaTitle: optionalText,
+  title: z
+    .string()
+    .trim()
+    .min(1, 'Title is required')
+    .refine((v) => !hasBangla(v), {
+      message: 'Notice title (English) must be in English. Bangla characters are not allowed.',
+    }),
+  banglaTitle: optionalBanglaText,
   content: z.string().trim().min(1, 'Content is required'),
-  banglaContent: optionalText,
+  banglaContent: optionalBanglaText,
   targetAudience: z.enum(NOTICE_AUDIENCES, { message: 'INVALID_NOTICE_AUDIENCE' }),
   branchId: optionalText,
   academicSessionId: optionalText,

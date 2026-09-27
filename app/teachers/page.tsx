@@ -7,6 +7,10 @@ import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, toBanglaNumeral } from '@/lib/i18n';
 import { TEACHER_STATUSES } from '@/lib/validations/teacher';
+import { normalizeBdPhone, isValidBdPhone } from '@/lib/validations/student';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface TeacherItem {
   id: string;
@@ -51,6 +55,7 @@ export default function TeachersPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const loadOptions = useCallback(async () => {
     try {
@@ -102,31 +107,89 @@ export default function TeachersPage() {
   }, [fetchTeachers]);
 
   const createTeacher = async () => {
-    if (!form.name.trim() || !form.phone.trim()) {
-      showToast(lang === 'bn' ? 'নাম ও ফোন নম্বর আবশ্যক' : 'Name and phone are required');
+    const errs: Record<string, string> = {};
+    const trimmedName = form.name.trim();
+    const trimmedBangla = form.banglaName.trim();
+    const normalizedPhone = normalizeBdPhone(form.phone);
+    const trimmedEmail = form.email.trim();
+
+    if (!trimmedName) {
+      errs.name = lang === 'bn' ? 'শিক্ষকের নাম (ইংরেজি) আবশ্যক' : 'Teacher name (English) is required';
+    } else if (trimmedName.length < 2) {
+      errs.name = lang === 'bn' ? 'শিক্ষকের নাম কমপক্ষে ২ অক্ষরের হতে হবে' : 'Teacher name must be at least 2 characters';
+    } else if (hasBangla(trimmedName)) {
+      errs.name = lang === 'bn' ? 'শিক্ষকের নাম ইংরেজিতে লিখুন (বাংলা অক্ষর গ্রহণযোগ্য নয়)' : 'Teacher name must be in English';
+    }
+
+    if (trimmedBangla && hasEnglish(trimmedBangla)) {
+      errs.banglaName = lang === 'bn' ? 'শিক্ষকের বাংলা নাম শুধুমাত্র বাংলায় লিখুন (ইংরেজি গ্রহণযোগ্য নয়)' : 'Teacher Bangla name must not contain English characters';
+    }
+
+    if (!form.phone.trim()) {
+      errs.phone = lang === 'bn' ? 'ফোন নম্বর আবশ্যক' : 'Phone number is required';
+    } else if (!isValidBdPhone(form.phone)) {
+      errs.phone = lang === 'bn' ? 'সঠিক ১১ ডিজিটের মোবাইল নম্বর দিন (যেমন: 01712XXXXXX)' : 'Invalid Bangladeshi mobile number (must be 11 digits starting with 01)';
+    }
+
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      errs.email = lang === 'bn' ? 'সঠিক ইমেইল ঠিকানা দিন' : 'Please enter a valid email address';
+    }
+
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
+      const firstError = Object.values(errs)[0];
+      showToast(firstError);
       return;
     }
+
+    setFieldErrors({});
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        name: trimmedName,
+        banglaName: trimmedBangla,
+        phone: normalizedPhone,
+        email: trimmedEmail,
+        designation: form.designation.trim(),
+        qualification: form.qualification.trim(),
+      };
+
       const res = await fetch('/api/teachers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
-        showToast(lang === 'bn' ? 'শিক্ষক যুক্ত হয়েছে' : 'Teacher added successfully');
+        showToast(lang === 'bn' ? 'শিক্ষক সফলভাবে যুক্ত হয়েছে' : 'Teacher added successfully');
         setModalOpen(false);
         setForm(emptyForm);
+        setFieldErrors({});
         fetchTeachers();
       } else {
-        showToast(data.error || 'Failed to add teacher');
+        if (data.details) {
+          const serverFieldErrors: Record<string, string> = {};
+          for (const [key, msgs] of Object.entries(data.details)) {
+            if (Array.isArray(msgs) && msgs.length > 0) {
+              serverFieldErrors[key] = msgs[0] as string;
+            }
+          }
+          setFieldErrors(serverFieldErrors);
+        }
+        showToast(data.error || (lang === 'bn' ? 'শিক্ষক যোগ করতে ব্যর্থ হয়েছে' : 'Failed to add teacher'));
       }
     } catch {
-      showToast('Error adding teacher');
+      showToast(lang === 'bn' ? 'শিক্ষক যোগ করার সময় সমস্যা হয়েছে' : 'Error adding teacher');
     } finally {
       setSaving(false);
     }
+  };
+
+  const openCreateModal = () => {
+    setForm(emptyForm);
+    setFieldErrors({});
+    setModalOpen(true);
   };
 
   return (
@@ -139,7 +202,7 @@ export default function TeachersPage() {
         {canManage && (
           <button
             type="button"
-            onClick={() => setModalOpen(true)}
+            onClick={openCreateModal}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
           >
             <Icon name="userplus" size={17} />
@@ -188,7 +251,7 @@ export default function TeachersPage() {
           {canManage && (
             <button
               type="button"
-              onClick={() => setModalOpen(true)}
+              onClick={openCreateModal}
               className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#063b78] px-6 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
             >
               <Icon name="userplus" size={17} />
@@ -298,19 +361,54 @@ export default function TeachersPage() {
             </div>
             <div className="fld">
               <label>{dict.teachers.name} *</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <EnglishInput
+                value={form.name}
+                onChange={(val) => {
+                  setForm({ ...form, name: val });
+                  if (fieldErrors.name) setFieldErrors((prev) => ({ ...prev, name: '' }));
+                }}
+                className={fieldErrors.name ? '!border-red-500 !ring-1 !ring-red-200' : ''}
+              />
+              {fieldErrors.name && <p className="text-[11.5px] text-red-600 font-medium mt-1">{fieldErrors.name}</p>}
             </div>
             <div className="fld">
               <label>{dict.teachers.banglaName}</label>
-              <input value={form.banglaName} onChange={(e) => setForm({ ...form, banglaName: e.target.value })} />
+              <BanglaInput
+                value={form.banglaName}
+                onChange={(val) => {
+                  setForm({ ...form, banglaName: val });
+                  if (fieldErrors.banglaName) setFieldErrors((prev) => ({ ...prev, banglaName: '' }));
+                }}
+                className={fieldErrors.banglaName ? '!border-red-500 !ring-1 !ring-red-200' : ''}
+              />
+              {fieldErrors.banglaName && <p className="text-[11.5px] text-red-600 font-medium mt-1">{fieldErrors.banglaName}</p>}
             </div>
             <div className="fld">
               <label>{dict.teachers.phone} *</label>
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="01712000000" />
+              <input
+                value={form.phone}
+                onChange={(e) => {
+                  setForm({ ...form, phone: e.target.value });
+                  if (fieldErrors.phone) setFieldErrors((prev) => ({ ...prev, phone: '' }));
+                }}
+                placeholder="01712000000"
+                className={fieldErrors.phone ? '!border-red-500 !ring-1 !ring-red-200' : ''}
+              />
+              {fieldErrors.phone && <p className="text-[11.5px] text-red-600 font-medium mt-1">{fieldErrors.phone}</p>}
             </div>
             <div className="fld">
               <label>{dict.teachers.email}</label>
-              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => {
+                  setForm({ ...form, email: e.target.value });
+                  if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: '' }));
+                }}
+                placeholder="teacher@example.com"
+                className={fieldErrors.email ? '!border-red-500 !ring-1 !ring-red-200' : ''}
+              />
+              {fieldErrors.email && <p className="text-[11.5px] text-red-600 font-medium mt-1">{fieldErrors.email}</p>}
             </div>
             <div className="fld">
               <label>{dict.teachers.branch}</label>

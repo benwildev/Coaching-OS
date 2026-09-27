@@ -1,11 +1,31 @@
 import { z } from 'zod';
+import { hasBangla, hasEnglish } from '../format';
 
 export const COURSE_STATUSES = ['ACTIVE', 'INACTIVE', 'ARCHIVED'] as const;
 
 export const courseSchema = z.object({
-  name: z.string().min(2, 'Course name is required').max(150),
-  banglaName: z.string().max(150).optional().or(z.literal('')),
-  code: z.string().min(2, 'Course code is required').max(40),
+  name: z
+    .string()
+    .min(2, 'Course name is required')
+    .max(150)
+    .refine((val) => !hasBangla(val), {
+      message: 'Course name (English) must be in English. Bangla characters are not allowed.',
+    }),
+  banglaName: z
+    .string()
+    .max(150)
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasEnglish(val), {
+      message: 'Course name (Bangla) must be in Bangla. English letters are not allowed.',
+    }),
+  code: z
+    .string()
+    .min(2, 'Course code is required')
+    .max(40)
+    .refine((val) => !hasBangla(val), {
+      message: 'Course code must be in English alphanumeric characters.',
+    }),
   description: z.string().max(2000).optional().or(z.literal('')),
   academicProgramId: z.string().min(1, 'Academic program is required'),
   academicClassId: z.string().min(1, 'Academic class is required'),

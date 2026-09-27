@@ -42,6 +42,11 @@ export async function getFeeDashboard(coachingCenterId: string, params: Dashboar
     overdueAgg,
     invoicesIssuedThisMonth,
     paymentsCountToday,
+    studentsWithDue,
+    recentPaymentsRaw,
+    urgentDuesRaw,
+    activeStructuresRaw,
+    monthPaymentsByMethod,
   ] = await Promise.all([
     prisma.payment.aggregate({
       where: { coachingCenterId, ...branchFilter, paymentDate: { gte: todayStart }, status: { not: 'VOIDED' } },
@@ -71,8 +76,96 @@ export async function getFeeDashboard(coachingCenterId: string, params: Dashboar
     prisma.payment.count({
       where: { coachingCenterId, ...branchFilter, paymentDate: { gte: todayStart }, status: { not: 'VOIDED' } },
     }),
+    prisma.feeInvoice.findMany({
+      where: { coachingCenterId, ...branchFilter, status: { in: ['ISSUED', 'PARTIAL', 'OVERDUE'] }, dueAmount: { gt: 0 } },
+      distinct: ['studentId'],
+      select: { studentId: true },
+    }),
+    prisma.payment.findMany({
+      where: { coachingCenterId, ...branchFilter, status: { not: 'VOIDED' } },
+      take: 6,
+      orderBy: { paymentDate: 'desc' },
+      select: {
+        id: true,
+        receiptNumber: true,
+        amount: true,
+        paymentMethod: true,
+        paymentDate: true,
+        student: {
+          select: {
+            id: true,
+            name: true,
+            studentIdCode: true,
+            phone: true,
+          },
+        },
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+          },
+        },
+      },
+    }),
+    prisma.feeInvoice.findMany({
+      where: {
+        coachingCenterId,
+        ...branchFilter,
+        status: { in: ['ISSUED', 'PARTIAL', 'OVERDUE'] },
+        dueAmount: { gt: 0 },
+      },
+      take: 5,
+      orderBy: [{ dueDate: 'asc' }, { dueAmount: 'desc' }],
+      select: {
+        id: true,
+        invoiceNumber: true,
+        dueAmount: true,
+        totalAmount: true,
+        dueDate: true,
+        status: true,
+        student: {
+          select: {
+            id: true,
+            name: true,
+            studentIdCode: true,
+            studentBatches: {
+              where: { status: 'ACTIVE' },
+              take: 1,
+              select: { batch: { select: { name: true } } },
+            },
+          },
+        },
+      },
+    }),
+    prisma.feeStructure.findMany({
+      where: { coachingCenterId, ...branchFilter, isActive: true },
+      take: 4,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        banglaName: true,
+        amount: true,
+        feeType: true,
+        frequency: true,
+        _count: {
+          select: { feeAssignments: true },
+        },
+      },
+    }),
+    prisma.payment.groupBy({
+      by: ['paymentMethod'],
+      where: { coachingCenterId, ...branchFilter, paymentDate: { gte: monthStart }, status: { not: 'VOIDED' } },
+      _sum: { amount: true },
+    }),
   ]);
 
+  const methodTotals: Record<string, number> = { CASH: 0, BKASH: 0, NAGAD: 0, BANK: 0, CARD: 0, OTHER: 0 };
+  for (const p of monthPaymentsByMethod) {
+    if (p.paymentMethod) methodTotals[p.paymentMethod] = n(p._sum.amount);
+  }
+
+  const nowMs = Date.now();
   return {
     todayCollection: n(todayPayments._sum.amount),
     monthCollection: n(monthPayments._sum.amount),
@@ -80,6 +173,44 @@ export async function getFeeDashboard(coachingCenterId: string, params: Dashboar
     overdueAmount: n(overdueAgg._sum.dueAmount),
     invoicesIssuedThisMonth,
     paymentsCountToday,
+    studentsWithDueCount: studentsWithDue.length,
+    recentPayments: recentPaymentsRaw.map((p) => ({
+      id: p.id,
+      receiptNumber: p.receiptNumber,
+      amount: n(p.amount),
+      paymentMethod: p.paymentMethod,
+      paymentDate: p.paymentDate.toISOString(),
+      student: p.student,
+      invoice: p.invoice,
+    })),
+    urgentDues: urgentDuesRaw.map((inv) => {
+      const daysOverdue = inv.dueDate ? Math.max(0, Math.floor((nowMs - new Date(inv.dueDate).getTime()) / 86400000)) : 0;
+      return {
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        dueAmount: n(inv.dueAmount),
+        totalAmount: n(inv.totalAmount),
+        dueDate: inv.dueDate ? inv.dueDate.toISOString() : null,
+        daysOverdue,
+        status: inv.status,
+        student: {
+          id: inv.student.id,
+          name: inv.student.name,
+          studentIdCode: inv.student.studentIdCode,
+          batchName: inv.student.studentBatches[0]?.batch.name || null,
+        },
+      };
+    }),
+    activeStructures: activeStructuresRaw.map((s) => ({
+      id: s.id,
+      name: s.name,
+      banglaName: s.banglaName,
+      amount: n(s.amount),
+      feeType: s.feeType,
+      frequency: s.frequency,
+      assignmentsCount: s._count.feeAssignments,
+    })),
+    methodBreakdown: methodTotals,
   };
 }
 

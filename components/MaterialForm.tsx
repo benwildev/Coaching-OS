@@ -2,10 +2,12 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm, useWatch } from 'react-hook-form';
+import { useForm, useWatch, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 import Icon from './Icon';
+import EnglishInput from './EnglishInput';
+import BanglaInput from './BanglaInput';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, pickLocalized } from '@/lib/i18n';
 import { useQuestionBankOptions } from '@/lib/hooks/useQuestionBankOptions';
@@ -103,12 +105,34 @@ export default function MaterialForm({ initial }: { initial?: MaterialFormInitia
       <section className="card p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="fld">
           <label htmlFor="m-title">{m.englishTitle} *</label>
-          <input id="m-title" {...register('title')} />
+          <Controller
+            control={control}
+            name="title"
+            render={({ field }) => (
+              <EnglishInput
+                id="m-title"
+                value={field.value}
+                onChange={field.onChange}
+              />
+            )}
+          />
           {err(errors.title?.message)}
         </div>
         <div className="fld">
           <label htmlFor="m-title-bn">{m.banglaTitle}</label>
-          <input id="m-title-bn" className="font-bangla" {...register('banglaTitle')} />
+          <Controller
+            control={control}
+            name="banglaTitle"
+            render={({ field }) => (
+              <BanglaInput
+                id="m-title-bn"
+                className="font-bangla"
+                value={field.value ?? ''}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          {err(errors.banglaTitle?.message)}
         </div>
         <div className="fld">
           <label htmlFor="m-type">{m.type} *</label>
@@ -131,7 +155,21 @@ export default function MaterialForm({ initial }: { initial?: MaterialFormInitia
         </div>
         <div className="fld">
           <label htmlFor="m-desc-bn">{m.banglaDescription}</label>
-          <textarea id="m-desc-bn" rows={type === 'NOTE' ? 6 : 3} className="font-bangla" {...register('banglaDescription')} />
+          <Controller
+            control={control}
+            name="banglaDescription"
+            render={({ field }) => (
+              <BanglaInput
+                as="textarea"
+                rows={type === 'NOTE' ? 6 : 3}
+                id="m-desc-bn"
+                className="font-bangla"
+                value={field.value ?? ''}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          {err(errors.banglaDescription?.message)}
         </div>
         <div className="fld sm:col-span-2">
           <label htmlFor="m-thumb">{m.thumbnailUrl} <span className="font-normal text-[#64748b]">({c.optional})</span></label>

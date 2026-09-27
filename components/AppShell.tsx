@@ -9,9 +9,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { toast } = useApp();
   const pathname = usePathname();
 
-  // The student/guardian portal has its own layout/shell (components/portal)
-  // and its own auth — it must never inherit the staff sidebar/topbar.
-  if (pathname?.startsWith('/portal')) {
+  // The login, setup, and student/guardian portal pages have their own full-screen
+  // layouts and must never inherit the staff sidebar/topbar.
+  if (pathname === '/login' || pathname?.startsWith('/setup') || pathname?.startsWith('/portal')) {
     return <>{children}</>;
   }
 

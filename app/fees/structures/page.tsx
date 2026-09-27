@@ -8,6 +8,9 @@ import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, formatBDT } from '@/lib/i18n';
 import { FEE_TYPES, FEE_FREQUENCIES } from '@/lib/validations/fee';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface FeeStructureItem {
   id: string;
@@ -88,6 +91,30 @@ export default function FeeStructuresPage() {
 
       <FeesSubNav />
 
+      {/* Informative Guidance Banner */}
+      <div className="p-4 md:p-5 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-white border border-blue-100 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="h-10 w-10 rounded-xl bg-[#063b78] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5 sm:mt-0">
+            <Icon name="wallet" size={20} />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-[#092f63] text-[15px]">{dict.fees.structureNoticeTitle}</h3>
+            <p className="text-[13px] text-[#64748b] max-w-2xl mt-0.5 leading-relaxed">
+              {dict.fees.structureNoticeDesc}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 self-stretch sm:self-auto shrink-0">
+          <Link
+            href="/fees/invoices/new"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-xl bg-white border border-blue-200 px-3.5 py-2 text-[12.5px] font-bold text-[#063b78] hover:bg-blue-50 hover:border-blue-300 transition-colors shadow-2xs"
+          >
+            <Icon name="receipt" size={14} />
+            <span>{dict.fees.createInvoice}</span>
+          </Link>
+        </div>
+      </div>
+
       <div className="card p-4 md:p-5 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs flex flex-col gap-3.5">
         <div className="flex items-center gap-2.5 rounded-xl border border-[#dce5f0] px-3.5 py-2.5 bg-[#f8fafc] max-w-lg focus-within:border-[#063b78] focus-within:bg-white transition-colors">
           <Icon name="search" size={17} className="text-[#64748b]" />
@@ -151,10 +178,21 @@ export default function FeeStructuresPage() {
                     <td>{(dict.feeType as any)[s.feeType] || s.feeType}</td>
                     <td className="font-mono font-bold text-[#092f63]">{formatBDT(s.amount, lang)}</td>
                     <td>{(dict.feeFrequency as any)[s.frequency] || s.frequency}</td>
-                    <td>{s._count.feeAssignments}</td>
+                    <td>
+                      <span className="font-medium text-[#092f63]">{s._count.feeAssignments}</span>
+                      <span className="text-[11px] text-[#8795ab] ml-1">{lang === 'bn' ? 'শিক্ষার্থী' : 'students'}</span>
+                    </td>
                     <td><StatusBadge status={s.isActive ? 'ACTIVE' : 'INACTIVE'} size="sm" /></td>
                     <td>
                       <div className="flex items-center justify-end gap-1.5">
+                        <Link
+                          href={`/fees/invoices/new?structureId=${s.id}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 text-[#063b78] hover:bg-blue-100 font-bold text-[12px] border border-blue-200 transition-colors"
+                          title={dict.fees.createInvoiceForStructure}
+                        >
+                          <Icon name="receipt" size={13} />
+                          <span>{dict.fees.createInvoiceForStructure}</span>
+                        </Link>
                         <button className="tb" onClick={() => setEditing(s)}>{dict.actions.edit}</button>
                         <button className="tb" onClick={() => toggleActive(s)}>
                           {s.isActive ? dict.fees.inactive : dict.fees.active}
@@ -203,6 +241,14 @@ function EditStructureModal({
   const [error, setError] = useState('');
 
   async function save() {
+    if (hasBangla(name)) {
+      setError(lang === 'bn' ? 'ফি কাঠামোর নাম ইংরেজিতে লিখুন' : 'Fee structure name must be in English');
+      return;
+    }
+    if (banglaName && hasEnglish(banglaName)) {
+      setError(lang === 'bn' ? 'ফি কাঠামোর বাংলা নাম শুধুমাত্র বাংলায় লিখুন' : 'Fee structure Bangla name must not contain English characters');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -238,12 +284,14 @@ function EditStructureModal({
         </div>
         {error && <div className="rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[13px] px-3 py-2">{error}</div>}
         <div className="fld">
-          <label>{dict.fees.name}</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} />
+          <label>{dict.fees.name} *</label>
+          <EnglishInput required value={name} onChange={(val) => setName(val)} placeholder={dict.fees.namePlaceholder} />
         </div>
         <div className="fld">
-          <label>{dict.fees.banglaName}</label>
-          <input value={banglaName} onChange={(e) => setBanglaName(e.target.value)} />
+          <label>
+            {dict.fees.banglaName} <span className="text-[11.5px] font-normal text-[#64748b]">({lang === 'bn' ? 'ঐচ্ছিক' : 'Optional'})</span>
+          </label>
+          <BanglaInput value={banglaName} onChange={(val) => setBanglaName(val)} placeholder={dict.fees.banglaNamePlaceholder} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="fld">

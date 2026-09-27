@@ -1,12 +1,15 @@
 import { z } from 'zod';
+import { hasBangla, hasEnglish, toEnglishNumeral } from '../format';
 
 /**
  * Normalizes a Bangladeshi phone number into canonical 11-digit format (01XXXXXXXXX)
  */
 export function normalizeBdPhone(phone?: string | null): string {
   if (!phone) return '';
+  // Convert any Bengali numerals (০-৯) to English numerals (0-9)
+  const converted = toEnglishNumeral(phone);
   // Remove spaces, hyphens, parentheses, and any non-digit characters except leading '+'
-  let cleaned = phone.trim().replace(/[^0-9+]/g, '');
+  let cleaned = converted.trim().replace(/[^0-9+]/g, '');
 
   if (cleaned.startsWith('+88')) {
     cleaned = cleaned.substring(3);
@@ -76,8 +79,21 @@ export const BLOOD_GROUPS = [
 
 export const admissionSchema = z.object({
   // Step 1: Student Information
-  name: z.string().min(2, 'Student full name is required').max(100),
-  banglaName: z.string().max(100).optional().or(z.literal('')),
+  name: z
+    .string()
+    .min(2, 'Student full name is required')
+    .max(100)
+    .refine((val) => !hasBangla(val), {
+      message: 'Student full name (English) must be in English. Bangla characters are not allowed.',
+    }),
+  banglaName: z
+    .string()
+    .max(100)
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasEnglish(val), {
+      message: 'Student full name (Bangla) must be in Bangla. English letters are not allowed.',
+    }),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
   dob: z.string().optional().or(z.literal('')),
   bloodGroup: z.string().optional().or(z.literal('')),
@@ -101,8 +117,21 @@ export const admissionSchema = z.object({
   sscReg: z.string().optional().or(z.literal('')),
 
   // Step 2: Guardian Information
-  guardianName: z.string().min(2, 'Guardian name is required').max(100),
-  guardianBanglaName: z.string().max(100).optional().or(z.literal('')),
+  guardianName: z
+    .string()
+    .min(2, 'Guardian name is required')
+    .max(100)
+    .refine((val) => !hasBangla(val), {
+      message: 'Guardian name (English) must be in English. Bangla characters are not allowed.',
+    }),
+  guardianBanglaName: z
+    .string()
+    .max(100)
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasEnglish(val), {
+      message: 'Guardian Bangla name must be in Bangla. English letters are not allowed.',
+    }),
   guardianRelationship: z.enum(GUARDIAN_RELATIONS).default('FATHER'),
   guardianPhone: z
     .string()
@@ -131,7 +160,13 @@ export const admissionSchema = z.object({
 
   // Optional secondary guardian
   hasSecondaryGuardian: z.boolean().default(false),
-  secondaryName: z.string().optional().or(z.literal('')),
+  secondaryName: z
+    .string()
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasBangla(val), {
+      message: 'Secondary guardian name must be in English.',
+    }),
   secondaryRelationship: z.string().optional().or(z.literal('')),
   secondaryPhone: z
     .string()
@@ -160,45 +195,79 @@ export type AdmissionInput = z.infer<typeof admissionSchema>;
 
 export const studentUpdateSchema = z.object({
   // Personal Info
-  name: z.string().min(2, 'Name is required').max(100).optional(),
-  banglaName: z.string().max(100).optional().or(z.literal('')),
+  name: z
+    .string()
+    .min(2, 'Name is required')
+    .max(100)
+    .optional()
+    .refine((val) => !val || !hasBangla(val), {
+      message: 'Student name (English) must be in English.',
+    }),
+  banglaName: z
+    .string()
+    .max(100)
+    .optional()
+    .nullable()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasEnglish(val), {
+      message: 'Student full name (Bangla) must be in Bangla.',
+    }),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
-  dob: z.string().optional().or(z.literal('')),
-  bloodGroup: z.string().optional().or(z.literal('')),
-  religion: z.string().optional().or(z.literal('')),
+  dob: z.string().optional().nullable().or(z.literal('')),
+  bloodGroup: z.string().optional().nullable().or(z.literal('')),
+  religion: z.string().optional().nullable().or(z.literal('')),
   phone: z
     .string()
     .optional()
+    .nullable()
     .or(z.literal(''))
     .refine((val) => !val || isValidBdPhone(val), {
       message: 'Invalid Bangladeshi mobile number',
     }),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
-  photoUrl: z.string().optional().or(z.literal('')),
-  address: z.string().optional().or(z.literal('')),
-  permanentAddress: z.string().optional().or(z.literal('')),
-  schoolName: z.string().optional().or(z.literal('')),
-  educationBoardId: z.string().optional().or(z.literal('')),
-  nidBirthReg: z.string().optional().or(z.literal('')),
-  sscRoll: z.string().optional().or(z.literal('')),
-  sscReg: z.string().optional().or(z.literal('')),
-  branchId: z.string().optional().or(z.literal('')),
+  email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
+  photoUrl: z.string().optional().nullable().or(z.literal('')),
+  address: z.string().optional().nullable().or(z.literal('')),
+  permanentAddress: z.string().optional().nullable().or(z.literal('')),
+  schoolName: z.string().optional().nullable().or(z.literal('')),
+  educationBoardId: z.string().optional().nullable().or(z.literal('')),
+  nidBirthReg: z.string().optional().nullable().or(z.literal('')),
+  sscRoll: z.string().optional().nullable().or(z.literal('')),
+  sscReg: z.string().optional().nullable().or(z.literal('')),
+  branchId: z.string().optional().nullable().or(z.literal('')),
   status: z.enum(STUDENT_STATUSES).optional(),
 
   // Primary Guardian
-  guardianId: z.string().optional(),
-  guardianName: z.string().min(2).max(100).optional(),
-  guardianBanglaName: z.string().max(100).optional().or(z.literal('')),
+  guardianId: z.string().optional().nullable(),
+  guardianName: z
+    .string()
+    .min(2)
+    .max(100)
+    .optional()
+    .refine((val) => !val || !hasBangla(val), {
+      message: 'Guardian name (English) must be in English.',
+    }),
+  guardianBanglaName: z
+    .string()
+    .max(100)
+    .optional()
+    .nullable()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasEnglish(val), {
+      message: 'Guardian name (Bangla) must be in Bangla.',
+    }),
   guardianRelationship: z.enum(GUARDIAN_RELATIONS).optional(),
   guardianPhone: z
     .string()
     .optional()
+    .nullable()
+    .or(z.literal(''))
     .refine((val) => !val || isValidBdPhone(val), {
       message: 'Invalid guardian mobile number',
     }),
   guardianAltPhone: z
     .string()
     .optional()
+    .nullable()
     .or(z.literal(''))
     .refine((val) => !val || isValidBdPhone(val), {
       message: 'Invalid alternative mobile number',
@@ -206,13 +275,14 @@ export const studentUpdateSchema = z.object({
   guardianWhatsapp: z
     .string()
     .optional()
+    .nullable()
     .or(z.literal(''))
     .refine((val) => !val || isValidBdPhone(val), {
       message: 'Invalid WhatsApp number',
     }),
-  guardianEmail: z.string().email('Invalid email').optional().or(z.literal('')),
-  guardianOccupation: z.string().optional().or(z.literal('')),
-  guardianAddress: z.string().optional().or(z.literal('')),
+  guardianEmail: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
+  guardianOccupation: z.string().optional().nullable().or(z.literal('')),
+  guardianAddress: z.string().optional().nullable().or(z.literal('')),
   preferredChannel: z.enum(COMMUNICATION_CHANNELS).optional(),
 
   // Academic enrollment update (optional: create new or update active)

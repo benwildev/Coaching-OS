@@ -28,7 +28,7 @@ export async function generateInvoiceNumber(tx: Prisma.TransactionClient, coachi
 }
 
 /** Recomputes an invoice's display status from its stored dueDate/dueAmount, without mutating it. */
-function computeDisplayStatus(status: string, dueDate: Date | null, dueAmount: number): string {
+export function computeDisplayStatus(status: string, dueDate: Date | null, dueAmount: number): string {
   if (status === 'CANCELLED' || status === 'DRAFT' || status === 'PAID') return status;
   if (dueDate && dueDate.getTime() < Date.now() && dueAmount > 0) return 'OVERDUE';
   return status;
@@ -40,7 +40,7 @@ function computeDisplayStatus(status: string, dueDate: Date | null, dueAmount: n
  * read, and harmless if raced by a concurrent payment (payment.service
  * recomputes status transactionally from fresh data on every payment).
  */
-async function syncOverdueStatuses(coachingCenterId: string, invoiceIds: string[]): Promise<void> {
+export async function syncOverdueStatuses(coachingCenterId: string, invoiceIds: string[]): Promise<void> {
   if (invoiceIds.length === 0) return;
   await prisma.feeInvoice.updateMany({
     where: {

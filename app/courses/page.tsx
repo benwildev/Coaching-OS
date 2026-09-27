@@ -7,6 +7,9 @@ import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
 import { COURSE_STATUSES } from '@/lib/validations/course';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface HierarchyProgram {
   id: string;
@@ -124,6 +127,18 @@ export default function CoursesPage() {
   const createCourse = async () => {
     if (!form.name.trim() || !form.code.trim() || !form.academicProgramId || !form.academicClassId) {
       showToast(lang === 'bn' ? 'নাম, কোড, প্রোগ্রাম ও শ্রেণি আবশ্যক' : 'Name, code, program and class are required');
+      return;
+    }
+    if (hasBangla(form.name)) {
+      showToast(lang === 'bn' ? 'কোর্সের নাম ইংরেজিতে লিখুন। বাংলা বর্ণ গ্রহণযোগ্য নয়।' : 'Course name must be in English.');
+      return;
+    }
+    if (hasBangla(form.code)) {
+      showToast(lang === 'bn' ? 'কোর্স কোড ইংরেজিতে লিখুন।' : 'Course code must be in English.');
+      return;
+    }
+    if (form.banglaName && hasEnglish(form.banglaName)) {
+      showToast(lang === 'bn' ? 'কোর্সের বাংলা নামে ইংরেজি বর্ণ গ্রহণযোগ্য নয়।' : 'Bangla name cannot contain English letters.');
       return;
     }
     setSaving(true);
@@ -310,15 +325,30 @@ export default function CoursesPage() {
 
             <div className="fld">
               <label>{dict.courses.name} *</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <EnglishInput
+                value={form.name}
+                onChange={(val) => setForm({ ...form, name: val })}
+                placeholder={lang === 'bn' ? 'ইংরেজিতে লিখুন (যেমন: Higher Math 1st Paper)' : 'e.g. Higher Math 1st Paper'}
+                required
+              />
             </div>
             <div className="fld">
               <label>{dict.courses.banglaName}</label>
-              <input value={form.banglaName} onChange={(e) => setForm({ ...form, banglaName: e.target.value })} />
+              <BanglaInput
+                value={form.banglaName}
+                onChange={(val) => setForm({ ...form, banglaName: val })}
+                placeholder={lang === 'bn' ? 'যেমন: উচ্চতর গণিত ১ম পত্র' : 'Optional Bangla name'}
+              />
             </div>
             <div className="fld">
               <label>{dict.courses.code} *</label>
-              <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} />
+              <EnglishInput
+                value={form.code}
+                uppercase
+                onChange={(val) => setForm({ ...form, code: val })}
+                placeholder="e.g. HMATH-101"
+                required
+              />
             </div>
             <div className="fld">
               <label>{dict.courses.description}</label>

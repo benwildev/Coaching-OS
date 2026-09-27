@@ -7,6 +7,9 @@ import Icon from '@/components/Icon';
 import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
 import { FEE_TYPES, FEE_FREQUENCIES } from '@/lib/validations/fee';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface Options {
   branches: Array<{ id: string; name: string; banglaName?: string | null }>;
@@ -48,6 +51,14 @@ export default function NewFeeStructurePage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (hasBangla(name)) {
+      setError(lang === 'bn' ? 'ফি কাঠামোর নাম ইংরেজিতে লিখুন' : 'Fee structure name must be in English');
+      return;
+    }
+    if (banglaName && hasEnglish(banglaName)) {
+      setError(lang === 'bn' ? 'ফি কাঠামোর বাংলা নাম শুধুমাত্র বাংলায় লিখুন' : 'Fee structure Bangla name must not contain English characters');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -99,12 +110,23 @@ export default function NewFeeStructurePage() {
 
         <div className="grid sm:grid-cols-2 gap-4">
           <div className="fld">
-            <label>{dict.fees.name}</label>
-            <input required value={name} onChange={(e) => setName(e.target.value)} />
+            <label>{dict.fees.name} *</label>
+            <EnglishInput
+              required
+              value={name}
+              onChange={(val) => setName(val)}
+              placeholder={dict.fees.namePlaceholder}
+            />
           </div>
           <div className="fld">
-            <label>{dict.fees.banglaName}</label>
-            <input value={banglaName} onChange={(e) => setBanglaName(e.target.value)} />
+            <label>
+              {dict.fees.banglaName} <span className="text-[11.5px] font-normal text-[#64748b]">({lang === 'bn' ? 'ঐচ্ছিক' : 'Optional'})</span>
+            </label>
+            <BanglaInput
+              value={banglaName}
+              onChange={(val) => setBanglaName(val)}
+              placeholder={dict.fees.banglaNamePlaceholder}
+            />
           </div>
         </div>
 

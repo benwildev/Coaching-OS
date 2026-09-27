@@ -13,6 +13,9 @@ import {
   BLOOD_GROUPS,
   isValidBdPhone,
 } from '@/lib/validations/student';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface AcademicOptions {
   sessions: Array<{ id: string; name: string; isCurrent: boolean }>;
@@ -169,6 +172,26 @@ export default function EditStudentPage() {
       return;
     }
 
+    if (hasBangla(form.name)) {
+      setError(lang === 'bn' ? 'শিক্ষার্থীর ইংরেজি নামে বাংলা বর্ণ গ্রহণযোগ্য নয়।' : 'Student name must be in English.');
+      return;
+    }
+
+    if (hasBangla(form.guardianName)) {
+      setError(lang === 'bn' ? 'অভিভাবকের ইংরেজি নামে বাংলা বর্ণ গ্রহণযোগ্য নয়।' : 'Guardian name must be in English.');
+      return;
+    }
+
+    if (form.banglaName && hasEnglish(form.banglaName)) {
+      setError(lang === 'bn' ? 'শিক্ষার্থীর বাংলা নামে ইংরেজি বর্ণ গ্রহণযোগ্য নয়।' : 'Student Bangla name cannot contain English letters.');
+      return;
+    }
+
+    if (form.guardianBanglaName && hasEnglish(form.guardianBanglaName)) {
+      setError(lang === 'bn' ? 'অভিভাবকের বাংলা নামে ইংরেজি বর্ণ গ্রহণযোগ্য নয়।' : 'Guardian Bangla name cannot contain English letters.');
+      return;
+    }
+
     if (form.phone && !isValidBdPhone(form.phone)) {
       setError(lang === 'bn' ? 'শিক্ষার্থীর সঠিক মোবাইল নম্বর দিন।' : 'Invalid student mobile number.');
       return;
@@ -228,7 +251,15 @@ export default function EditStudentPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update student');
+      if (!res.ok) {
+        if (data.details) {
+          const detailMsgs = Object.entries(data.details)
+            .map(([field, errs]: [string, any]) => `${field}: ${Array.isArray(errs) ? errs.join(', ') : errs}`)
+            .join('; ');
+          throw new Error(`${data.error || (lang === 'bn' ? 'তথ্য যাচাইকরণে ত্রুটি হয়েছে' : 'Validation failed')}: ${detailMsgs}`);
+        }
+        throw new Error(data.error || (lang === 'bn' ? 'শিক্ষার্থীর তথ্য আপডেট ব্যর্থ হয়েছে' : 'Failed to update student'));
+      }
 
       showToast(lang === 'bn' ? 'শিক্ষার্থীর তথ্য সংরক্ষিত হয়েছে!' : 'Student updated successfully!');
       router.push(`/students/${studentId}`);
@@ -315,12 +346,12 @@ export default function EditStudentPage() {
               <label className="block text-[13px] font-bold text-[#092f63] mb-1">
                 {dict.admission.fullName} *
               </label>
-              <input
-                type="text"
+              <EnglishInput
                 required
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(val) => setForm({ ...form, name: val })}
                 className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2 text-[13.5px] text-[#092f63]"
+                placeholder="e.g. Tanvir Ahmed"
               />
             </div>
 
@@ -328,11 +359,11 @@ export default function EditStudentPage() {
               <label className="block text-[13px] font-bold text-[#092f63] mb-1">
                 {dict.admission.banglaName}
               </label>
-              <input
-                type="text"
+              <BanglaInput
                 value={form.banglaName}
-                onChange={(e) => setForm({ ...form, banglaName: e.target.value })}
+                onChange={(val) => setForm({ ...form, banglaName: val })}
                 className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2 text-[13.5px] text-[#092f63]"
+                placeholder="যেমন: তানভীর আহমেদ"
               />
             </div>
 
@@ -443,12 +474,12 @@ export default function EditStudentPage() {
               <label className="block text-[13px] font-bold text-[#092f63] mb-1">
                 {dict.admission.guardianName} *
               </label>
-              <input
-                type="text"
+              <EnglishInput
                 required
                 value={form.guardianName}
-                onChange={(e) => setForm({ ...form, guardianName: e.target.value })}
+                onChange={(val) => setForm({ ...form, guardianName: val })}
                 className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2 text-[13.5px]"
+                placeholder="e.g. Md. Rafiqul Islam"
               />
             </div>
 

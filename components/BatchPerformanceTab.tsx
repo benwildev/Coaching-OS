@@ -48,7 +48,7 @@ export default function BatchPerformanceTab({ batchId }: { batchId: string }) {
       .then((res) => res.json())
       .then((resData) => {
         if (!cancelled && resData.success) {
-          setData(resData.performance);
+          setData(resData.stats);
         }
       })
       .catch((err) => console.error('Failed to load batch performance', err))

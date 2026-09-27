@@ -1,6 +1,7 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
 import { getCurrentDhakaDateOnly, getCurrentDhakaDayOfWeek, isScheduleActiveOnDate } from '@/lib/schedule';
+import { normalizeBdPhone } from '@/lib/validations/student';
 import type { TeacherInput, TeacherUpdateInput } from '@/lib/validations/teacher';
 import type { Prisma } from '@prisma/client';
 
@@ -60,7 +61,7 @@ export async function getTeachersList(coachingCenterId: string, params: TeacherF
     const todaysClassCount = t.classSchedules.filter(
       (s) => s.dayOfWeek === todayDow && isScheduleActiveOnDate(s, today)
     ).length;
-    const { classSchedules, ...rest } = t;
+    const { classSchedules: _classSchedules, ...rest } = t;
     return { ...rest, weeklyClassCount, todaysClassCount };
   });
 
@@ -122,6 +123,8 @@ export async function getTeacherByUserId(coachingCenterId: string, userId: strin
 
 export async function createTeacher(coachingCenterId: string, input: TeacherInput, actorId?: string) {
   const teacherCode = await generateTeacherCode(coachingCenterId);
+  const normalizedPhone = normalizeBdPhone(input.phone) || input.phone.trim();
+  const validJoiningDate = input.joiningDate && !isNaN(Date.parse(input.joiningDate)) ? new Date(input.joiningDate) : null;
 
   const teacher = await prisma.$transaction(async (tx) => {
     const created = await tx.teacher.create({
@@ -131,14 +134,14 @@ export async function createTeacher(coachingCenterId: string, input: TeacherInpu
         teacherCode,
         name: input.name.trim(),
         banglaName: input.banglaName?.trim() || null,
-        phone: input.phone.trim(),
+        phone: normalizedPhone,
         email: input.email?.trim() || null,
         designation: input.designation?.trim() || null,
         qualification: input.qualification?.trim() || null,
         bio: input.bio?.trim() || null,
         photoUrl: input.photoUrl?.trim() || null,
         status: input.status ?? 'ACTIVE',
-        joiningDate: input.joiningDate ? new Date(input.joiningDate) : null,
+        joiningDate: validJoiningDate,
       },
     });
 
@@ -166,9 +169,35 @@ export async function createTeacher(coachingCenterId: string, input: TeacherInpu
 
 async function generateTeacherCode(coachingCenterId: string): Promise<string> {
   const center = await prisma.coachingCenter.findUnique({ where: { id: coachingCenterId }, select: { code: true } });
-  const count = await prisma.teacher.count({ where: { coachingCenterId } });
   const prefix = (center?.code || 'TCH').trim().toUpperCase();
-  return `${prefix}-T-${String(count + 1).padStart(4, '0')}`;
+
+  // Find the latest teacher code for this center starting with this prefix
+  const latest = await prisma.teacher.findFirst({
+    where: {
+      coachingCenterId,
+      teacherCode: { startsWith: `${prefix}-T-` },
+    },
+    orderBy: { teacherCode: 'desc' },
+    select: { teacherCode: true },
+  });
+
+  let nextNum = 1;
+  if (latest?.teacherCode) {
+    const parts = latest.teacherCode.split('-');
+    const parsed = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(parsed)) {
+      nextNum = parsed + 1;
+    }
+  }
+
+  // Ensure collision safety against any existing codes
+  let candidate = `${prefix}-T-${String(nextNum).padStart(4, '0')}`;
+  while (await prisma.teacher.findUnique({ where: { coachingCenterId_teacherCode: { coachingCenterId, teacherCode: candidate } } })) {
+    nextNum++;
+    candidate = `${prefix}-T-${String(nextNum).padStart(4, '0')}`;
+  }
+
+  return candidate;
 }
 
 export async function updateTeacher(
@@ -180,6 +209,11 @@ export async function updateTeacher(
   const existing = await prisma.teacher.findFirst({ where: { id: teacherId, coachingCenterId } });
   if (!existing) throw new Error('TEACHER_NOT_FOUND');
 
+  const normalizedPhone = input.phone ? (normalizeBdPhone(input.phone) || input.phone.trim()) : undefined;
+  const validJoiningDate = input.joiningDate !== undefined
+    ? (input.joiningDate && !isNaN(Date.parse(input.joiningDate)) ? new Date(input.joiningDate) : null)
+    : undefined;
+
   const teacher = await prisma.$transaction(async (tx) => {
     const updated = await tx.teacher.update({
       where: { id: teacherId },
@@ -187,14 +221,14 @@ export async function updateTeacher(
         branchId: input.branchId !== undefined ? input.branchId || null : existing.branchId,
         name: input.name?.trim() ?? existing.name,
         banglaName: input.banglaName !== undefined ? input.banglaName?.trim() || null : existing.banglaName,
-        phone: input.phone?.trim() ?? existing.phone,
+        phone: normalizedPhone ?? existing.phone,
         email: input.email !== undefined ? input.email?.trim() || null : existing.email,
         designation: input.designation !== undefined ? input.designation?.trim() || null : existing.designation,
         qualification: input.qualification !== undefined ? input.qualification?.trim() || null : existing.qualification,
         bio: input.bio !== undefined ? input.bio?.trim() || null : existing.bio,
         photoUrl: input.photoUrl !== undefined ? input.photoUrl?.trim() || null : existing.photoUrl,
         status: input.status ?? existing.status,
-        joiningDate: input.joiningDate !== undefined ? (input.joiningDate ? new Date(input.joiningDate) : null) : existing.joiningDate,
+        joiningDate: validJoiningDate !== undefined ? validJoiningDate : existing.joiningDate,
       },
     });
 

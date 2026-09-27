@@ -307,3 +307,55 @@ button:disabled {
 .print-only {
   display: none;
 }
+
+/* ==========================================
+   REPORTS (Phase 10) — tables & print layout
+   ========================================== */
+.report-table th, .report-table td {
+  text-align: left;
+  vertical-align: top;
+}
+.report-table th.ra, .report-table td.ra {
+  text-align: right;
+}
+.report-print-header {
+  display: none;
+}
+@media print {
+  .report-print-header {
+    display: block !important;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #000;
+    color: #000;
+  }
+  .report-root {
+    gap: 10px !important;
+    max-width: none !important;
+  }
+  .report-section {
+    box-shadow: none !important;
+    border: 1px solid #cfd6df !important;
+    border-radius: 0 !important;
+    break-inside: auto;
+  }
+  .report-section .overflow-x-auto {
+    overflow: visible !important;
+  }
+  .report-table {
+    font-size: 9.5pt;
+  }
+  .report-table th, .report-table td {
+    padding: 4px 6px !important;
+    color: #000 !important;
+  }
+  .report-table thead {
+    display: table-header-group;
+  }
+  .report-table tr {
+    break-inside: avoid;
+  }
+  .report-chart {
+    break-inside: avoid;
+  }
+}

@@ -13,6 +13,9 @@ import {
   BLOOD_GROUPS,
   isValidBdPhone,
 } from '@/lib/validations/student';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface HierarchyData {
   sessions: Array<{ id: string; name: string; banglaName?: string | null; isCurrent: boolean }>;
@@ -197,6 +200,14 @@ export default function NewStudentPage() {
         setError(lang === 'bn' ? 'শিক্ষার্থীর ইংরেজি নাম আবশ্যক।' : 'Student English name is required.');
         return false;
       }
+      if (hasBangla(form.name)) {
+        setError(lang === 'bn' ? 'শিক্ষার্থীর ইংরেজি নামে বাংলা বর্ণ গ্রহণযোগ্য নয়।' : 'Student English name cannot contain Bangla characters.');
+        return false;
+      }
+      if (form.banglaName && hasEnglish(form.banglaName)) {
+        setError(lang === 'bn' ? 'শিক্ষার্থীর বাংলা নামে ইংরেজি বর্ণ গ্রহণযোগ্য নয়।' : 'Student Bangla name cannot contain English letters.');
+        return false;
+      }
       if (form.phone && !isValidBdPhone(form.phone)) {
         setError(
           lang === 'bn'
@@ -210,6 +221,14 @@ export default function NewStudentPage() {
     if (step === 2) {
       if (!form.guardianName.trim()) {
         setError(lang === 'bn' ? 'অভিভাবকের নাম আবশ্যক।' : 'Guardian name is required.');
+        return false;
+      }
+      if (hasBangla(form.guardianName)) {
+        setError(lang === 'bn' ? 'অভিভাবকের ইংরেজি নামে বাংলা বর্ণ গ্রহণযোগ্য নয়।' : 'Guardian English name cannot contain Bangla characters.');
+        return false;
+      }
+      if (form.hasSecondaryGuardian && form.secondaryName && hasBangla(form.secondaryName)) {
+        setError(lang === 'bn' ? 'দ্বিতীয় অভিভাবকের ইংরেজি নামে বাংলা বর্ণ গ্রহণযোগ্য নয়।' : 'Secondary guardian English name cannot contain Bangla characters.');
         return false;
       }
       if (!form.guardianPhone.trim() || !isValidBdPhone(form.guardianPhone)) {
@@ -387,11 +406,10 @@ export default function NewStudentPage() {
                     <label className="block text-[13px] font-bold text-[#092f63] mb-1.5">
                       {dict.admission.fullName} <span className="text-rose-500">*</span>
                     </label>
-                    <input
-                      type="text"
+                    <EnglishInput
                       required
                       value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      onChange={(val) => setForm({ ...form, name: val })}
                       placeholder="e.g. Tanvir Ahmed"
                       className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] outline-none focus:border-[#063b78]"
                     />
@@ -402,10 +420,9 @@ export default function NewStudentPage() {
                     <label className="block text-[13px] font-bold text-[#092f63] mb-1.5">
                       {dict.admission.banglaName}
                     </label>
-                    <input
-                      type="text"
+                    <BanglaInput
                       value={form.banglaName || ''}
-                      onChange={(e) => setForm({ ...form, banglaName: e.target.value })}
+                      onChange={(val) => setForm({ ...form, banglaName: val })}
                       placeholder="যেমন: তানভীর আহমেদ"
                       className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] outline-none focus:border-[#063b78]"
                     />
@@ -545,11 +562,10 @@ export default function NewStudentPage() {
                     <label className="block text-[13px] font-bold text-[#092f63] mb-1.5">
                       {dict.admission.guardianName} <span className="text-rose-500">*</span>
                     </label>
-                    <input
-                      type="text"
+                    <EnglishInput
                       required
                       value={form.guardianName}
-                      onChange={(e) => setForm({ ...form, guardianName: e.target.value })}
+                      onChange={(val) => setForm({ ...form, guardianName: val })}
                       placeholder="e.g. Md. Rafiqul Islam"
                       className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] outline-none focus:border-[#063b78]"
                     />

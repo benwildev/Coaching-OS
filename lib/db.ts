@@ -7,10 +7,15 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 export function createPrismaClient(): PrismaClient {
-  const connectionString = process.env.DATABASE_URL;
+  let connectionString = process.env.DATABASE_URL;
 
   if (!connectionString) {
     throw new Error('DATABASE_URL is not set. Please ensure .env contains a valid DATABASE_URL.');
+  }
+
+  // Prevent pg / pg-connection-string security warning by ensuring verify-full semantics
+  if (connectionString.includes('sslmode=require') && !connectionString.includes('uselibpqcompat')) {
+    connectionString = connectionString.replace('sslmode=require', 'sslmode=verify-full');
   }
 
   const adapter = new PrismaPg({ connectionString });

@@ -8,6 +8,9 @@ import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
 import { COURSE_STATUSES } from '@/lib/validations/course';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface SubjectOption {
   id: string;
@@ -109,6 +112,14 @@ export default function CourseDetailPage() {
   }, [load]);
 
   const saveDetails = async () => {
+    if (editForm.name && hasBangla(editForm.name)) {
+      showToast(lang === 'bn' ? 'কোর্সের নাম ইংরেজিতে লিখুন' : 'Course name must be in English');
+      return;
+    }
+    if (editForm.banglaName && hasEnglish(editForm.banglaName)) {
+      showToast(lang === 'bn' ? 'কোর্সের বাংলা নাম শুধুমাত্র বাংলায় লিখুন' : 'Course Bangla name must not contain English characters');
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/courses/${courseId}`, {
@@ -214,11 +225,11 @@ export default function CourseDetailPage() {
         <div className="grid md:grid-cols-2 gap-4">
           <div className="fld">
             <label>{dict.courses.name}</label>
-            <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+            <EnglishInput value={editForm.name} onChange={(val) => setEditForm({ ...editForm, name: val })} />
           </div>
           <div className="fld">
             <label>{dict.courses.banglaName}</label>
-            <input value={editForm.banglaName} onChange={(e) => setEditForm({ ...editForm, banglaName: e.target.value })} />
+            <BanglaInput value={editForm.banglaName || ''} onChange={(val) => setEditForm({ ...editForm, banglaName: val })} />
           </div>
           <div className="fld">
             <label>{dict.courses.code}</label>

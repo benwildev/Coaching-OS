@@ -55,18 +55,46 @@ export default function StudentFinancialSummary({ studentId }: { studentId: stri
       ) : !summary ? (
         <p className="text-[13px] text-[#64748b] italic">{dict.fees.noFeeAssignments}</p>
       ) : (
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="p-3 rounded-xl bg-[#f8fafc] text-center">
-            <div className="text-[10.5px] font-bold text-[#64748b] uppercase">{dict.fees.totalBilled}</div>
-            <div className="text-[15px] font-extrabold text-[#092f63]">{formatBDT(summary.totalBilled, lang)}</div>
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="p-3 rounded-xl bg-[#f8fafc] text-center border border-[#edf2f7]">
+              <div className="text-[10.5px] font-bold text-[#64748b] uppercase">{dict.fees.totalBilled}</div>
+              <div className="text-[15px] font-extrabold text-[#092f63]">{formatBDT(summary.totalBilled, lang)}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-emerald-50 text-center border border-emerald-100">
+              <div className="text-[10.5px] font-bold text-emerald-700 uppercase">{dict.fees.totalPaid}</div>
+              <div className="text-[15px] font-extrabold text-emerald-600">{formatBDT(summary.totalPaid, lang)}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-rose-50 text-center col-span-2 border border-rose-100">
+              <div className="text-[10.5px] font-bold text-rose-700 uppercase">{dict.fees.totalDue}</div>
+              <div className="text-[17px] font-extrabold text-rose-600">{formatBDT(summary.totalDue, lang)}</div>
+            </div>
           </div>
-          <div className="p-3 rounded-xl bg-emerald-50 text-center">
-            <div className="text-[10.5px] font-bold text-emerald-700 uppercase">{dict.fees.totalPaid}</div>
-            <div className="text-[15px] font-extrabold text-emerald-600">{formatBDT(summary.totalPaid, lang)}</div>
-          </div>
-          <div className="p-3 rounded-xl bg-rose-50 text-center col-span-2">
-            <div className="text-[10.5px] font-bold text-rose-700 uppercase">{dict.fees.totalDue}</div>
-            <div className="text-[17px] font-extrabold text-rose-600">{formatBDT(summary.totalDue, lang)}</div>
+
+          {summary.totalBilled === 0 && (
+            <div className="rounded-xl bg-blue-50/70 border border-blue-200/70 p-3 text-[12px] text-[#063b78] leading-relaxed">
+              💡 {lang === 'bn'
+                ? 'এই শিক্ষার্থীর নামে এখনো কোনো চালান তৈরি করা হয়নি। ফি কাঠামো থেকে সরাসরি বিল করতে নিচের বাটনে ক্লিক করুন।'
+                : 'No invoices have been issued for this student yet. Click below to bill them from fee structures.'}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 pt-1">
+            <Link
+              href={`/fees/invoices/new?studentId=${studentId}`}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#063b78] hover:bg-[#052e5e] text-white py-2 text-[12.5px] font-bold transition-colors shadow-2xs"
+            >
+              <Icon name="plus" size={14} />
+              <span>{dict.fees.createInvoice}</span>
+            </Link>
+            <Link
+              href={`/fees/student/${studentId}`}
+              className="inline-flex items-center justify-center gap-1 rounded-xl border border-[#dce5f0] bg-[#f8fafc] hover:bg-white text-[#092f63] px-3 py-2 text-[12.5px] font-semibold transition-colors"
+              title={dict.fees.viewFullProfile}
+            >
+              <Icon name="external" size={13} />
+              <span>{dict.fees.assignFee}</span>
+            </Link>
           </div>
         </div>
       )}

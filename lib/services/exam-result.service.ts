@@ -3,7 +3,8 @@ import { recordAuditLog } from './audit.service';
 import { notifyStudentGuardians } from './guardian-notify.service';
 import { EXAM_STATUS } from '@/lib/validations/exam';
 import type { ResultEntryInput, ResultFilterParams } from '@/lib/validations/result';
-import type { SessionUser } from '@/lib/auth/session';
+import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import type { Prisma } from '@prisma/client';
 import {
   getCoachingCenterGradingConfig,
   calculateSubjectGrade,
@@ -99,6 +100,43 @@ export async function getTeacherAuthorizedSubjectIds(
 }
 
 /**
+ * Result-read scope for a TEACHER, as a Result filter: exactly the rule
+ * assertTeacherSubjectAccess applies to marks entry — a batch exam's subject
+ * requires an ACTIVE BatchTeacherAssignment for that (batch, subject); a
+ * batch-less (class-wide) exam's subject requires a TeacherSubject record.
+ * Returns null for OWNER/ADMIN/STAFF (no teacher restriction). A teacher
+ * with no profile/assignments gets a filter that matches nothing.
+ */
+export async function getTeacherResultAccessWhere(
+  coachingCenterId: string,
+  user: SessionUser
+): Promise<Prisma.ResultWhereInput | null> {
+  if (user.role !== 'TEACHER') return null;
+
+  const teacher = await prisma.teacher.findFirst({
+    where: { coachingCenterId, userId: user.userId },
+    select: { id: true },
+  });
+  if (!teacher) return { id: { in: [] } };
+
+  const [assignments, teacherSubjects] = await Promise.all([
+    prisma.batchTeacherAssignment.findMany({
+      where: { coachingCenterId, teacherId: teacher.id, status: 'ACTIVE' },
+      select: { batchId: true, subjectId: true },
+    }),
+    prisma.teacherSubject.findMany({ where: { teacherId: teacher.id }, select: { subjectId: true } }),
+  ]);
+
+  const or: Prisma.ResultWhereInput[] = assignments.map((a) => ({
+    examSubject: { subjectId: a.subjectId, exam: { batchId: a.batchId } },
+  }));
+  if (teacherSubjects.length) {
+    or.push({ examSubject: { subjectId: { in: teacherSubjects.map((t) => t.subjectId) }, exam: { batchId: null } } });
+  }
+  return or.length ? { OR: or } : { id: { in: [] } };
+}
+
+/**
  * Get results and marks entry roster for a specific ExamSubject
  */
 export async function getExamSubjectResults(
@@ -144,6 +182,9 @@ export async function getExamSubjectResults(
   if (!examSubject) {
     throw new Error('EXAM_SUBJECT_NOT_FOUND');
   }
+
+  // Branch-scoped STAFF/TEACHER may only access their own branch's exams.
+  assertBranchAccess(user, examSubject.exam.branchId);
 
   // Teacher authorization check
   await assertTeacherSubjectAccess(
@@ -264,6 +305,9 @@ export async function bulkSaveSubjectResults(
   if (!examSubject) {
     throw new Error('EXAM_SUBJECT_NOT_FOUND');
   }
+
+  // Branch-scoped STAFF/TEACHER may only access their own branch's exams.
+  assertBranchAccess(user, examSubject.exam.branchId);
 
   // Teacher authorization check
   await assertTeacherSubjectAccess(
@@ -606,7 +650,9 @@ export async function verifyAndPublishExam(
 export async function getStudentResultHistory(
   coachingCenterId: string,
   studentId: string,
-  isStudentPortal: boolean = false
+  isStudentPortal: boolean = false,
+  /** Extra caller-scope restriction (e.g. getTeacherResultAccessWhere); never loosens the tenant filter. */
+  accessWhere: Prisma.ResultWhereInput | null = null
 ) {
   const where: any = {
     studentId,
@@ -617,6 +663,7 @@ export async function getStudentResultHistory(
       },
     },
   };
+  if (accessWhere) where.AND = [accessWhere];
 
   const results = await prisma.result.findMany({
     where,
@@ -807,7 +854,12 @@ export async function getBatchPerformanceStats(coachingCenterId: string, batchId
 /**
  * Query results list with server-side pagination and multi-dimensional filters
  */
-export async function getResultsList(coachingCenterId: string, params: ResultFilterParams) {
+export async function getResultsList(
+  coachingCenterId: string,
+  params: ResultFilterParams,
+  /** Extra caller-scope restriction (e.g. getTeacherResultAccessWhere); never loosens the tenant filter. */
+  accessWhere: Prisma.ResultWhereInput | null = null
+) {
   const page = Math.max(1, Number(params.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
   const skip = (page - 1) * pageSize;
@@ -819,6 +871,7 @@ export async function getResultsList(coachingCenterId: string, params: ResultFil
       },
     },
   };
+  if (accessWhere) where.AND = [accessWhere];
 
   if (params.examId) where.examSubject.examId = params.examId;
   if (params.studentId) where.studentId = params.studentId;

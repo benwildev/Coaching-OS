@@ -11,6 +11,9 @@ import { useApp } from '@/lib/store';
 import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 import { BATCH_STATUSES } from '@/lib/validations/batch';
 import { DAY_LABELS, formatTimeRange } from '@/lib/schedule';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 type Tab = 'overview' | 'students' | 'subjects' | 'teachers' | 'routine' | 'room' | 'attendance' | 'financial' | 'performance' | 'history';
 
@@ -117,6 +120,14 @@ export default function BatchDetailPage() {
   }, [studentQuery, assignModalOpen, batch]);
 
   const saveOverview = async () => {
+    if (overviewForm.name && hasBangla(overviewForm.name)) {
+      showToast(lang === 'bn' ? 'ব্যাচের নাম ইংরেজিতে লিখুন' : 'Batch name must be in English');
+      return;
+    }
+    if (overviewForm.banglaName && hasEnglish(overviewForm.banglaName)) {
+      showToast(lang === 'bn' ? 'ব্যাচের বাংলা নাম শুধুমাত্র বাংলায় লিখুন' : 'Batch Bangla name must not contain English characters');
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/batches/${batchId}`, {
@@ -331,11 +342,11 @@ export default function BatchDetailPage() {
           <div className="grid md:grid-cols-2 gap-4">
             <div className="fld">
               <label>{dict.batches.name}</label>
-              <input value={overviewForm.name} onChange={(e) => setOverviewForm({ ...overviewForm, name: e.target.value })} />
+              <EnglishInput value={overviewForm.name} onChange={(val) => setOverviewForm({ ...overviewForm, name: val })} />
             </div>
             <div className="fld">
               <label>{dict.batches.banglaName}</label>
-              <input value={overviewForm.banglaName} onChange={(e) => setOverviewForm({ ...overviewForm, banglaName: e.target.value })} />
+              <BanglaInput value={overviewForm.banglaName || ''} onChange={(val) => setOverviewForm({ ...overviewForm, banglaName: val })} />
             </div>
             <div className="fld">
               <label>{dict.batches.code}</label>

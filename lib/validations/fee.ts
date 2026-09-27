@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasBangla, hasEnglish } from '../format';
 
 export const FEE_TYPES = [
   'ADMISSION',
@@ -18,8 +19,21 @@ export const FEE_FREQUENCIES = ['ONE_TIME', 'MONTHLY', 'QUARTERLY', 'HALF_YEARLY
 export const FEE_ASSIGNMENT_STATUSES = ['PENDING', 'PARTIAL', 'PAID', 'WAIVED', 'CANCELLED'] as const;
 
 export const feeStructureSchema = z.object({
-  name: z.string().min(2, 'Fee structure name is required').max(150),
-  banglaName: z.string().max(150).optional().or(z.literal('')),
+  name: z
+    .string()
+    .min(2, 'Fee structure name is required')
+    .max(150)
+    .refine((val) => !hasBangla(val), {
+      message: 'Fee structure name (English) must be in English. Bangla characters are not allowed.',
+    }),
+  banglaName: z
+    .string()
+    .max(150)
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasEnglish(val), {
+      message: 'Fee structure name (Bangla) must be in Bangla. English letters are not allowed.',
+    }),
   code: z.string().max(40).optional().or(z.literal('')),
   description: z.string().max(2000).optional().or(z.literal('')),
   feeType: z.enum(FEE_TYPES).default('MONTHLY'),

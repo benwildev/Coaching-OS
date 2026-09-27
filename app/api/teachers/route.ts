@@ -33,8 +33,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const validated = teacherSchema.safeParse(body);
     if (!validated.success) {
+      const fieldErrors = validated.error.flatten().fieldErrors;
+      const firstMsg = Object.values(fieldErrors).flat()[0] || 'Validation failed';
       return NextResponse.json(
-        { success: false, error: 'Validation failed', details: validated.error.flatten().fieldErrors },
+        { success: false, error: firstMsg, details: fieldErrors },
         { status: 400 }
       );
     }

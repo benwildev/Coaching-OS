@@ -582,7 +582,7 @@ export async function getAttendanceHistory(coachingCenterId: string, params: Att
 // un-recorded class is a data-entry gap, not evidence the student was
 // absent.
 
-function computePercentage(counts: { present: number; absent: number; late: number }): number {
+export function computePercentage(counts: { present: number; absent: number; late: number }): number {
   const denominator = counts.present + counts.absent + counts.late;
   if (denominator === 0) return 0;
   return Math.round(((counts.present + counts.late) / denominator) * 1000) / 10; // one decimal place

@@ -8,45 +8,33 @@ import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 
+/** One row as returned by GET /api/results (exam-result.service getResultsList). */
 interface ResultRow {
   id: string;
+  studentId: string;
+  studentName: string;
+  studentBanglaName: string | null;
+  studentIdCode: string;
+  examId: string;
+  examTitle: string;
+  examBanglaTitle: string | null;
+  examType: string;
+  examStatus: string;
+  startDate: string | null;
+  batchName: string | null;
+  className: string;
+  subjectName: string;
+  subjectBanglaName: string | null;
+  totalMarks: number;
+  passMarks: number;
   marksObtained: number | null;
-  status: string;
+  highestMarks: number | null;
   grade: string | null;
   gpa: number | null;
   isPassed: boolean | null;
   rank: number | null;
-  highestMarks: number | null;
+  status: string;
   remarks: string | null;
-  student: {
-    id: string;
-    studentIdCode: string;
-    name: string;
-    banglaName?: string | null;
-    enrollments?: Array<{ rollNumber?: string | null }>;
-  };
-  examSubject: {
-    id: string;
-    totalMarks: number;
-    passMarks: number;
-    subject: {
-      id: string;
-      name: string;
-      banglaName?: string | null;
-      code?: string | null;
-    };
-    exam: {
-      id: string;
-      title: string;
-      banglaTitle?: string | null;
-      examType: string;
-      status: string;
-      startDate?: string | null;
-      academicSession?: { name: string };
-      academicClass?: { name: string };
-      batch?: { name: string };
-    };
-  };
 }
 
 function ResultsContent() {
@@ -341,7 +329,6 @@ function ResultsContent() {
                   <th className="px-4 py-3">#</th>
                   <th className="px-4 py-3">{lang === 'bn' ? 'শিক্ষার্থী' : 'Student'}</th>
                   <th className="px-4 py-3">{lang === 'bn' ? 'আইডি' : 'Student ID'}</th>
-                  <th className="px-4 py-3">{lang === 'bn' ? 'রোল' : 'Roll'}</th>
                   <th className="px-4 py-3">{lang === 'bn' ? 'পরীক্ষা' : 'Exam'}</th>
                   <th className="px-4 py-3">{lang === 'bn' ? 'বিষয়' : 'Subject'}</th>
                   <th className="px-4 py-3 text-right">{lang === 'bn' ? 'প্রাপ্ত / পূর্ণমান' : 'Marks / Total'}</th>
@@ -354,8 +341,7 @@ function ResultsContent() {
               </thead>
               <tbody className="divide-y divide-[#edf2f7]">
                 {results.map((r, index) => {
-                  const roll = r.student.enrollments?.[0]?.rollNumber;
-                  const totalMarks = r.examSubject.totalMarks;
+                  const totalMarks = r.totalMarks;
                   const marks = r.marksObtained;
                   const pct = marks !== null && totalMarks > 0 ? ((marks / totalMarks) * 100).toFixed(1) : '—';
 
@@ -366,26 +352,28 @@ function ResultsContent() {
                       </td>
                       <td className="px-4 py-3 font-bold text-[#092f63]">
                         <Link
-                          href={`/students/${r.student.id}`}
+                          href={`/students/${r.studentId}`}
                           className="hover:text-[#063b78] hover:underline print:no-underline"
                         >
-                          {lang === 'bn' && r.student.banglaName ? r.student.banglaName : r.student.name}
+                          {lang === 'bn' && r.studentBanglaName ? r.studentBanglaName : r.studentName}
                         </Link>
                       </td>
-                      <td className="px-4 py-3 font-mono text-[#063b78]">{r.student.studentIdCode}</td>
-                      <td className="px-4 py-3 font-semibold text-[#092f63]">{roll || '—'}</td>
+                      <td className="px-4 py-3 font-mono text-[#063b78]">{r.studentIdCode}</td>
                       <td className="px-4 py-3">
                         <Link
-                          href={`/exams/${r.examSubject.exam.id}`}
+                          href={`/exams/${r.examId}`}
                           className="font-medium text-[#092f63] hover:text-[#063b78] hover:underline print:no-underline"
                         >
-                          {r.examSubject.exam.title}
+                          {lang === 'bn' && r.examBanglaTitle ? r.examBanglaTitle : r.examTitle}
                         </Link>
+                        {r.examStatus !== 'PUBLISHED' && (
+                          <span className="ml-1.5 align-middle">
+                            <StatusBadge status={r.examStatus} dictKey="examStatus" size="sm" />
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 font-semibold text-[#092f63]">
-                        {lang === 'bn' && r.examSubject.subject.banglaName
-                          ? r.examSubject.subject.banglaName
-                          : r.examSubject.subject.name}
+                        {lang === 'bn' && r.subjectBanglaName ? r.subjectBanglaName : r.subjectName}
                       </td>
                       <td className="px-4 py-3 text-right">
                         {r.status === 'ABSENT' ? (

@@ -2,10 +2,12 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm, useWatch } from 'react-hook-form';
+import { useForm, useWatch, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 import Icon from './Icon';
+import EnglishInput from './EnglishInput';
+import BanglaInput from './BanglaInput';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, pickLocalized } from '@/lib/i18n';
 import { useQuestionBankOptions } from '@/lib/hooks/useQuestionBankOptions';
@@ -95,12 +97,34 @@ export default function NoticeForm({ initial }: { initial?: NoticeFormInitial })
       <section className="card p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="fld">
           <label htmlFor="ntc-title">{nDict.englishTitle} *</label>
-          <input id="ntc-title" {...register('title')} />
+          <Controller
+            control={control}
+            name="title"
+            render={({ field }) => (
+              <EnglishInput
+                id="ntc-title"
+                value={field.value}
+                onChange={field.onChange}
+              />
+            )}
+          />
           {err(errors.title?.message)}
         </div>
         <div className="fld">
           <label htmlFor="ntc-title-bn">{nDict.banglaTitle}</label>
-          <input id="ntc-title-bn" className="font-bangla" {...register('banglaTitle')} />
+          <Controller
+            control={control}
+            name="banglaTitle"
+            render={({ field }) => (
+              <BanglaInput
+                id="ntc-title-bn"
+                className="font-bangla"
+                value={field.value ?? ''}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          {err(errors.banglaTitle?.message)}
         </div>
         <div className="fld sm:col-span-2">
           <label htmlFor="ntc-content">{nDict.content} *</label>
@@ -109,7 +133,21 @@ export default function NoticeForm({ initial }: { initial?: NoticeFormInitial })
         </div>
         <div className="fld sm:col-span-2">
           <label htmlFor="ntc-content-bn">{nDict.banglaContent}</label>
-          <textarea id="ntc-content-bn" rows={5} className="font-bangla" {...register('banglaContent')} />
+          <Controller
+            control={control}
+            name="banglaContent"
+            render={({ field }) => (
+              <BanglaInput
+                as="textarea"
+                rows={5}
+                id="ntc-content-bn"
+                className="font-bangla"
+                value={field.value ?? ''}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          {err(errors.banglaContent?.message)}
         </div>
       </section>
 

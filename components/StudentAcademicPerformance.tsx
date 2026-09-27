@@ -6,35 +6,25 @@ import Icon from './Icon';
 import { useApp } from '@/lib/store';
 import { formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 
-interface StudentExamResult {
-  id: string;
-  marksObtained: number | null;
+/** One exam as returned by GET /api/results/student/[id] (`history`, exam-result.service getStudentResultHistory). */
+interface HistoryExam {
+  examId: string;
+  title: string;
+  banglaTitle: string | null;
+  examType: string;
   status: string;
-  grade: string | null;
-  gpa: number | null;
-  isPassed: boolean | null;
-  rank: number | null;
-  highestMarks: number | null;
-  remarks: string | null;
-  examSubject: {
-    id: string;
+  startDate: string | null;
+  subjects: Array<{
+    subjectId: string;
+    subjectName: string;
+    subjectBanglaName: string | null;
+    status: string;
+    marksObtained: number | null;
     totalMarks: number;
-    passMarks: number;
-    subject: {
-      id: string;
-      name: string;
-      banglaName?: string | null;
-      code?: string | null;
-    };
-    exam: {
-      id: string;
-      title: string;
-      banglaTitle?: string | null;
-      examType: string;
-      startDate?: string | null;
-      publishedAt?: string | null;
-    };
-  };
+    grade: string | null;
+    gpa: number | null;
+    isPassed: boolean | null;
+  }>;
 }
 
 interface StudentExamGroup {
@@ -63,7 +53,6 @@ export default function StudentAcademicPerformance({ studentId }: { studentId: s
   const { lang } = useApp();
 
   const [loading, setLoading] = useState(true);
-  const [results, setResults] = useState<StudentExamResult[]>([]);
   const [examGroups, setExamGroups] = useState<StudentExamGroup[]>([]);
   const [stats, setStats] = useState({
     totalExams: 0,
@@ -80,56 +69,49 @@ export default function StudentAcademicPerformance({ studentId }: { studentId: s
       .then((res) => res.json())
       .then((data) => {
         if (cancelled || !data.success) return;
-        const resList: StudentExamResult[] = data.results || [];
-        setResults(resList);
+        const history: HistoryExam[] = data.history || [];
 
-        // Group by exam
+        // Same per-exam / overall aggregation as before, fed from the API's grouped `history`.
         const map = new Map<string, StudentExamGroup>();
         let overallObtained = 0;
         let overallTotal = 0;
 
-        resList.forEach((r) => {
-          const ex = r.examSubject.exam;
-          const eId = ex.id;
-          if (!map.has(eId)) {
-            map.set(eId, {
-              examId: eId,
-              examTitle: ex.title,
-              banglaTitle: ex.banglaTitle,
-              examType: ex.examType,
-              examDate: ex.startDate,
-              totalMarks: 0,
-              obtainedMarks: 0,
-              percentage: 0,
-              isPassed: true,
-              subjectsCount: 0,
-              subjects: [],
+        history.forEach((ex) => {
+          const group: StudentExamGroup = {
+            examId: ex.examId,
+            examTitle: ex.title,
+            banglaTitle: ex.banglaTitle,
+            examType: ex.examType,
+            examDate: ex.startDate,
+            totalMarks: 0,
+            obtainedMarks: 0,
+            percentage: 0,
+            isPassed: true,
+            subjectsCount: 0,
+            subjects: [],
+          };
+          ex.subjects.forEach((r) => {
+            group.totalMarks += r.totalMarks;
+            if (r.marksObtained !== null && r.status === 'PRESENT') {
+              group.obtainedMarks += Number(r.marksObtained);
+              overallObtained += Number(r.marksObtained);
+              overallTotal += r.totalMarks;
+            }
+            if (r.isPassed === false || r.status === 'ABSENT') {
+              group.isPassed = false;
+            }
+            group.subjectsCount += 1;
+            group.subjects.push({
+              subjectName: lang === 'bn' && r.subjectBanglaName ? r.subjectBanglaName : r.subjectName,
+              marksObtained: r.marksObtained,
+              totalMarks: r.totalMarks,
+              grade: r.grade,
+              gpa: r.gpa,
+              isPassed: r.isPassed,
+              status: r.status,
             });
-          }
-
-          const group = map.get(eId)!;
-          group.totalMarks += r.examSubject.totalMarks;
-          if (r.marksObtained !== null && r.status === 'PRESENT') {
-            group.obtainedMarks += Number(r.marksObtained);
-            overallObtained += Number(r.marksObtained);
-            overallTotal += r.examSubject.totalMarks;
-          }
-          if (r.isPassed === false || r.status === 'ABSENT') {
-            group.isPassed = false;
-          }
-          group.subjectsCount += 1;
-          group.subjects.push({
-            subjectName:
-              lang === 'bn' && r.examSubject.subject.banglaName
-                ? r.examSubject.subject.banglaName
-                : r.examSubject.subject.name,
-            marksObtained: r.marksObtained,
-            totalMarks: r.examSubject.totalMarks,
-            grade: r.grade,
-            gpa: r.gpa,
-            isPassed: r.isPassed,
-            status: r.status,
           });
+          map.set(ex.examId, group);
         });
 
         // Compute percentages
@@ -187,7 +169,7 @@ export default function StudentAcademicPerformance({ studentId }: { studentId: s
             {lang === 'bn' ? 'পরীক্ষার ফলাফল লোড হচ্ছে…' : 'Loading performance records…'}
           </p>
         </div>
-      ) : results.length === 0 ? (
+      ) : examGroups.length === 0 ? (
         <div className="py-6 text-center">
           <p className="text-[13px] text-[#64748b] italic">
             {lang === 'bn'

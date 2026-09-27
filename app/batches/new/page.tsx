@@ -7,6 +7,9 @@ import Icon from '@/components/Icon';
 import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
 import { BATCH_STATUSES } from '@/lib/validations/batch';
+import EnglishInput from '@/components/EnglishInput';
+import BanglaInput from '@/components/BanglaInput';
+import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface OptionsData {
   branches: Array<{ id: string; name: string; banglaName?: string | null; isMain: boolean }>;
@@ -151,6 +154,14 @@ export default function NewBatchPage() {
       showToast(lang === 'bn' ? 'সব আবশ্যক তথ্য পূরণ করুন' : 'Please fill in all required fields');
       return;
     }
+    if (hasBangla(form.name)) {
+      showToast(lang === 'bn' ? 'ব্যাচের নাম ইংরেজিতে লিখুন' : 'Batch name must be in English');
+      return;
+    }
+    if (form.banglaName && hasEnglish(form.banglaName)) {
+      showToast(lang === 'bn' ? 'ব্যাচের বাংলা নাম শুধুমাত্র বাংলায় লিখুন' : 'Batch Bangla name must not contain English characters');
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch('/api/batches', {
@@ -258,11 +269,11 @@ export default function NewBatchPage() {
 
           <div className="fld">
             <label>{dict.batches.name} *</label>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <EnglishInput value={form.name} onChange={(val) => setForm({ ...form, name: val })} />
           </div>
           <div className="fld">
             <label>{dict.batches.banglaName}</label>
-            <input value={form.banglaName} onChange={(e) => setForm({ ...form, banglaName: e.target.value })} />
+            <BanglaInput value={form.banglaName} onChange={(val) => setForm({ ...form, banglaName: val })} />
           </div>
           <div className="fld">
             <label>{dict.batches.code} *</label>

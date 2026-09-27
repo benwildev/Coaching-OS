@@ -37,7 +37,7 @@ const identityInclude = {
  * user.service.ts for consistency — the same cross-tenant-identifier
  * collision model the existing staff login already accepts.
  */
-async function findAccountByIdentifier(identifier: string): Promise<PortalAccountWithIdentity | null> {
+export async function findAccountByIdentifier(identifier: string): Promise<PortalAccountWithIdentity | null> {
   const raw = identifier.trim();
   const normalizedEmail = raw.toLowerCase();
 
@@ -204,13 +204,19 @@ export async function completeSetupOrReset(rawToken: string, newPassword: string
   const account = await prisma.portalAccount.findUnique({ where: { id: record.portalAccountId } });
   if (!account) throw new Error('TOKEN_INVALID_OR_EXPIRED');
 
-  await prisma.$transaction([
-    prisma.portalAuthToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
-    prisma.portalAccount.update({
+  // Atomic single-use consume: two concurrent requests with the same token
+  // cannot both pass (the WHERE re-checks usedAt/expiry at the row level).
+  await prisma.$transaction(async (tx) => {
+    const consumed = await tx.portalAuthToken.updateMany({
+      where: { id: record.id, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
+    if (consumed.count !== 1) throw new Error('TOKEN_INVALID_OR_EXPIRED');
+    await tx.portalAccount.update({
       where: { id: account.id },
       data: { passwordHash: hashPassword(newPassword), failedLoginAttempts: 0, lockedUntil: null },
-    }),
-  ]);
+    });
+  });
 
   await recordAuditLog({
     coachingCenterId: account.coachingCenterId,

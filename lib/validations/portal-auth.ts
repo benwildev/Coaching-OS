@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
 export const portalLoginSchema = z.object({
-  portalType: z.enum(['STUDENT', 'GUARDIAN']),
+  // Optional: when omitted (unified sign-in form) the verified account's own type is used.
+  portalType: z.enum(['STUDENT', 'GUARDIAN']).optional(),
   identifier: z.string().trim().min(1, 'Identifier is required'),
   password: z.string().min(1, 'Password is required'),
 });

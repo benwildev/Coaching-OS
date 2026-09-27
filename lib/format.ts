@@ -82,3 +82,49 @@ export function seeded(seed: number) {
     return s / 4294967296;
   };
 }
+
+/**
+ * Detects whether a string contains any Bengali Unicode characters (U+0980 to U+09FF)
+ */
+export function hasBangla(str?: string | null): boolean {
+  if (!str) return false;
+  return /[\u0980-\u09FF]/.test(str);
+}
+
+/**
+ * Strips all Bengali Unicode characters from text
+ */
+export function stripBangla(str?: string | null): string {
+  if (!str) return '';
+  return str.replace(/[\u0980-\u09FF]/g, '');
+}
+
+/**
+ * Detects whether a string contains English / Latin alphabet characters (a-z, A-Z)
+ */
+export function hasEnglish(str?: string | null): boolean {
+  if (!str) return false;
+  return /[a-zA-Z]/.test(str);
+}
+
+/**
+ * Strips English / Latin alphabet characters from text
+ */
+export function stripEnglish(str?: string | null): string {
+  if (!str) return '';
+  return str.replace(/[a-zA-Z]/g, '');
+}
+
+/**
+ * Converts Bengali numerals (০-৯) to English numerals (0-9)
+ */
+export function toEnglishNumeral(str?: string | null): string {
+  if (!str) return '';
+  const bnToEnMap: Record<string, string> = {
+    '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+    '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9',
+  };
+  return String(str).replace(/[০-৯]/g, (d) => bnToEnMap[d] ?? d);
+}
+
+

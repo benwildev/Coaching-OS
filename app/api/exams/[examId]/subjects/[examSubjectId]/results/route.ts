@@ -26,7 +26,7 @@ export async function GET(
     return NextResponse.json({ success: true, ...data });
   } catch (error: any) {
     console.error('[API /api/exams/.../results GET] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
+    const status = error.message?.startsWith('FORBIDDEN') ? 403 : error.message?.split(':')[0].endsWith('NOT_FOUND') ? 404 : 400;
     return NextResponse.json({ success: false, error: error.message || 'Failed to load marks roster' }, { status });
   }
 }
@@ -63,7 +63,7 @@ export async function PUT(
     return NextResponse.json({ success: true, ...result });
   } catch (error: any) {
     console.error('[API /api/exams/.../results PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
+    const status = error.message?.startsWith('FORBIDDEN') ? 403 : error.message?.split(':')[0].endsWith('NOT_FOUND') ? 404 : 400;
     return NextResponse.json({ success: false, error: error.message || 'Failed to save marks' }, { status });
   }
 }

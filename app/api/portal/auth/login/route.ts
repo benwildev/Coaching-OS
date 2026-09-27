@@ -20,7 +20,7 @@ export async function POST(request: Request) {
         { status: 401 }
       );
     }
-    if (result.session.portalType !== parsed.data.portalType) {
+    if (parsed.data.portalType && result.session.portalType !== parsed.data.portalType) {
       // Same generic message as a wrong password — never reveal which
       // portal type an identifier actually belongs to.
       return NextResponse.json(
