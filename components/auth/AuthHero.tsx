@@ -33,12 +33,12 @@ export default function AuthHero({ lang }: { lang: AuthLang }) {
         </div>
         <div>
           <div className="font-extrabold text-white text-[17px] tracking-tight leading-tight">
-            {lang === 'bn' ? 'আলোকিত কোচিং সেন্টার' : 'Alokito Coaching Centre'}
+            {lang === 'bn' ? 'কোচিং ওএস' : 'Coaching OS'}
           </div>
           <div className="text-xs text-blue-200/80 font-medium mt-0.5">
             {lang === 'bn'
-              ? 'ধানমন্ডি, ঢাকা · ৯ম-১২শ শ্রেণি'
-              : 'Dhanmondi, Dhaka · Class 9–12'}
+              ? 'বাংলাদেশ কোচিং সেন্টার ম্যানেজমেন্ট সিস্টেম'
+              : 'Bangladesh coaching centre management'}
           </div>
         </div>
       </div>

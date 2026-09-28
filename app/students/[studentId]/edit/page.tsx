@@ -15,6 +15,7 @@ import {
 } from '@/lib/validations/student';
 import EnglishInput from '@/components/EnglishInput';
 import BanglaInput from '@/components/BanglaInput';
+import FileUploadButton from '@/components/FileUploadButton';
 import { hasBangla, hasEnglish } from '@/lib/format';
 
 interface AcademicOptions {
@@ -62,6 +63,7 @@ export default function EditStudentPage() {
     gender: 'MALE',
     dob: '',
     bloodGroup: '',
+    photoUrl: '',
     religion: 'Islam',
     phone: '',
     email: '',
@@ -130,6 +132,7 @@ export default function EditStudentPage() {
           gender: s.gender || 'MALE',
           dob: s.dob ? s.dob.split('T')[0] : '',
           bloodGroup: s.bloodGroup || '',
+          photoUrl: s.photoUrl || '',
           religion: s.religion || '',
           phone: s.phone || '',
           email: s.email || '',
@@ -210,6 +213,7 @@ export default function EditStudentPage() {
         gender: form.gender,
         dob: form.dob || null,
         bloodGroup: form.bloodGroup || null,
+        photoUrl: form.photoUrl || null,
         religion: form.religion,
         phone: form.phone || null,
         email: form.email || null,
@@ -408,6 +412,19 @@ export default function EditStudentPage() {
                   <option key={bg} value={bg}>{bg}</option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label className="block text-[13px] font-bold text-[#092f63] mb-1">
+                {lang === 'bn' ? 'ছবি' : 'Photo'}
+              </label>
+              <div className="flex items-center gap-3">
+                {form.photoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={form.photoUrl} alt="Student" className="w-9 h-9 rounded-full object-cover border border-[#dce5f0]" />
+                )}
+                <FileUploadButton scope="photo" lang={lang} onUploaded={(url) => setForm({ ...form, photoUrl: url })} />
+              </div>
             </div>
 
             <div>

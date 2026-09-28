@@ -28,6 +28,7 @@ export function toPortalSessionUser(account: PortalAccountWithIdentity): PortalS
     guardianId: account.guardianId,
     coachingCenterId: account.coachingCenterId,
     name: name || '',
+    sessionVersion: account.sessionVersion,
   };
 }
 
@@ -55,9 +56,17 @@ export async function provisionPortalAccount(params: {
     throw new Error('INVALID_PORTAL_IDENTITY: exactly one of studentId or guardianId is required');
   }
 
+  // Phase 10.4: tenant-scoped lookup (was a bare findUnique on studentId/
+  // guardianId with no coachingCenterId filter) — an OWNER/ADMIN of tenant A
+  // who knew a tenant-B student/guardian id could otherwise find and
+  // re-provision tenant B's existing portal account and get a working setup
+  // link for it. Scoping to this caller's tenant here means a foreign id
+  // simply looks like "no account yet", and the contact lookup right below
+  // (already tenant-scoped) then correctly rejects it as NOT_FOUND instead
+  // of creating or touching another tenant's account.
   let account = params.studentId
-    ? await prisma.portalAccount.findUnique({ where: { studentId: params.studentId } })
-    : await prisma.portalAccount.findUnique({ where: { guardianId: params.guardianId! } });
+    ? await prisma.portalAccount.findFirst({ where: { studentId: params.studentId, coachingCenterId: params.coachingCenterId } })
+    : await prisma.portalAccount.findFirst({ where: { guardianId: params.guardianId!, coachingCenterId: params.coachingCenterId } });
 
   if (!account) {
     const contact = params.studentId
@@ -154,7 +163,16 @@ export async function completeSetupOrReset(rawToken: string, newPassword: string
     if (consumed.count !== 1) throw new Error('TOKEN_INVALID_OR_EXPIRED');
     await tx.portalAccount.update({
       where: { id: account.id },
-      data: { passwordHash: hashPassword(newPassword), failedLoginAttempts: 0, lockedUntil: null },
+      // Phase 10.4: a password setup/reset revokes any outstanding session
+      // for this account (sessionVersion bump) — someone who set up the
+      // account or reset the password should not automatically stay signed
+      // in with a session that predates the new password.
+      data: {
+        passwordHash: hashPassword(newPassword),
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        sessionVersion: { increment: 1 },
+      },
     });
   });
 
@@ -169,14 +187,25 @@ export async function completeSetupOrReset(rawToken: string, newPassword: string
   });
 }
 
-export async function changePassword(session: PortalSessionUser, currentPassword: string, newPassword: string): Promise<void> {
+/**
+ * Changes the password and revokes every outstanding session for this
+ * account (Phase 10.4), including the caller's own current cookie — the
+ * route re-issues a fresh one from the returned `sessionVersion` so the
+ * caller's own device stays signed in while any other copy of the old
+ * token stops working immediately.
+ */
+export async function changePassword(
+  session: PortalSessionUser,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ sessionVersion: number }> {
   const account = await prisma.portalAccount.findUnique({ where: { id: session.portalAccountId } });
   if (!account || !account.passwordHash) throw new Error('PORTAL_PASSWORD_NOT_SET');
   if (!verifyPassword(currentPassword, account.passwordHash)) throw new Error('PORTAL_INVALID_CREDENTIALS');
 
-  await prisma.portalAccount.update({
+  const updated = await prisma.portalAccount.update({
     where: { id: account.id },
-    data: { passwordHash: hashPassword(newPassword) },
+    data: { passwordHash: hashPassword(newPassword), sessionVersion: { increment: 1 } },
   });
 
   await recordAuditLog({
@@ -187,6 +216,16 @@ export async function changePassword(session: PortalSessionUser, currentPassword
     entity: 'PortalAccount',
     entityId: account.id,
     details: null,
+  });
+
+  return { sessionVersion: updated.sessionVersion };
+}
+
+/** Bumps sessionVersion only — used by logout to revoke every outstanding token for this account. */
+export async function bumpPortalAccountSessionVersion(portalAccountId: string): Promise<void> {
+  await prisma.portalAccount.update({
+    where: { id: portalAccountId },
+    data: { sessionVersion: { increment: 1 } },
   });
 }
 
@@ -292,9 +331,16 @@ export async function setPortalAccountStatus(
   const account = await prisma.portalAccount.findFirst({ where: { id: portalAccountId, coachingCenterId } });
   if (!account) throw new Error('PORTAL_ACCOUNT_NOT_FOUND');
 
+  // Phase 10.4: any status change revokes every outstanding session for
+  // this account — disabling must take effect immediately, and
+  // re-enabling should not silently resurrect a token from before it was
+  // disabled.
   await prisma.portalAccount.update({
     where: { id: account.id },
-    data: status === 'ACTIVE' ? { status, failedLoginAttempts: 0, lockedUntil: null } : { status },
+    data:
+      status === 'ACTIVE'
+        ? { status, failedLoginAttempts: 0, lockedUntil: null, sessionVersion: { increment: 1 } }
+        : { status, sessionVersion: { increment: 1 } },
   });
 
   await recordAuditLog({

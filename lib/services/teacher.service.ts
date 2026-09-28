@@ -1,9 +1,11 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
+import { createUser } from './user.service';
+import { getTodaysClasses } from './attendance.service';
 import { getCurrentDhakaDateOnly, getCurrentDhakaDayOfWeek, isScheduleActiveOnDate } from '@/lib/schedule';
 import { normalizeBdPhone } from '@/lib/validations/student';
-import type { TeacherInput, TeacherUpdateInput } from '@/lib/validations/teacher';
-import type { Prisma } from '@prisma/client';
+import type { TeacherInput, TeacherUpdateInput, TeacherAccountLinkInput } from '@/lib/validations/teacher';
+import type { Prisma, RoleCode } from '@prisma/client';
 
 export interface TeacherFilterParams {
   search?: string;
@@ -79,6 +81,7 @@ export async function getTeacherById(coachingCenterId: string, teacherId: string
     where: { id: teacherId, coachingCenterId },
     include: {
       branch: true,
+      user: { select: { id: true, email: true, name: true, status: true } },
       teacherSubjects: { include: { subject: true } },
       batchTeacherAssignments: {
         include: {
@@ -253,4 +256,278 @@ export async function updateTeacher(
   });
 
   return teacher;
+}
+
+// ------------------------------------------------------------------
+// Phase 10.5: Teacher <-> User account linking (OWNER/ADMIN only)
+// ------------------------------------------------------------------
+//
+// Teacher (HR/profile record) and User (login identity) were previously
+// two completely disjoint tables — Teacher.userId existed in the schema
+// but no application code path ever set it, so a real TEACHER login could
+// never resolve its own Teacher profile for attendance/marks scoping.
+
+export interface EligibleTeacherAccount {
+  id: string;
+  email: string;
+  name: string;
+  status: string;
+}
+
+/** Users with the TEACHER role in this tenant who aren't linked to a Teacher yet — candidates for "link existing account". */
+export async function getEligibleTeacherAccounts(coachingCenterId: string): Promise<EligibleTeacherAccount[]> {
+  const linkedUserIds = (
+    await prisma.teacher.findMany({ where: { coachingCenterId, userId: { not: null } }, select: { userId: true } })
+  ).map((t) => t.userId!);
+
+  const users = await prisma.user.findMany({
+    where: {
+      coachingCenterId,
+      id: { notIn: linkedUserIds },
+      roleAssignments: { some: { role: { code: 'TEACHER' } } },
+    },
+    select: { id: true, email: true, name: true, status: true },
+    orderBy: { name: 'asc' },
+  });
+  return users;
+}
+
+/**
+ * Links a Teacher record to a User login — either by creating a brand new
+ * TEACHER-role User (reusing the same createUser used by Settings > Users,
+ * so password hashing/escalation rules are identical), or by linking an
+ * already-existing, still-unlinked TEACHER-role User in this tenant.
+ *
+ * Both Teacher and the target User are always re-verified against
+ * `coachingCenterId` here — a client cannot link across tenants, and
+ * `Teacher.userId` is `@unique` at the DB level so one User can never end
+ * up linked to two Teacher records (a race on this is simply rejected by
+ * that constraint).
+ */
+export async function linkTeacherAccount(
+  coachingCenterId: string,
+  teacherId: string,
+  input: TeacherAccountLinkInput,
+  actorId: string,
+  actorRole: RoleCode
+): Promise<{ userId: string; email: string }> {
+  const teacher = await prisma.teacher.findFirst({ where: { id: teacherId, coachingCenterId } });
+  if (!teacher) throw new Error('TEACHER_NOT_FOUND');
+  if (teacher.userId) throw new Error('TEACHER_ALREADY_LINKED: This teacher already has a linked login account.');
+
+  let userId: string;
+  let email: string;
+
+  if (input.mode === 'create') {
+    // The new login inherits the teacher's own branch, so the two records
+    // stay consistent for branch-scoped authorization (assertBranchAccess
+    // compares User.branchId, not Teacher.branchId, everywhere else).
+    const user = await createUser(
+      coachingCenterId,
+      {
+        email: input.email,
+        phone: input.phone,
+        password: input.password,
+        name: input.name,
+        banglaName: input.banglaName || undefined,
+        role: 'TEACHER',
+        branchId: teacher.branchId || undefined,
+      },
+      actorId,
+      actorRole
+    );
+    userId = user.id;
+    email = user.email;
+  } else {
+    const user = await prisma.user.findFirst({ where: { id: input.userId, coachingCenterId } });
+    if (!user) throw new Error('USER_NOT_FOUND');
+
+    const roleAssignment = await prisma.roleAssignment.findFirst({
+      where: { userId: user.id },
+      include: { role: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    // Prevent linking an ADMIN/OWNER/STAFF account as a teacher's login —
+    // only an existing TEACHER-role account is eligible.
+    if (!roleAssignment || roleAssignment.role.code !== 'TEACHER') {
+      throw new Error('INVALID_TEACHER_ACCOUNT: Only a user with the TEACHER role can be linked to a teacher record.');
+    }
+    const alreadyLinkedElsewhere = await prisma.teacher.findFirst({ where: { userId: user.id } });
+    if (alreadyLinkedElsewhere) {
+      throw new Error('USER_ALREADY_LINKED: This account is already linked to another teacher record.');
+    }
+    userId = user.id;
+    email = user.email;
+  }
+
+  await prisma.teacher.update({ where: { id: teacherId }, data: { userId } });
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: actorId,
+    action: input.mode === 'create' ? 'TEACHER_ACCOUNT_CREATED_AND_LINKED' : 'TEACHER_ACCOUNT_LINKED',
+    entity: 'Teacher',
+    entityId: teacherId,
+    details: { linkedUserId: userId, linkedEmail: email },
+  });
+
+  return { userId, email };
+}
+
+/**
+ * Unlinks a Teacher from its User login (the login itself is untouched —
+ * disable it separately via the existing user-status endpoint if needed).
+ */
+export async function unlinkTeacherAccount(coachingCenterId: string, teacherId: string, actorId: string): Promise<void> {
+  const teacher = await prisma.teacher.findFirst({ where: { id: teacherId, coachingCenterId } });
+  if (!teacher) throw new Error('TEACHER_NOT_FOUND');
+  if (!teacher.userId) throw new Error('TEACHER_NOT_LINKED: This teacher has no linked login account.');
+
+  const previousUserId = teacher.userId;
+  await prisma.teacher.update({ where: { id: teacherId }, data: { userId: null } });
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: actorId,
+    action: 'TEACHER_ACCOUNT_UNLINKED',
+    entity: 'Teacher',
+    entityId: teacherId,
+    details: { previousUserId },
+  });
+}
+
+// ------------------------------------------------------------------
+// Phase 10.5: real Teacher Dashboard data
+// ------------------------------------------------------------------
+//
+// Every figure here comes from the teacher's own assignments — resolved
+// from the authenticated User via getTeacherByUserId, never from a
+// client-supplied teacherId. No fabricated numbers: an empty section
+// means "no data yet", not a placeholder value.
+
+export interface TeacherDashboardData {
+  linked: true;
+  teacher: { id: string; name: string; banglaName: string | null };
+  todaysClasses: Array<{
+    scheduleId: string;
+    time: string;
+    batchName: string;
+    subjectName: string;
+    roomName: string | null;
+    studentCount: number;
+    sessionId: string | null;
+    sessionStatus: string | null;
+  }>;
+  pendingAttendanceCount: number;
+  assignments: Array<{
+    batchId: string;
+    batchName: string;
+    subjectId: string;
+    subjectName: string;
+    studentCount: number;
+  }>;
+  studentCount: number;
+  pendingMarksEntry: Array<{
+    examId: string;
+    examSubjectId: string;
+    examTitle: string;
+    subjectName: string;
+    batchName: string | null;
+    enteredCount: number;
+    totalCount: number;
+  }>;
+  recentNotices: Array<{ id: string; title: string; banglaTitle: string | null; publishedAt: Date | null }>;
+}
+
+export async function getTeacherDashboardData(
+  coachingCenterId: string,
+  userId: string
+): Promise<{ linked: false } | TeacherDashboardData> {
+  const teacher = await prisma.teacher.findFirst({ where: { coachingCenterId, userId } });
+  if (!teacher) return { linked: false };
+
+  const [todaysClasses, assignments, recentNotices] = await Promise.all([
+    getTodaysClasses(coachingCenterId, { teacherId: teacher.id }),
+    prisma.batchTeacherAssignment.findMany({
+      where: { coachingCenterId, teacherId: teacher.id, status: 'ACTIVE' },
+      include: {
+        batch: { select: { id: true, name: true, banglaName: true, studentBatches: { where: { status: 'ACTIVE' }, select: { studentId: true } } } },
+        subject: { select: { id: true, name: true, banglaName: true } },
+      },
+    }),
+    prisma.notice.findMany({
+      where: {
+        coachingCenterId,
+        status: 'PUBLISHED',
+        targetAudience: { in: ['ALL_CENTER', 'TEACHERS'] },
+        OR: [{ branchId: null }, { branchId: teacher.branchId ?? undefined }],
+      },
+      orderBy: { publishedAt: 'desc' },
+      take: 5,
+      select: { id: true, title: true, banglaTitle: true, publishedAt: true },
+    }),
+  ]);
+
+  const teacherSubjectIds = Array.from(new Set(assignments.map((a) => a.subject.id)));
+  const teacherBatchIds = Array.from(new Set(assignments.map((a) => a.batch.id)));
+
+  // Scoped by the teacher's own subject+batch assignments up front — never
+  // pulls another teacher's (or the whole tenant's) exam subjects.
+  const ongoingExamSubjects = teacherSubjectIds.length && teacherBatchIds.length
+    ? await prisma.examSubject.findMany({
+        where: {
+          subjectId: { in: teacherSubjectIds },
+          exam: { coachingCenterId, status: { in: ['ONGOING', 'COMPLETED'] }, batchId: { in: teacherBatchIds } },
+        },
+        include: {
+          exam: { select: { id: true, title: true, batchId: true, batch: { select: { name: true } } } },
+          subject: { select: { name: true } },
+          results: { select: { studentId: true, marksObtained: true } },
+        },
+      })
+    : [];
+
+  const pendingMarksEntry = ongoingExamSubjects
+    .map((es) => {
+      const enteredCount = es.results.filter((r) => r.marksObtained !== null).length;
+      const totalCount = es.results.length;
+      return {
+        examId: es.exam.id,
+        examSubjectId: es.id,
+        examTitle: es.exam.title,
+        subjectName: es.subject.name,
+        batchName: es.exam.batch?.name ?? null,
+        enteredCount,
+        totalCount,
+      };
+    })
+    .filter((es) => es.enteredCount < es.totalCount);
+
+  const uniqueStudentIds = new Set(assignments.flatMap((a) => a.batch.studentBatches.map((sb) => sb.studentId)));
+
+  return {
+    linked: true,
+    teacher: { id: teacher.id, name: teacher.name, banglaName: teacher.banglaName },
+    todaysClasses: todaysClasses.map((c) => ({
+      scheduleId: c.schedule.id,
+      time: c.schedule.startTime,
+      batchName: c.schedule.batch.name,
+      subjectName: c.schedule.subject?.name ?? '',
+      roomName: c.schedule.room?.name ?? null,
+      studentCount: c.eligibleStudentCount,
+      sessionId: c.session?.id ?? null,
+      sessionStatus: c.session?.status ?? null,
+    })),
+    pendingAttendanceCount: todaysClasses.filter((c) => !c.session || c.session.status !== 'COMPLETED').length,
+    assignments: assignments.map((a) => ({
+      batchId: a.batch.id,
+      batchName: a.batch.name,
+      subjectId: a.subject.id,
+      subjectName: a.subject.name,
+      studentCount: a.batch.studentBatches.length,
+    })),
+    studentCount: uniqueStudentIds.size,
+    pendingMarksEntry,
+    recentNotices,
+  };
 }

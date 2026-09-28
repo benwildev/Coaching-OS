@@ -258,9 +258,30 @@ const STATUS_BADGE = {
   next: { label: 'Up next', cls: 'bg-[#e6effa] text-[#00509d]' },
 };
 
-export function TodaySchedule({ agenda, exams }: { agenda: DashboardData['todaysAgenda']; exams: DashboardData['upcomingExams'] }) {
+export function TodaySchedule({
+  agenda,
+  exams,
+  completion,
+}: {
+  agenda: DashboardData['todaysAgenda'];
+  exams: DashboardData['upcomingExams'];
+  /** Phase 10.5: honest "attendance not yet recorded" count — distinct from each row's own "done" badge above, which only means the class period has ended. */
+  completion?: DashboardData['attendanceCompletion'];
+}) {
   return (
-    <Panel title="Today's classes & exams" subtitle="What is running, and what comes next?">
+    <Panel
+      title="Today's classes & exams"
+      subtitle="What is running, and what comes next?"
+      action={
+        completion && completion.started > 0 ? (
+          <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${completion.pending > 0 ? 'bg-[#fff6cc] text-[#7a5200]' : 'bg-[#e9f7ef] text-[#0f7a45]'}`}>
+            {completion.pending > 0
+              ? `${completion.pending} attendance${completion.pending > 1 ? 's' : ''} not recorded`
+              : `Attendance recorded ${completion.completed}/${completion.started}`}
+          </span>
+        ) : undefined
+      }
+    >
       {agenda.length === 0 ? (
         <Empty>No classes or exams scheduled today.</Empty>
       ) : (

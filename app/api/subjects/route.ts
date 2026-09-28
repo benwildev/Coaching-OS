@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requireRole } from '@/lib/auth/session';
 import prisma from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -56,6 +56,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    // Phase 10.5: previously any authenticated tenant user (incl. TEACHER)
+    // could create subjects; academic setup is an office-staff action.
+    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
     const body = await request.json();
     const { academicClassId, academicGroupId, name, banglaName, code } = body;
 

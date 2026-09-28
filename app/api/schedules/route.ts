@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { getSchedulesList, createClassSchedule } from '@/lib/services/schedule.service';
 import { classScheduleSchema } from '@/lib/validations/schedule';
 import type { DayOfWeek } from '@prisma/client';
@@ -8,11 +8,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const { coachingCenterId } = await requireTenant();
+    const { coachingCenterId, user } = await requireTenant();
     const { searchParams } = new URL(request.url);
 
+    // Phase 10.5: previously trusted ?branch= verbatim.
     const schedules = await getSchedulesList(coachingCenterId, {
-      branchId: searchParams.get('branch') || undefined,
+      branchId: resolveEffectiveBranchId(user, searchParams.get('branch') || undefined),
       batchId: searchParams.get('batch') || undefined,
       teacherId: searchParams.get('teacher') || undefined,
       roomId: searchParams.get('room') || undefined,

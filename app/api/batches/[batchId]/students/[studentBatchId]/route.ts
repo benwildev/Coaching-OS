@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
-import { updateStudentBatchAssignment } from '@/lib/services/batch.service';
+import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { updateStudentBatchAssignment, getBatchById } from '@/lib/services/batch.service';
 import { studentBatchUpdateSchema } from '@/lib/validations/batch';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,13 @@ export async function PUT(
     const { coachingCenterId, user } = await requireTenant();
     await requireRole(['OWNER', 'ADMIN', 'STAFF']);
 
-    const { studentBatchId } = await props.params;
+    const { batchId, studentBatchId } = await props.params;
+
+    // Phase 10.5: previously no branch check.
+    const batch = await getBatchById(coachingCenterId, batchId);
+    if (!batch) return NextResponse.json({ success: false, error: 'Batch not found' }, { status: 404 });
+    assertBranchAccess(user, batch.branchId);
+
     const body = await request.json();
     const validated = studentBatchUpdateSchema.safeParse(body);
     if (!validated.success) {

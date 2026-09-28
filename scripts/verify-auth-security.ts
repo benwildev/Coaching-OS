@@ -181,12 +181,20 @@ async function main() {
       assert(sets(r, SESSION_COOKIE_NAME) && !sets(r, PORTAL_SESSION_COOKIE_NAME) && clears(r, PORTAL_SESSION_COOKIE_NAME), `${label} gets only the staff session (portal session cleared)`);
       const c = r.cookies[SESSION_COOKIE_NAME];
       const p = jwtPayload(c.value);
-      assert(p.userId === id && p.coachingCenterId === centerA && p.role === role && !('portalType' in p), `${label} session identity/tenant/role`);
-      assert(!('password' in p) && !('passwordHash' in p) && !('otp' in p), 'no secrets in JWT');
+      // Phase 10.4: the JWT itself only asserts {type, sub, sessionVersion} —
+      // role/tenant/branch/email/name are never trusted from the token, so
+      // there is nothing there for a tampered token to lie about. Identity
+      // is instead confirmed via /api/auth/me, which is DB-sourced on every
+      // request.
+      assert(p.type === 'staff' && p.sub === id && typeof p.sessionVersion === 'number' && !('portalType' in p) && !('role' in p) && !('coachingCenterId' in p) && !('branchId' in p), `${label} JWT carries only {type,sub,sessionVersion} — no role/tenant claim to spoof`);
+      assert(!('password' in p) && !('passwordHash' in p) && !('otp' in p) && !('email' in p) && !('name' in p), 'no PII/secrets in JWT');
       assert(c.attrs.includes('httponly') && c.attrs.includes('samesite=lax') && c.attrs.includes('path=/') && c.attrs.includes('max-age='), `${label} cookie attributes (${c.attrs})`);
       assert(c.attrs.includes('secure'), 'Secure cookie in production');
       const dash = await get('/dashboard', cookieOf(r, SESSION_COOKIE_NAME));
       assert(dash.status === 200, `${label} can open /dashboard (got ${dash.status})`);
+      const me = await get('/api/auth/me', cookieOf(r, SESSION_COOKIE_NAME));
+      const meUser = me.body.user as { userId?: string; role?: string; coachingCenterId?: string } | null;
+      assert(meUser?.userId === id && meUser.role === role && meUser.coachingCenterId === centerA, `${label} identity/tenant/role resolved fresh from DB (got ${JSON.stringify(me.body.user)})`);
       staffCookies[label] = cookieOf(r, SESSION_COOKIE_NAME);
       ok(`${[1, 2, 3, 4][['OWNER', 'ADMIN', 'STAFF', 'TEACHER'].indexOf(label)]}. ${label} email/password → staff session, correct identity, redirect /dashboard`);
     }
@@ -198,15 +206,25 @@ async function main() {
     assert(stu.status === 200 && stu.body.accountType === 'STUDENT' && stu.body.redirectTo === '/portal/student', `student login (got ${stu.status} ${JSON.stringify(stu.body)})`);
     assert(sets(stu, PORTAL_SESSION_COOKIE_NAME) && !sets(stu, SESSION_COOKIE_NAME) && clears(stu, SESSION_COOKIE_NAME), 'student gets only the portal session (staff session cleared)');
     const sjwt = jwtPayload(stu.cookies[PORTAL_SESSION_COOKIE_NAME].value);
-    assert(sjwt.portalType === 'STUDENT' && sjwt.studentId === student.id && sjwt.coachingCenterId === centerA && !('role' in sjwt), 'student portal identity, no staff role');
+    // Phase 10.4: same minimal-token design on the portal side — the JWT is
+    // only {type:'portal', sub: portalAccountId, sessionVersion}; portalType/
+    // studentId/guardianId/coachingCenterId are re-derived from the DB on
+    // every request, never trusted from the token.
+    assert(sjwt.type === 'portal' && sjwt.sub === sp.account.id && typeof sjwt.sessionVersion === 'number' && !('portalType' in sjwt) && !('studentId' in sjwt) && !('coachingCenterId' in sjwt) && !('role' in sjwt), 'student portal JWT carries only {type,sub,sessionVersion} — no identity claim to spoof');
     assert(stu.cookies[PORTAL_SESSION_COOKIE_NAME].attrs.includes('httponly') && stu.cookies[PORTAL_SESSION_COOKIE_NAME].attrs.includes('secure'), 'portal cookie attributes');
     const stuCookie = cookieOf(stu, PORTAL_SESSION_COOKIE_NAME);
+    const stuMe = await get('/api/portal/auth/me', stuCookie);
+    const stuMeUser = stuMe.body.user as { portalType?: string; studentId?: string } | null;
+    assert(stuMeUser?.portalType === 'STUDENT' && stuMeUser.studentId === student.id, `student identity resolved fresh from DB (got ${JSON.stringify(stuMe.body.user)})`);
     ok('5. STUDENT email/password → portal session (studentId from account), redirect /portal/student');
     const grd = await login(guardian.email!, 'GuardianPass123');
     assert(grd.status === 200 && grd.body.accountType === 'GUARDIAN' && grd.body.redirectTo === '/portal/guardian', `guardian login (got ${grd.status} ${JSON.stringify(grd.body)})`);
     const gjwt = jwtPayload(grd.cookies[PORTAL_SESSION_COOKIE_NAME].value);
-    assert(gjwt.portalType === 'GUARDIAN' && gjwt.guardianId === guardian.id && !gjwt.studentId, 'guardian identity (no child chosen at login)');
+    assert(gjwt.type === 'portal' && gjwt.sub === gp.account.id && typeof gjwt.sessionVersion === 'number' && !('portalType' in gjwt) && !('guardianId' in gjwt) && !('studentId' in gjwt), 'guardian portal JWT carries only {type,sub,sessionVersion}');
     const grdCookie = cookieOf(grd, PORTAL_SESSION_COOKIE_NAME);
+    const grdMe = await get('/api/portal/auth/me', grdCookie);
+    const grdMeUser = grdMe.body.user as { portalType?: string; guardianId?: string; studentId?: string | null } | null;
+    assert(grdMeUser?.portalType === 'GUARDIAN' && grdMeUser.guardianId === guardian.id && !grdMeUser.studentId, 'guardian identity (no child chosen at login), resolved fresh from DB');
     const kids = await get('/api/portal/guardian/children', grdCookie);
     const kidIds = ((kids.body.children as { student: { id: string } }[] | undefined) ?? []).map((k) => k.student.id).sort();
     assert(kids.status === 200 && JSON.stringify(kidIds) === JSON.stringify([student.id, sibling.id].sort()), `guardian sees both linked children after login (got ${kids.status} ${JSON.stringify(kidIds)})`);
@@ -279,15 +297,21 @@ async function main() {
     // ---- 15: cross-tenant ----
     const asA = await login(shared, 'TenantAPass1');
     const asB = await login(shared, 'TenantBPass1');
-    assert(asA.status === 200 && jwtPayload(asA.cookies[SESSION_COOKIE_NAME].value).userId === sharedA.id, 'tenant-A password → tenant-A account');
+    // Phase 10.4: the JWT's `sub` is the userId regardless of tenant (tenant
+    // is re-derived from the DB by `sub`, never carried in the token), so
+    // `sub` alone confirms which account the password resolved to; the
+    // account's real tenant is confirmed via /api/auth/me below.
+    assert(asA.status === 200 && jwtPayload(asA.cookies[SESSION_COOKIE_NAME].value).sub === sharedA.id, 'tenant-A password → tenant-A account');
     const bJwt = jwtPayload(asB.cookies[SESSION_COOKIE_NAME].value);
-    assert(asB.status === 200 && bJwt.userId === sharedB.id && bJwt.coachingCenterId === centerB, 'tenant-B password → tenant-B account');
+    assert(asB.status === 200 && bJwt.sub === sharedB.id, 'tenant-B password → tenant-B account');
+    const bMe = await get('/api/auth/me', cookieOf(asB, SESSION_COOKIE_NAME));
+    assert((bMe.body.user as { coachingCenterId?: string } | null)?.coachingCenterId === centerB, `tenant-B account resolves to tenant B (got ${JSON.stringify(bMe.body.user)})`);
     const twinLogin = await login(twin, 'SamePass123');
     assert(twinLogin.status === 401 && JSON.stringify(twinLogin.body) === JSON.stringify(wrong.body) && !JSON.stringify(twinLogin.body).includes(TAG), 'identical credentials in two tenants → generic denial, no tenant names');
     const staffSide = await login(staff.email, PW);
     const portalSide = await login(staff.email, 'PortalSidePass1');
     assert(staffSide.status === 200 && staffSide.body.accountType === 'STAFF', 'shared email + staff password → staff account');
-    assert(portalSide.status === 200 && portalSide.body.accountType === 'STUDENT' && jwtPayload(portalSide.cookies[PORTAL_SESSION_COOKIE_NAME].value).coachingCenterId === centerB, 'shared email + portal password → that portal account');
+    assert(portalSide.status === 200 && portalSide.body.accountType === 'STUDENT' && jwtPayload(portalSide.cookies[PORTAL_SESSION_COOKIE_NAME].value).sub === mp.account.id, 'shared email + portal password → that portal account');
     const mixedAmbiguous = await login(mixedStaff.email, PW);
     assert(mixedAmbiguous.status === 401 && !sets(mixedAmbiguous, SESSION_COOKIE_NAME) && !sets(mixedAmbiguous, PORTAL_SESSION_COOKIE_NAME), 'same email + same password on staff and portal accounts → denied');
     const crossRead = await get(`/api/students/${student.id}`, cookieOf(asB, SESSION_COOKIE_NAME));

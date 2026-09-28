@@ -1,5 +1,5 @@
 import prisma from '@/lib/db';
-import type { Prisma, AttendanceStatus } from '@prisma/client';
+import type { Prisma, AttendanceStatus, RoleCode } from '@prisma/client';
 import {
   getCurrentDhakaDateOnly,
   getCurrentDhakaDayOfWeek,
@@ -65,7 +65,18 @@ function pctChange(curr: number, prev: number): number | null {
   return Math.round(((curr - prev) / prev) * 1000) / 10;
 }
 
-export async function getDashboardData(coachingCenterId: string, params: DashboardParams = {}) {
+/**
+ * Phase 10.4: TEACHER must never receive center-wide financial figures
+ * (collection, outstanding dues, per-student overdue amounts, payment
+ * activity) — this is enforced here, in the data layer, rather than only by
+ * the page choosing not to render a card, so it also protects any future
+ * caller of this function (e.g. an API route) that a UI-only hide would not.
+ */
+function canViewFinance(role: RoleCode): boolean {
+  return role !== 'TEACHER';
+}
+
+export async function getDashboardData(coachingCenterId: string, params: DashboardParams, viewerRole: RoleCode) {
   const cc = coachingCenterId;
   const range: DashboardRange = params.range && DASHBOARD_RANGES.includes(params.range) ? params.range : 3;
   const classId = params.classId && params.classId !== 'all' ? params.classId : undefined;
@@ -604,6 +615,28 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
   const collectedPrev = sumPrev(collectedByMonth, range);
   const billedNow = sumLast(billedByMonth, range);
 
+  const financeVisible = canViewFinance(viewerRole);
+
+  // Phase 10.4: a TEACHER gets every non-financial section as normal, but
+  // collection/outstanding figures, the fee chart, per-student overdue
+  // amounts and payment activity are removed here — not just hidden by the
+  // page — before this ever leaves the service.
+  const needsAttentionOut = flagged.map((s) => {
+    if (financeVisible) return s;
+    const flags = { attendance: s.flags.attendance, score: s.flags.score, fees: false };
+    const count = Number(flags.attendance) + Number(flags.score);
+    // Recompute the reason with the same attendance > fees > score priority
+    // as the original, but with fees removed from consideration — the
+    // original `s.reason` string is only safe to reuse as-is when it was
+    // already attendance-based (fees never outranks it), otherwise it may
+    // be fee-derived text (e.g. an overdue-invoice count) that a TEACHER
+    // must not see.
+    let reason = '';
+    if (flags.attendance) reason = s.reason;
+    else if (flags.score) reason = `Average ${Math.round(s.score!)}%`;
+    return { ...s, due: 0, flags, count, reason };
+  }).filter((s) => financeVisible || s.count > 0);
+
   return {
     center: {
       name: center?.name || '',
@@ -616,21 +649,42 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
       admissions: { value: admissionsNow, delta: pctChange(admissionsNow, admissionsPrev), spark: chartSlice(admissionsByMonth) },
       batches: { value: batches.length, opened: batchesOpenedThisMonth, spark: chartSlice(monthStarts.map((s, i) => batches.filter((b) => (b.startDate || b.createdAt) < (monthStarts[i + 1] || now)).length)) },
       attendance: { value: todayRate, avg30, spark: dailyRates.slice(-12) },
-      collected: { value: collectedNow, delta: pctChange(collectedNow, collectedPrev), billed: billedNow, spark: chartSlice(collectedByMonth) },
-      outstanding: { value: outstandingTotal, lateStudents: lateStudents.size, spark: chartSlice(billedByMonth.map((b, i) => Math.max(0, b - collectedByMonth[i]))) },
+      collected: financeVisible
+        ? { value: collectedNow, delta: pctChange(collectedNow, collectedPrev), billed: billedNow, spark: chartSlice(collectedByMonth) }
+        : { value: 0, delta: null, billed: 0, spark: [] },
+      outstanding: financeVisible
+        ? { value: outstandingTotal, lateStudents: lateStudents.size, spark: chartSlice(billedByMonth.map((b, i) => Math.max(0, b - collectedByMonth[i]))) }
+        : { value: 0, lateStudents: 0, spark: [] },
       exams: { value: upcomingExams.length, thisWeek: upcomingExams.filter((e) => e.startDate < in7).length, spark: chartSlice(examsByMonth) },
       teachers: { value: scopedTeachers.length, classesToday: classesTodayCount, spark: chartSlice(monthStarts.map((s, i) => scopedTeachers.filter((t) => t.createdAt < (monthStarts[i + 1] || now)).length)) },
     },
-    feeChart: chartSlice(monthStarts.map((s, i) => i)).map((i) => ({
-      label: new Date(monthStarts[i].getTime() + DHAKA_OFFSET_MS).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }),
-      billed: billedByMonth[i],
-      collected: collectedByMonth[i],
-      current: i === bucketCount - 1,
-    })),
-    outstanding: { total: outstandingTotal, invoices: outstandingInvoices.length, aging: aging.map(({ label, amount }) => ({ label, amount })), late30Amount, lateStudents: lateStudents.size },
+    feeChart: financeVisible
+      ? chartSlice(monthStarts.map((s, i) => i)).map((i) => ({
+          label: new Date(monthStarts[i].getTime() + DHAKA_OFFSET_MS).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }),
+          billed: billedByMonth[i],
+          collected: collectedByMonth[i],
+          current: i === bucketCount - 1,
+        }))
+      : [],
+    outstanding: financeVisible
+      ? { total: outstandingTotal, invoices: outstandingInvoices.length, aging: aging.map(({ label, amount }) => ({ label, amount })), late30Amount, lateStudents: lateStudents.size }
+      : { total: 0, invoices: 0, aging: [], late30Amount: 0, lateStudents: 0 },
     heatmap,
-    activity,
+    activity: financeVisible ? activity : activity.filter((a) => a.kind !== 'payment'),
     todaysAgenda,
+    // Phase 10.5: an honest "missing attendance" count, distinct from the
+    // agenda's "done" badge (which just means the class period has ended,
+    // whether or not attendance was actually recorded — see statusFor
+    // above) and distinct from the attendance-percentage KPI (which only
+    // ever measures COMPLETED sessions, so a class with no session at all
+    // simply doesn't lower it). completed/pending only count classes whose
+    // scheduled time has already started, so an upcoming class this
+    // afternoon isn't reported as "missing" at 9am.
+    attendanceCompletion: (() => {
+      const started = scopedToday.filter((c) => parseTimeToMinutes(c.schedule.startTime) <= nowMinutes);
+      const completed = started.filter((c) => c.session?.status === 'COMPLETED').length;
+      return { scheduled: scopedToday.length, started: started.length, completed, pending: started.length - completed };
+    })(),
     upcomingExams: upcomingExams.slice(0, 5).map((e) => ({
       id: e.id,
       title: e.title,
@@ -643,9 +697,10 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
     topPerformers,
     teacherWorkload,
     weeklyTarget,
-    needsAttention: flagged,
+    needsAttention: needsAttentionOut,
     attendanceThreshold,
     occupancy,
+    financeVisible,
   };
 }
 

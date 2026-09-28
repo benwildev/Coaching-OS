@@ -13,19 +13,27 @@ export async function GET(request: Request, props: { params: Promise<{ teacherId
     const teacher = await getTeacherById(coachingCenterId, teacherId);
     if (!teacher) return NextResponse.json({ success: false, error: 'Teacher not found' }, { status: 404 });
 
+    // Phase 10.5: previously no branch check at all — a branch-locked
+    // STAFF could view any teacher's profile regardless of branch.
+    assertBranchAccess(user, teacher.branchId);
+
     // Teachers may see their own full profile; other teachers' contact/HR
     // details are unnecessary for them and are redacted.
     if (user.role === 'TEACHER') {
       const own = await getTeacherByUserId(coachingCenterId, user.userId);
       if (own?.id !== teacherId) {
-        const { phone, email, bio, joiningDate, attendances, ...publicFields } = teacher as any;
+        // Phase 10.5: `user` (the linked login's email/name/status) is now
+        // part of getTeacherById's result too — strip it here for the same
+        // reason phone/email/bio already are.
+        const { phone, email, bio, joiningDate, attendances, user: _linkedUser, ...publicFields } = teacher as any;
         return NextResponse.json({ success: true, teacher: publicFields, redacted: true });
       }
     }
 
     return NextResponse.json({ success: true, teacher });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  } catch (error: any) {
+    const status = error?.message === 'FORBIDDEN_BRANCH' ? 403 : 401;
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
   }
 }
 

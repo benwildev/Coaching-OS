@@ -1,6 +1,6 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
-import { dateRangesOverlap, parseTimeToMinutes, timeRangesOverlap } from '@/lib/schedule';
+import { dateRangesOverlap, isScheduleActiveOnDate, parseTimeToMinutes, timeRangesOverlap, getCurrentDhakaDateOnly, WEEK_ORDER } from '@/lib/schedule';
 import type { ClassScheduleInput } from '@/lib/validations/schedule';
 import type { DayOfWeek, Prisma } from '@prisma/client';
 
@@ -93,6 +93,127 @@ export async function detectScheduleConflicts(input: ConflictCheckInput): Promis
   }
 
   return conflicts;
+}
+
+export interface StudentBatchConflict {
+  conflictingBatchId: string;
+  conflictingBatchName: string;
+  message: string;
+}
+
+/**
+ * Phase 10.5: does a candidate batch's weekly schedule genuinely overlap
+ * with any batch the student is ALREADY actively enrolled in? Reuses the
+ * same time/date-overlap primitives as detectScheduleConflicts, but from
+ * the student's perspective — a student may legitimately be in two batches
+ * (e.g. a Physics batch and a separate Chemistry batch) as long as their
+ * class times don't actually clash on the same day.
+ */
+export async function detectStudentBatchConflicts(
+  coachingCenterId: string,
+  studentId: string,
+  candidateBatchId: string
+): Promise<StudentBatchConflict[]> {
+  const otherActiveBatchIds = (
+    await prisma.studentBatch.findMany({
+      where: { coachingCenterId, studentId, status: 'ACTIVE', batchId: { not: candidateBatchId } },
+      select: { batchId: true },
+    })
+  ).map((sb) => sb.batchId);
+
+  if (otherActiveBatchIds.length === 0) return [];
+
+  const [candidateSchedules, existingSchedules] = await Promise.all([
+    prisma.classSchedule.findMany({
+      where: { coachingCenterId, batchId: candidateBatchId, status: 'ACTIVE' },
+    }),
+    prisma.classSchedule.findMany({
+      where: { coachingCenterId, batchId: { in: otherActiveBatchIds }, status: 'ACTIVE' },
+      include: { batch: { select: { id: true, name: true } } },
+    }),
+  ]);
+
+  if (candidateSchedules.length === 0 || existingSchedules.length === 0) return [];
+
+  const conflicts: StudentBatchConflict[] = [];
+  for (const cand of candidateSchedules) {
+    const candStart = parseTimeToMinutes(cand.startTime);
+    const candEnd = parseTimeToMinutes(cand.endTime);
+    for (const ex of existingSchedules) {
+      if (ex.dayOfWeek !== cand.dayOfWeek) continue;
+      if (!timeRangesOverlap(candStart, candEnd, parseTimeToMinutes(ex.startTime), parseTimeToMinutes(ex.endTime))) continue;
+      if (!dateRangesOverlap(cand.effectiveStartDate, cand.effectiveEndDate, ex.effectiveStartDate, ex.effectiveEndDate)) continue;
+
+      conflicts.push({
+        conflictingBatchId: ex.batch.id,
+        conflictingBatchName: ex.batch.name,
+        message: `Clashes with an existing class in ${ex.batch.name} on ${ex.dayOfWeek} at the same time.`,
+      });
+    }
+  }
+  return conflicts;
+}
+
+export interface StudentTimetableEntry {
+  id: string;
+  dayOfWeek: DayOfWeek;
+  startTime: string;
+  endTime: string;
+  subjectName: string;
+  subjectBanglaName: string | null;
+  batchName: string;
+  teacherName: string | null;
+  roomName: string | null;
+}
+
+/**
+ * Phase 10.5: the student portal's REAL weekly timetable — built from
+ * ClassSchedule for the student's own currently-ACTIVE batch(es), never a
+ * static mock. Respects effective dates (a schedule that hasn't started
+ * yet, or already ended, is excluded) the same way detectScheduleConflicts
+ * and getTodaysClasses do. Grouped by day in the Bangladesh week order
+ * (Saturday-first) by the caller; this returns a flat, time-sorted list.
+ */
+export async function getStudentTimetable(coachingCenterId: string, studentId: string): Promise<StudentTimetableEntry[]> {
+  const activeBatchIds = (
+    await prisma.studentBatch.findMany({
+      where: { coachingCenterId, studentId, status: 'ACTIVE' },
+      select: { batchId: true },
+    })
+  ).map((sb) => sb.batchId);
+
+  if (activeBatchIds.length === 0) return [];
+
+  const today = getCurrentDhakaDateOnly();
+  const schedules = await prisma.classSchedule.findMany({
+    where: { coachingCenterId, batchId: { in: activeBatchIds }, status: 'ACTIVE' },
+    include: {
+      batch: { select: { name: true } },
+      subject: { select: { name: true, banglaName: true } },
+      teacher: { select: { name: true } },
+      room: { select: { name: true } },
+    },
+    orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+  });
+
+  return schedules
+    .filter((s) => isScheduleActiveOnDate(s, today))
+    .map((s) => ({
+      id: s.id,
+      dayOfWeek: s.dayOfWeek,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      subjectName: s.subject.name,
+      subjectBanglaName: s.subject.banglaName,
+      batchName: s.batch.name,
+      teacherName: s.teacher?.name ?? null,
+      roomName: s.room?.name ?? null,
+    }))
+    .sort((a, b) => {
+      const dayDiff = WEEK_ORDER.indexOf(a.dayOfWeek) - WEEK_ORDER.indexOf(b.dayOfWeek);
+      if (dayDiff !== 0) return dayDiff;
+      return parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime);
+    });
 }
 
 export interface ScheduleFilterParams {

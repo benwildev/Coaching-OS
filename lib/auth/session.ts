@@ -1,41 +1,77 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import type { RoleCode } from '@prisma/client';
+import prisma from '@/lib/db';
+import { getStaffSecretKey } from './secret';
+import { staffIdentityInclude, toStaffIdentity, type StaffIdentity } from '@/lib/services/user.service';
 
 export const SESSION_COOKIE_NAME = 'coaching_os_session';
-const SECRET_KEY = new TextEncoder().encode(
-  process.env.AUTH_SECRET || 'coaching-os-bangladesh-production-secret-key-32chars'
-);
 
-export interface SessionUser {
-  userId: string;
-  email: string;
-  phone?: string | null;
-  name: string;
-  banglaName?: string | null;
-  role: RoleCode;
-  coachingCenterId: string;
-  branchId?: string | null;
+/**
+ * Phase 10.4: `SessionUser` IS `StaffIdentity` (lib/services/user.service.ts)
+ * — one definition, so the shape returned by a fresh DB read and the shape
+ * every route/service already imports as `SessionUser` can never drift
+ * apart.
+ */
+export type SessionUser = StaffIdentity;
+
+interface StaffTokenPayload {
+  type: 'staff';
+  sub: string; // userId
+  sessionVersion: number;
+}
+
+function isStaffTokenPayload(payload: unknown): payload is StaffTokenPayload {
+  if (!payload || typeof payload !== 'object') return false;
+  const p = payload as Record<string, unknown>;
+  return p.type === 'staff' && typeof p.sub === 'string' && typeof p.sessionVersion === 'number';
 }
 
 /**
- * Sign a JWT token for a session
+ * Sign a JWT token for a staff session. The token itself only asserts
+ * "this is user <sub>, as of session version <n>" — nothing else about the
+ * account (role, tenant, branch, status) is trusted from the token. Every
+ * verification re-reads all of that from the database (see
+ * `verifySessionToken`), so a role/branch/status change, or a password
+ * change/logout (which bumps sessionVersion), takes effect on the very next
+ * request instead of waiting out the token's 7-day expiry.
  */
-export async function createSessionToken(user: SessionUser): Promise<string> {
-  return new SignJWT({ ...user })
+export async function createSessionToken(user: Pick<SessionUser, 'userId' | 'sessionVersion'>): Promise<string> {
+  const payload: StaffTokenPayload = { type: 'staff', sub: user.userId, sessionVersion: user.sessionVersion };
+  return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
-    .sign(SECRET_KEY);
+    .sign(getStaffSecretKey());
 }
 
 /**
- * Verify a JWT session token
+ * Verify a staff JWT and re-derive the session identity from the database.
+ * Rejects (returns null) when:
+ *  - the signature/expiry is invalid, or it was signed for the portal
+ *    audience instead (different derived key — see lib/auth/secret.ts);
+ *  - the `type` claim is missing/not exactly "staff" (no default-role /
+ *    default-allow fallback for a malformed or foreign token);
+ *  - the user no longer exists, is not ACTIVE, or has no role assignment
+ *    (`toStaffIdentity` already enforces both — default deny, not default
+ *    STAFF as an earlier version of this function did);
+ *  - the token's `sessionVersion` doesn't match the current DB value, i.e.
+ *    the account logged out, changed its password, or was disabled/
+ *    re-enabled since this token was issued.
  */
 export async function verifySessionToken(token: string): Promise<SessionUser | null> {
   try {
-    const { payload } = await jwtVerify(token, SECRET_KEY);
-    return payload as unknown as SessionUser;
+    const { payload } = await jwtVerify(token, getStaffSecretKey());
+    if (!isStaffTokenPayload(payload)) return null;
+
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: staffIdentityInclude,
+    });
+    if (!user) return null;
+    if (user.sessionVersion !== payload.sessionVersion) return null;
+
+    return toStaffIdentity(user);
   } catch {
     return null;
   }
@@ -149,6 +185,9 @@ export function resolveEffectiveBranchId(user: SessionUser, requestedBranchId?: 
  * OWNER/ADMIN/STAFF retain administrative access to everyone's.
  * `ownTeacherId` is the Teacher record linked to the caller's User (or null
  * if the caller has no teacher profile), resolved by the route beforehand.
+ *
+ * Default-deny: any role outside the four known ones falls through to the
+ * final throw rather than silently succeeding.
  */
 export function assertTeacherSelfAccess(
   user: SessionUser,
@@ -162,4 +201,5 @@ export function assertTeacherSelfAccess(
     }
     return;
   }
+  throw new Error('FORBIDDEN');
 }

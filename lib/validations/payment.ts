@@ -13,6 +13,10 @@ export const paymentCreateSchema = z.object({
   bankName: z.string().max(120).optional().or(z.literal('')),
   chequeNumber: z.string().max(60).optional().or(z.literal('')),
   notes: z.string().max(500).optional().or(z.literal('')),
+  // Phase 10.5: optional client-generated key (one per "Pay" attempt,
+  // resent unchanged on retry) so a double-submit/network-retry of the
+  // exact same payment is a no-op instead of a second Payment row.
+  idempotencyKey: z.string().max(100).optional().or(z.literal('')),
 });
 export type PaymentCreateInput = z.infer<typeof paymentCreateSchema>;
 

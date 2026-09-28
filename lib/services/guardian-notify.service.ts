@@ -57,9 +57,14 @@ export async function notifyStudentGuardians(params: {
     sourceId: params.sourceId,
   });
   for (const link of links) {
+    // Phase 10.5: studentId included — this whole function is always about
+    // one specific student, so a guardian with several children (e.g. two
+    // kids in the same exam/batch, giving the same sourceId) must get a
+    // separate notification per child instead of only the first one.
     await notifyPortalAccountsForEvent({
       coachingCenterId: params.coachingCenterId,
       guardianId: link.guardianId,
+      studentId: params.studentId,
       type: params.event,
       title,
       body,

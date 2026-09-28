@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
 import { getRoomById, updateRoom } from '@/lib/services/room.service';
 import { roomUpdateSchema } from '@/lib/validations/room';
 
@@ -7,13 +7,16 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request, props: { params: Promise<{ roomId: string }> }) {
   try {
-    const { coachingCenterId } = await requireTenant();
+    const { coachingCenterId, user } = await requireTenant();
     const { roomId } = await props.params;
     const room = await getRoomById(coachingCenterId, roomId);
     if (!room) return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
+    // Phase 10.5: previously no branch check at all.
+    assertBranchAccess(user, room.branchId);
     return NextResponse.json({ success: true, room });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  } catch (error: any) {
+    const status = error?.message === 'FORBIDDEN_BRANCH' ? 403 : 401;
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
   }
 }
 
@@ -23,6 +26,13 @@ export async function PUT(request: Request, props: { params: Promise<{ roomId: s
     await requireRole(['OWNER', 'ADMIN', 'STAFF']);
 
     const { roomId } = await props.params;
+
+    // Phase 10.5: previously no branch check at all — a branch-locked
+    // STAFF could edit any room in any branch of the tenant.
+    const existing = await getRoomById(coachingCenterId, roomId);
+    if (!existing) return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
+    assertBranchAccess(user, existing.branchId);
+
     const body = await request.json();
     const validated = roomUpdateSchema.safeParse(body);
     if (!validated.success) {
@@ -31,11 +41,15 @@ export async function PUT(request: Request, props: { params: Promise<{ roomId: s
         { status: 400 }
       );
     }
+    if (validated.data.branchId) {
+      assertBranchAccess(user, validated.data.branchId);
+    }
 
     const room = await updateRoom(coachingCenterId, roomId, validated.data, user.userId);
     return NextResponse.json({ success: true, room });
   } catch (error: any) {
     console.error('[API /api/rooms/[roomId] PUT] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update room' }, { status: 400 });
+    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
+    return NextResponse.json({ success: false, error: error.message || 'Failed to update room' }, { status });
   }
 }

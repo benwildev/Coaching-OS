@@ -1,12 +1,16 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
+import { assertBatchHasCapacity } from './batch.service';
+import { detectStudentBatchConflicts } from './schedule.service';
+import { generateInvoiceNumber } from './invoice.service';
+import { generateReceiptNumber } from './payment.service';
 import {
   type AdmissionInput,
   type StudentUpdateInput,
   admissionSchema,
   normalizeBdPhone,
 } from '@/lib/validations/student';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, RoleCode } from '@prisma/client';
 
 export interface StudentFilterParams {
   search?: string;
@@ -34,38 +38,73 @@ export async function generateStudentId(
   centerCode: string,
   academicYear: number
 ): Promise<string> {
-  const sequence = await tx.studentIdSequence.upsert({
+  const shortYear = String(academicYear).slice(-2);
+  const code = (centerCode || 'CO').trim().toUpperCase();
+  const prefix = `${code}-${shortYear}-`;
+
+  let nextSeq = 1;
+  const existingSeq = await tx.studentIdSequence.findUnique({
     where: {
-      coachingCenterId_academicYear: {
-        coachingCenterId,
-        academicYear,
-      },
-    },
-    create: {
-      coachingCenterId,
-      academicYear,
-      currentNumber: 1,
-    },
-    update: {
-      currentNumber: { increment: 1 },
+      coachingCenterId_academicYear: { coachingCenterId, academicYear },
     },
   });
 
-  const shortYear = String(academicYear).slice(-2);
-  const formattedSeq = String(sequence.currentNumber).padStart(5, '0');
-  const code = (centerCode || 'CO').trim().toUpperCase();
+  if (!existingSeq) {
+    const lastStudent = await tx.student.findFirst({
+      where: {
+        coachingCenterId,
+        studentIdCode: { startsWith: prefix },
+      },
+      orderBy: { studentIdCode: 'desc' },
+      select: { studentIdCode: true },
+    });
 
-  return `${code}-${shortYear}-${formattedSeq}`;
+    let currentMax = 0;
+    if (lastStudent?.studentIdCode) {
+      const match = lastStudent.studentIdCode.match(/\d+$/);
+      if (match) currentMax = parseInt(match[0], 10);
+    }
+    nextSeq = currentMax + 1;
+    await tx.studentIdSequence.create({
+      data: {
+        coachingCenterId,
+        academicYear,
+        currentNumber: nextSeq,
+      },
+    });
+  } else {
+    const updated = await tx.studentIdSequence.update({
+      where: { id: existingSeq.id },
+      data: { currentNumber: { increment: 1 } },
+    });
+    nextSeq = updated.currentNumber;
+  }
+
+  let candidateId = `${code}-${shortYear}-${String(nextSeq).padStart(5, '0')}`;
+  while (await tx.student.findFirst({ where: { coachingCenterId, studentIdCode: candidateId } })) {
+    nextSeq += 1;
+    candidateId = `${code}-${shortYear}-${String(nextSeq).padStart(5, '0')}`;
+    await tx.studentIdSequence.update({
+      where: {
+        coachingCenterId_academicYear: { coachingCenterId, academicYear },
+      },
+      data: { currentNumber: nextSeq },
+    });
+  }
+
+  return candidateId;
 }
 
 /**
- * Creates a new student with guardian, enrollment, optional batch, and audit log
- * within a single atomic database transaction.
+ * Creates a new student with guardian, enrollment, optional batch, fee assignment,
+ * discount/waiver handling, invoice generation, initial payment, and audit logging
+ * within an atomic database transaction.
  */
 export async function createStudentAdmission(
   coachingCenterId: string,
   rawInput: AdmissionInput,
-  actorId?: string
+  actorId?: string,
+  actorRole: RoleCode = 'STAFF'
 ) {
   // Validate input
   const input = admissionSchema.parse(rawInput);
@@ -81,25 +120,7 @@ export async function createStudentAdmission(
       throw new Error('TENANT_NOT_FOUND');
     }
 
-    // 2. Fetch academic session to get current year
-    const session = await tx.academicSession.findFirst({
-      where: { id: input.academicSessionId, coachingCenterId },
-      select: { id: true, startDate: true },
-    });
-
-    const admissionYear = session?.startDate
-      ? new Date(session.startDate).getFullYear()
-      : new Date().getFullYear();
-
-    // 3. Generate sequential human-readable Student ID
-    const studentIdCode = await generateStudentId(
-      tx,
-      coachingCenterId,
-      center.code,
-      admissionYear
-    );
-
-    // 4. Verify branch exists and belongs to this tenant
+    // 2. Verify branch exists and belongs to this tenant
     const branch = await tx.branch.findFirst({
       where: { id: input.branchId, coachingCenterId },
     });
@@ -108,7 +129,103 @@ export async function createStudentAdmission(
       throw new Error('BRANCH_NOT_FOUND');
     }
 
-    // 5. Create Student record
+    // 3. Verify academic hierarchy belongs to this tenant and matches structure
+    const session = await tx.academicSession.findFirst({
+      where: { id: input.academicSessionId, coachingCenterId },
+      select: { id: true, startDate: true },
+    });
+    if (!session) {
+      throw new Error('SESSION_NOT_FOUND: Academic session does not exist in this coaching center');
+    }
+
+    const program = await tx.academicProgram.findFirst({
+      where: { id: input.academicProgramId, coachingCenterId },
+    });
+    if (!program) {
+      throw new Error('PROGRAM_NOT_FOUND: Academic program does not exist in this coaching center');
+    }
+
+    const cls = await tx.academicClass.findFirst({
+      where: { id: input.academicClassId, coachingCenterId, academicProgramId: input.academicProgramId },
+    });
+    if (!cls) {
+      throw new Error('CLASS_NOT_FOUND: Class does not belong to the selected academic program');
+    }
+
+    if (input.academicGroupId) {
+      const grp = await tx.academicGroup.findFirst({
+        where: { id: input.academicGroupId, coachingCenterId, academicClassId: input.academicClassId },
+      });
+      if (!grp) {
+        throw new Error('GROUP_NOT_FOUND: Group does not belong to the selected academic class');
+      }
+    }
+
+    if (input.courseId) {
+      const crs = await tx.course.findFirst({
+        where: {
+          id: input.courseId,
+          coachingCenterId,
+          academicProgramId: input.academicProgramId,
+          academicClassId: input.academicClassId,
+          status: 'ACTIVE',
+        },
+      });
+      if (!crs) {
+        throw new Error('COURSE_NOT_FOUND: Course is either inactive or does not match the selected program/class');
+      }
+    }
+
+    // 4. Duplicate checks (prevent duplicate active enrollment / duplicate identity)
+    if (input.phone) {
+      const normStudentPhone = normalizeBdPhone(input.phone);
+      const duplicateEnrollment = await tx.studentEnrollment.findFirst({
+        where: {
+          coachingCenterId,
+          academicSessionId: input.academicSessionId,
+          academicProgramId: input.academicProgramId,
+          academicClassId: input.academicClassId,
+          status: 'ENROLLED',
+          student: { phone: normStudentPhone, status: 'ACTIVE' },
+        },
+        include: { student: { select: { id: true, name: true, studentIdCode: true } } },
+      });
+
+      if (duplicateEnrollment) {
+        throw new Error(
+          `DUPLICATE_ENROLLMENT: Student ${duplicateEnrollment.student.name} (${duplicateEnrollment.student.studentIdCode}) with phone ${input.phone} is already actively enrolled in this class for this session.`
+        );
+      }
+    }
+
+    if (input.nidBirthReg && input.nidBirthReg.trim()) {
+      const duplicateNid = await tx.student.findFirst({
+        where: {
+          coachingCenterId,
+          nidBirthReg: input.nidBirthReg.trim(),
+        },
+        select: { id: true, name: true, studentIdCode: true },
+      });
+      if (duplicateNid) {
+        throw new Error(
+          `DUPLICATE_STUDENT: A student with NID/Birth Reg ${input.nidBirthReg} (${duplicateNid.name}, ID: ${duplicateNid.studentIdCode}) already exists.`
+        );
+      }
+    }
+
+    const admissionYear = session.startDate
+      ? new Date(session.startDate).getFullYear()
+      : new Date().getFullYear();
+
+    // 5. Generate sequential human-readable Student ID
+    const studentIdCode = await generateStudentId(
+      tx,
+      coachingCenterId,
+      center.code,
+      admissionYear
+    );
+
+    // 6. Create Student record
     const student = await tx.student.create({
       data: {
         coachingCenterId,
@@ -135,53 +252,77 @@ export async function createStudentAdmission(
       },
     });
 
-    // 6. Create Primary Guardian record
-    const primaryPhone = normalizeBdPhone(input.guardianPhone);
-    const primaryGuardian = await tx.guardian.create({
-      data: {
-        coachingCenterId,
-        name: input.guardianName.trim(),
-        banglaName: input.guardianBanglaName?.trim() || null,
-        relationship: input.guardianRelationship,
-        phone: primaryPhone,
-        altPhone: input.guardianAltPhone ? normalizeBdPhone(input.guardianAltPhone) : null,
-        whatsapp: input.guardianWhatsapp ? normalizeBdPhone(input.guardianWhatsapp) : null,
-        email: input.guardianEmail?.trim() || null,
-        occupation: input.guardianOccupation?.trim() || null,
-        address: input.guardianAddress?.trim() || null,
-        isPrimary: true,
-        isEmergency: true,
-        preferredChannel: input.preferredChannel || 'SMS',
-      },
-    });
+    // 7. Guardian Handling (link existing guardian or create new)
+    let primaryGuardian;
+    if (input.guardianId) {
+      primaryGuardian = await tx.guardian.findFirst({
+        where: { id: input.guardianId, coachingCenterId },
+      });
+      if (!primaryGuardian) {
+        throw new Error('GUARDIAN_NOT_FOUND: The selected guardian was not found in this coaching center');
+      }
+    } else {
+      const primaryPhone = normalizeBdPhone(input.guardianPhone);
+      const existingGuardian = await tx.guardian.findFirst({
+        where: { coachingCenterId, phone: primaryPhone },
+      });
+
+      if (existingGuardian) {
+        primaryGuardian = existingGuardian;
+      } else {
+        primaryGuardian = await tx.guardian.create({
+          data: {
+            coachingCenterId,
+            name: input.guardianName?.trim() || 'Guardian',
+            banglaName: input.guardianBanglaName?.trim() || null,
+            relationship: input.guardianRelationship || 'FATHER',
+            phone: primaryPhone,
+            altPhone: input.guardianAltPhone ? normalizeBdPhone(input.guardianAltPhone) : null,
+            whatsapp: input.guardianWhatsapp ? normalizeBdPhone(input.guardianWhatsapp) : null,
+            email: input.guardianEmail?.trim() || null,
+            occupation: input.guardianOccupation?.trim() || null,
+            address: input.guardianAddress?.trim() || null,
+            isPrimary: true,
+            isEmergency: true,
+            preferredChannel: input.preferredChannel || 'SMS',
+          },
+        });
+      }
+    }
 
     // Link Primary Guardian to Student
     await tx.studentGuardian.create({
       data: {
         studentId: student.id,
         guardianId: primaryGuardian.id,
-        relationship: input.guardianRelationship,
+        relationship: input.guardianRelationship || primaryGuardian.relationship,
         isPrimary: true,
         isEmergencyContact: true,
         canReceiveNotifications: true,
-        preferredChannel: input.preferredChannel || 'SMS',
+        preferredChannel: input.preferredChannel || primaryGuardian.preferredChannel || 'SMS',
       },
     });
 
-    // 7. Handle Secondary Guardian if provided
-    if (input.hasSecondaryGuardian && input.secondaryName && input.secondaryPhone) {
+    // 8. Handle Secondary Guardian if provided
+    if (input.hasSecondaryGuardian && input.secondaryPhone) {
       const secPhone = normalizeBdPhone(input.secondaryPhone);
-      const secondaryGuardian = await tx.guardian.create({
-        data: {
-          coachingCenterId,
-          name: input.secondaryName.trim(),
-          relationship: input.secondaryRelationship || 'OTHER',
-          phone: secPhone,
-          isPrimary: false,
-          isEmergency: false,
-          preferredChannel: 'SMS',
-        },
+      let secondaryGuardian = await tx.guardian.findFirst({
+        where: { coachingCenterId, phone: secPhone },
       });
+
+      if (!secondaryGuardian) {
+        secondaryGuardian = await tx.guardian.create({
+          data: {
+            coachingCenterId,
+            name: input.secondaryName?.trim() || 'Secondary Guardian',
+            relationship: input.secondaryRelationship || 'OTHER',
+            phone: secPhone,
+            isPrimary: false,
+            isEmergency: false,
+            preferredChannel: 'SMS',
+          },
+        });
+      }
 
       await tx.studentGuardian.create({
         data: {
@@ -196,7 +337,7 @@ export async function createStudentAdmission(
       });
     }
 
-    // 8. Create Academic Enrollment record
+    // 9. Create Academic Enrollment record
     const enrollment = await tx.studentEnrollment.create({
       data: {
         coachingCenterId,
@@ -215,25 +356,306 @@ export async function createStudentAdmission(
       },
     });
 
-    // 9. Assign Batch if selected
+    // 10. Assign Batch if selected
+    let assignedBatch = null;
     if (input.batchId) {
       const batch = await tx.batch.findFirst({
         where: { id: input.batchId, coachingCenterId },
       });
-      if (batch) {
-        await tx.studentBatch.create({
-          data: {
-            coachingCenterId,
-            studentId: student.id,
-            batchId: batch.id,
-            joinedAt: new Date(),
-            status: 'ACTIVE',
+      if (!batch) {
+        throw new Error('BATCH_NOT_FOUND: The requested batch was not found');
+      }
+      if (batch.branchId !== input.branchId) {
+        throw new Error('CROSS_BRANCH_BATCH: Selected batch belongs to a different branch');
+      }
+      if (
+        batch.academicSessionId !== input.academicSessionId ||
+        batch.academicProgramId !== input.academicProgramId ||
+        batch.academicClassId !== input.academicClassId
+      ) {
+        throw new Error('INCOMPATIBLE_BATCH: Selected batch does not match the academic program/class');
+      }
+      if (batch.status === 'COMPLETED' || batch.status === 'CANCELLED') {
+        throw new Error(`BATCH_INACTIVE: Cannot assign student to a ${batch.status.toLowerCase()} batch`);
+      }
+
+      // Schedule conflict detection
+      if (!input.overrideConflict) {
+        const conflicts = await detectStudentBatchConflicts(coachingCenterId, student.id, batch.id);
+        if (conflicts.length > 0) {
+          throw new Error(`SCHEDULE_CONFLICT: ${conflicts[0].message}`);
+        }
+      }
+
+      // Concurrency-safe capacity enforcement using PostgreSQL advisory lock
+      await assertBatchHasCapacity(tx, batch.id, batch.capacity, input.overrideCapacity);
+
+      await tx.studentBatch.create({
+        data: {
+          coachingCenterId,
+          studentId: student.id,
+          batchId: batch.id,
+          joinedAt: new Date(),
+          status: 'ACTIVE',
+        },
+      });
+      assignedBatch = batch;
+    }
+
+    // 11. Fee Assignment & Invoice (if requested)
+    let feeAssignment = null;
+    let invoice = null;
+    let isDiscountPending = false;
+
+    const hasFeeAssignment = Boolean(input.feeStructureId || (input.feeAmount !== undefined && input.feeAmount > 0));
+
+    if (hasFeeAssignment) {
+      let originalAmount = 0;
+      let feeName = 'Admission Fee';
+      let feeStructureId: string | null = null;
+
+      if (input.feeStructureId) {
+        const fs = await tx.feeStructure.findFirst({
+          where: { id: input.feeStructureId, coachingCenterId, isActive: true },
+        });
+        if (!fs) {
+          throw new Error('FEE_STRUCTURE_NOT_FOUND: Fee structure does not exist or is inactive');
+        }
+        if (fs.branchId && fs.branchId !== input.branchId) {
+          throw new Error('CROSS_BRANCH_FEE_STRUCTURE: Fee structure belongs to another branch');
+        }
+        if (fs.academicClassId && fs.academicClassId !== input.academicClassId) {
+          throw new Error('INCOMPATIBLE_FEE_STRUCTURE: Fee structure does not match student class');
+        }
+        if (fs.courseId && input.courseId && fs.courseId !== input.courseId) {
+          throw new Error('INCOMPATIBLE_FEE_STRUCTURE: Fee structure does not match selected course');
+        }
+        originalAmount = input.feeAmount !== undefined ? input.feeAmount : Number(fs.amount);
+        feeName = input.feeName?.trim() || fs.name;
+        feeStructureId = fs.id;
+      } else {
+        originalAmount = input.feeAmount!;
+        feeName = input.feeName?.trim() || 'Admission Fee';
+      }
+
+      const reqDiscount = Math.max(0, input.discountAmount || 0);
+      const reqWaiver = Math.max(0, input.waiverAmount || 0);
+
+      if (reqDiscount + reqWaiver > originalAmount) {
+        throw new Error('INVALID_DISCOUNT: Discount and waiver combined cannot exceed original fee amount');
+      }
+
+      // Discount & Waiver Authorization (OWNER vs Non-OWNER)
+      const isOwner = actorRole === 'OWNER';
+      let appliedDiscount = 0;
+      let appliedWaiver = 0;
+      let finalAmount = originalAmount;
+
+      if (isOwner) {
+        appliedDiscount = reqDiscount;
+        appliedWaiver = reqWaiver;
+        finalAmount = Math.max(0, originalAmount - appliedDiscount - appliedWaiver);
+      } else if (reqDiscount > 0 || reqWaiver > 0) {
+        // Staff/Admin cannot silently apply discounts — obligation remains at originalAmount
+        isDiscountPending = true;
+        finalAmount = originalAmount;
+      }
+
+      feeAssignment = await tx.studentFeeAssignment.create({
+        data: {
+          coachingCenterId,
+          branchId: input.branchId,
+          studentId: student.id,
+          feeStructureId,
+          batchId: input.batchId || null,
+          academicSessionId: input.academicSessionId,
+          name: feeName,
+          description: input.remarks || null,
+          originalAmount,
+          discountAmount: appliedDiscount,
+          waiverAmount: appliedWaiver,
+          finalAmount,
+          dueDate: input.feeDueDate ? new Date(input.feeDueDate) : null,
+          status: 'PENDING',
+          createdById: actorId,
+        },
+      });
+
+      // Record discount/waiver history
+      if (isOwner) {
+        if (appliedDiscount > 0) {
+          await tx.feeDiscount.create({
+            data: {
+              coachingCenterId,
+              studentFeeAssignmentId: feeAssignment.id,
+              type: 'DISCOUNT',
+              amount: appliedDiscount,
+              reason: input.discountReason?.trim() || 'Approved by Owner at admission',
+              createdById: actorId,
+            },
+          });
+        }
+        if (appliedWaiver > 0) {
+          await tx.feeDiscount.create({
+            data: {
+              coachingCenterId,
+              studentFeeAssignmentId: feeAssignment.id,
+              type: 'WAIVER',
+              amount: appliedWaiver,
+              reason: input.discountReason?.trim() || 'Approved by Owner at admission',
+              createdById: actorId,
+            },
+          });
+        }
+      } else if (isDiscountPending) {
+        if (reqDiscount > 0) {
+          await tx.feeDiscount.create({
+            data: {
+              coachingCenterId,
+              studentFeeAssignmentId: feeAssignment.id,
+              type: 'DISCOUNT',
+              amount: reqDiscount,
+              reason: `[PENDING_APPROVAL: Requested by Staff] ${input.discountReason?.trim() || 'Admission discount request'}`,
+              createdById: actorId,
+            },
+          });
+        }
+        if (reqWaiver > 0) {
+          await tx.feeDiscount.create({
+            data: {
+              coachingCenterId,
+              studentFeeAssignmentId: feeAssignment.id,
+              type: 'WAIVER',
+              amount: reqWaiver,
+              reason: `[PENDING_APPROVAL: Requested by Staff] ${input.discountReason?.trim() || 'Admission waiver request'}`,
+              createdById: actorId,
+            },
+          });
+        }
+      }
+
+      // Generate Invoice
+      const invoiceNumber = await generateInvoiceNumber(tx, coachingCenterId);
+      const invoiceNotes = isDiscountPending
+        ? `[PENDING_APPROVAL] Discount request of ৳${reqDiscount} submitted by staff. Pending Owner approval.`
+        : input.remarks?.trim() || null;
+
+      invoice = await tx.feeInvoice.create({
+        data: {
+          coachingCenterId,
+          branchId: input.branchId,
+          studentId: student.id,
+          invoiceNumber,
+          invoiceDate: input.admissionDate ? new Date(input.admissionDate) : new Date(),
+          dueDate: input.feeDueDate ? new Date(input.feeDueDate) : null,
+          subtotalAmount: originalAmount,
+          discountAmount: appliedDiscount,
+          waiverAmount: appliedWaiver,
+          totalAmount: finalAmount,
+          paidAmount: 0,
+          dueAmount: finalAmount,
+          status: finalAmount <= 0 ? 'PAID' : 'ISSUED',
+          notes: invoiceNotes,
+          createdById: actorId,
+          items: {
+            create: [
+              {
+                studentFeeAssignmentId: feeAssignment.id,
+                description: feeName,
+                quantity: 1,
+                unitAmount: originalAmount,
+                discountAmount: appliedDiscount,
+                amount: finalAmount,
+                displayOrder: 0,
+              },
+            ],
           },
+        },
+        include: { items: true },
+      });
+    }
+
+    // 12. Initial Payment (if provided)
+    let payment = null;
+    let receiptNumber = null;
+
+    if (input.initialPayment && input.initialPayment.amount > 0) {
+      if (!invoice) {
+        throw new Error('PAYMENT_ERROR: Cannot record payment without an invoice');
+      }
+
+      const payAmount = input.initialPayment.amount;
+      if (payAmount > Number(invoice.dueAmount)) {
+        throw new Error('OVERPAYMENT: Payment amount cannot exceed the invoice payable amount');
+      }
+
+      const method = input.initialPayment.paymentMethod;
+      const txId = input.initialPayment.transactionId?.trim() || null;
+      const idempotencyKey = input.initialPayment.idempotencyKey?.trim() || null;
+
+      if (idempotencyKey) {
+        const existingPayment = await tx.payment.findFirst({
+          where: { coachingCenterId, idempotencyKey },
+        });
+        if (existingPayment) {
+          throw new Error('IDEMPOTENT_RETRY: Payment with this idempotency key has already been recorded');
+        }
+      }
+
+      if (method !== 'CASH' && method !== 'OTHER' && txId) {
+        const dupTx = await tx.payment.findFirst({
+          where: { coachingCenterId, paymentMethod: method, transactionId: txId },
+        });
+        if (dupTx) {
+          throw new Error(`DUPLICATE_TRANSACTION: Transaction ID ${txId} has already been recorded for ${method}`);
+        }
+      }
+
+      receiptNumber = await generateReceiptNumber(tx, coachingCenterId);
+
+      payment = await tx.payment.create({
+        data: {
+          coachingCenterId,
+          branchId: input.branchId,
+          studentId: student.id,
+          invoiceId: invoice.id,
+          receiptNumber,
+          amount: payAmount,
+          paymentMethod: method,
+          transactionId: txId,
+          referenceNumber: input.initialPayment.referenceNumber?.trim() || null,
+          senderMobile: input.initialPayment.senderMobile?.trim() || null,
+          bankName: input.initialPayment.bankName?.trim() || null,
+          chequeNumber: input.initialPayment.chequeNumber?.trim() || null,
+          paymentDate: new Date(),
+          notes: input.initialPayment.notes?.trim() || null,
+          status: 'COMPLETED',
+          collectedById: actorId,
+          idempotencyKey,
+        },
+      });
+
+      const remainingDue = Math.max(0, Number(invoice.dueAmount) - payAmount);
+      const newStatus = remainingDue <= 0 ? 'PAID' : 'PARTIAL';
+
+      invoice = await tx.feeInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          paidAmount: payAmount,
+          dueAmount: remainingDue,
+          status: newStatus,
+        },
+      });
+
+      if (feeAssignment) {
+        await tx.studentFeeAssignment.update({
+          where: { id: feeAssignment.id },
+          data: { status: newStatus },
         });
       }
     }
 
-    // 10. Record Audit Log
+    // 13. Record Audit Logs
     await recordAuditLog({
       coachingCenterId,
       userId: actorId,
@@ -245,13 +667,67 @@ export async function createStudentAdmission(
         name: student.name,
         branchId: input.branchId,
         enrollmentId: enrollment.id,
+        guardianId: primaryGuardian.id,
+        batchId: assignedBatch?.id || null,
       },
     });
+
+    if (feeAssignment) {
+      await recordAuditLog({
+        coachingCenterId,
+        userId: actorId,
+        action: 'STUDENT_FEE_ASSIGNED',
+        entity: 'StudentFeeAssignment',
+        entityId: feeAssignment.id,
+        details: {
+          studentId: student.id,
+          name: feeAssignment.name,
+          finalAmount: Number(feeAssignment.finalAmount),
+        },
+      });
+    }
+
+    if (isDiscountPending) {
+      await recordAuditLog({
+        coachingCenterId,
+        userId: actorId,
+        action: 'DISCOUNT_REQUESTED',
+        entity: 'FeeDiscount',
+        entityId: feeAssignment?.id || student.id,
+        details: {
+          studentId: student.id,
+          discountAmount: input.discountAmount,
+          waiverAmount: input.waiverAmount,
+          status: 'PENDING_APPROVAL',
+        },
+      });
+    }
+
+    if (payment) {
+      await recordAuditLog({
+        coachingCenterId,
+        userId: actorId,
+        action: 'PAYMENT_CREATED',
+        entity: 'Payment',
+        entityId: payment.id,
+        details: {
+          receiptNumber: payment.receiptNumber,
+          amount: Number(payment.amount),
+          paymentMethod: payment.paymentMethod,
+        },
+      });
+    }
 
     return {
       ...student,
       enrollment,
       primaryGuardian,
+      batch: assignedBatch,
+      feeAssignment,
+      invoice,
+      payment,
+      receiptNumber,
+      isDiscountPending,
     };
   }, {
     maxWait: 10000,
@@ -598,6 +1074,13 @@ export async function updateStudent(
       });
 
       if (ne.batchId) {
+        // Phase 10.5: this path previously skipped capacity enforcement
+        // entirely — a full batch could always be over-filled by
+        // re-enrolling a student here.
+        const targetBatch = await tx.batch.findFirst({ where: { id: ne.batchId, coachingCenterId }, select: { capacity: true } });
+        if (targetBatch) {
+          await assertBatchHasCapacity(tx, ne.batchId, targetBatch.capacity);
+        }
         // Mark old active batches as TRANSFERRED or keep active
         await tx.studentBatch.create({
           data: {
@@ -633,7 +1116,7 @@ export async function updateStudent(
  * for building dynamic, dependent form selections.
  */
 export async function getAcademicHierarchyOptions(coachingCenterId: string) {
-  const [sessions, branches, programs, courses, batches, boards] = await Promise.all([
+  const [sessions, branches, programs, courses, batches, boards, feeStructures] = await Promise.all([
     prisma.academicSession.findMany({
       where: { coachingCenterId, status: 'ACTIVE' },
       orderBy: { startDate: 'desc' },
@@ -673,23 +1156,52 @@ export async function getAcademicHierarchyOptions(coachingCenterId: string) {
     }),
     prisma.batch.findMany({
       where: { coachingCenterId, status: 'ACTIVE' },
-      select: {
-        id: true,
-        name: true,
-        banglaName: true,
-        code: true,
-        branchId: true,
-        academicSessionId: true,
-        academicProgramId: true,
-        academicClassId: true,
-        academicGroupId: true,
-        courseId: true,
-        capacity: true,
+      include: {
+        _count: {
+          select: {
+            studentBatches: { where: { status: 'ACTIVE' } },
+          },
+        },
+        classSchedules: {
+          where: { status: 'ACTIVE' },
+          select: {
+            id: true,
+            dayOfWeek: true,
+            startTime: true,
+            endTime: true,
+            room: { select: { id: true, name: true, code: true } },
+          },
+        },
+        batchTeacherAssignments: {
+          select: {
+            teacher: { select: { id: true, name: true, banglaName: true } },
+            subject: { select: { id: true, name: true, banglaName: true } },
+          },
+        },
       },
     }),
     prisma.educationBoard.findMany({
       orderBy: { name: 'asc' },
       select: { id: true, name: true, banglaName: true, code: true },
+    }),
+    prisma.feeStructure.findMany({
+      where: { coachingCenterId, isActive: true },
+      orderBy: { amount: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        banglaName: true,
+        code: true,
+        feeType: true,
+        amount: true,
+        frequency: true,
+        dueDay: true,
+        lateFee: true,
+        branchId: true,
+        academicSessionId: true,
+        academicClassId: true,
+        courseId: true,
+      },
     }),
   ]);
 
@@ -698,7 +1210,12 @@ export async function getAcademicHierarchyOptions(coachingCenterId: string) {
     branches,
     programs,
     courses,
-    batches,
+    batches: batches.map((b) => ({
+      ...b,
+      enrolledCount: b._count.studentBatches,
+      availableSeats: Math.max(0, b.capacity - b._count.studentBatches),
+    })),
     boards,
+    feeStructures,
   };
 }

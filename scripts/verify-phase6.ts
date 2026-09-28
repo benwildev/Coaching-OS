@@ -15,6 +15,20 @@ import {
   verifyAndPublishExam,
   getStudentResultHistory,
 } from '../lib/services/exam-result.service';
+import { completeInitialSetup } from '../lib/services/tenant.service';
+
+// Phase 10.5: this used to run its DB-dependent tests (Test 3 onward)
+// against whatever REAL coaching center happened to be first in the
+// database (`coachingCenter.findFirst()`), creating temporary
+// subjects/students/exams inside it and audit-logging actions under the
+// real owner's actorId. If the process was killed mid-run (as has
+// happened with other verify scripts under a `timeout` wrapper, which
+// sends SIGTERM and skips `finally`), leftover fake records could be left
+// mixed into real production data. Refactored to bootstrap its own
+// throwaway tenant via completeInitialSetup(), matching every other
+// verify-phaseN script, and clean it up with a single cascading
+// coachingCenter delete.
+const TAG = `P6VERIFY-${Date.now()}`;
 
 async function runVerification() {
   console.log('========================================================');
@@ -79,41 +93,39 @@ async function runVerification() {
   }
   console.log('✔ Competition ranking passed: Ties handled deterministically (1, 2, 2, 4)');
 
-  // 3. Find test tenant context in DB
-  console.log('\n--- Test 3: Locate active Coaching Center context ---');
-  const center = await prisma.coachingCenter.findFirst({
-    include: {
-      branches: true,
-      academicSessions: { where: { status: 'ACTIVE' } },
-      academicPrograms: {
-        include: {
-          classes: true,
-        },
-      },
-      users: { take: 1 },
-    },
-  });
+  // 3. Bootstrap a throwaway Coaching Center context (never touch production data)
+  console.log('\n--- Test 3: Bootstrap a throwaway Coaching Center context ---');
+  const code = `P6V${Date.now().toString().slice(-8)}`;
+  const setup = await completeInitialSetup({
+    centerName: `${TAG} Centre`,
+    centerCode: code,
+    centerPhone: '01700000000',
+    centerCity: 'Dhaka',
+    centerDistrict: 'Dhaka',
+    ownerName: `${TAG} Owner`,
+    ownerEmail: `${code.toLowerCase()}-owner@verify.local`,
+    ownerPhone: `019${Date.now().toString().slice(-8)}`,
+    ownerPassword: 'CorrectHorse9',
+    branchName: 'Main Campus',
+    branchCode: 'MAIN',
+    sessionName: '2026',
+    sessionStartDate: '2026-01-01',
+    sessionEndDate: '2026-12-31',
+    selectedPrograms: ['SSC'],
+    primaryColor: '#063B78',
+    accentColor: '#FFD200',
+  } as Parameters<typeof completeInitialSetup>[0]);
 
-  if (!center) {
-    console.log('⚠ No coaching center found in database. Skipping DB-dependent tests.');
-    return;
-  }
+  const coachingCenterId = setup.center.id;
+  const session = await prisma.academicSession.findFirstOrThrow({ where: { coachingCenterId } });
+  const program = await prisma.academicProgram.findFirstOrThrow({ where: { coachingCenterId } });
+  const academicClass = await prisma.academicClass.findFirstOrThrow({ where: { coachingCenterId, academicProgramId: program.id } });
+  const adminUser = setup.owner;
 
-  const session = center.academicSessions[0];
-  const program = center.academicPrograms[0];
-  const academicClass = program?.classes[0];
-  const adminUser = center.users[0];
-
-  if (!session || !program || !academicClass || !adminUser) {
-    console.log('⚠ Insufficient academic session/program/class. Skipping DB tests.');
-    return;
-  }
-
-  const coachingCenterId = center.id;
-  const branchId = center.branches[0]?.id;
+  const branchId = setup.branch.id;
   const actorId = adminUser.id;
 
-  console.log(`✔ Found Tenant: ${center.name} (${center.id})`);
+  console.log(`✔ Created throwaway Tenant: ${setup.center.name} (${coachingCenterId})`);
   console.log(`✔ Session: ${session.name}, Class: ${academicClass.name}`);
 
   let testSubject1Id: string | null = null;
@@ -283,10 +295,13 @@ async function runVerification() {
     const sessionUser = {
       userId: actorId,
       email: adminUser.email,
+      phone: null,
       name: adminUser.name,
+      banglaName: null,
       role: 'OWNER' as const,
       coachingCenterId,
       branchId,
+      sessionVersion: 0,
     };
 
     // Reject marks > totalMarks
@@ -372,38 +387,12 @@ async function runVerification() {
       `✔ Published exam visible in student portal: Total Marks=${thisExam.overall.totalObtainedMarks}/${thisExam.overall.totalPossibleMarks}, Passed=${thisExam.overall.isPassed}`
     );
   } finally {
-    // Cleanup temporary test entities cleanly
-    console.log('\n--- Cleaning up temporary test examination records ---');
-    if (testExamId) {
-      await prisma.result.deleteMany({
-        where: { examSubject: { examId: testExamId } },
-      });
-      await prisma.examSubject.deleteMany({
-        where: { examId: testExamId },
-      });
-      await prisma.examStudent.deleteMany({
-        where: { examId: testExamId },
-      });
-      await prisma.auditLog.deleteMany({
-        where: { entity: 'Exam', entityId: testExamId },
-      });
-      await prisma.exam.deleteMany({
-        where: { id: testExamId },
-      });
-      console.log('✔ Test examination and associated results/audits removed.');
-    }
-    if (testStudentId) {
-      await prisma.student.deleteMany({
-        where: { id: testStudentId },
-      });
-      console.log('✔ Temporary test student removed.');
-    }
-    if (testSubject1Id || testSubject2Id) {
-      await prisma.subject.deleteMany({
-        where: { id: { in: [testSubject1Id, testSubject2Id].filter(Boolean) as string[] } },
-      });
-      console.log('✔ Temporary test subjects removed.');
-    }
+    // Cleanup: remove the entire throwaway tenant (cascades subjects,
+    // students, exams, results, audit logs, roles, users). Never touches
+    // production data since this tenant only ever existed for this run.
+    console.log('\n--- Cleaning up throwaway Coaching Center ---');
+    await prisma.coachingCenter.deleteMany({ where: { id: coachingCenterId } });
+    console.log('✔ Throwaway tenant and all its test data removed.');
   }
 
   console.log('\n========================================================');

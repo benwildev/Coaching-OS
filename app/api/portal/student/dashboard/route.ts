@@ -33,11 +33,33 @@ export async function GET() {
 
     const recentResults = results.slice(0, 5);
 
+    // Phase 10.5: a real "next due" figure (was previously a hardcoded
+    // "Paid through September / Next due 10 Oct" on the client) — the
+    // unpaid invoice with the earliest due date, or null if there isn't one.
+    const nextDue = fees
+      ? fees.invoices
+          .filter((i) => i.status !== 'CANCELLED' && i.status !== 'DRAFT' && Number(i.dueAmount) > 0)
+          .sort((a, b) => {
+            const ad = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+            const bd = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+            return ad - bd;
+          })[0] ?? null
+      : null;
+
     return NextResponse.json({
       success: true,
       student,
-      attendance: { percentage: attendance.percentage, present: attendance.present, late: attendance.late, absent: attendance.absent, excused: attendance.excused, total: attendance.total },
+      attendance: {
+        percentage: attendance.percentage,
+        present: attendance.present,
+        late: attendance.late,
+        absent: attendance.absent,
+        excused: attendance.excused,
+        total: attendance.total,
+        recent: attendance.recent.slice(0, 8),
+      },
       fees: fees ? fees.summary : null,
+      nextDue: nextDue ? { dueDate: nextDue.dueDate, dueAmount: nextDue.dueAmount, invoiceNumber: nextDue.invoiceNumber } : null,
       upcomingExams,
       recentResults,
       notices: notices.notices,

@@ -635,9 +635,14 @@ export default function StudentDetailPage() {
                     {lang === 'bn' ? 'শিক্ষার্থীর ছবি' : 'Student Photo'}
                   </span>
                 </div>
-                <span className="text-[11px] text-[#64748b] font-medium">
-                  {student.photoUrl ? 'Attached' : (lang === 'bn' ? 'সংযুক্ত নেই' : 'Not attached')}
-                </span>
+                {student.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={student.photoUrl} alt="Student" className="w-9 h-9 rounded-full object-cover border border-[#dce5f0]" />
+                ) : (
+                  <span className="text-[11px] text-[#64748b] font-medium">
+                    {lang === 'bn' ? 'সংযুক্ত নেই' : 'Not attached'}
+                  </span>
+                )}
               </div>
 
               <div className="p-3 rounded-xl border border-[#dce5f0] bg-[#f8fafc] flex items-center justify-between">

@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
+import { detectStudentBatchConflicts } from './schedule.service';
 import type {
   BatchInput,
   BatchUpdateInput,
@@ -144,6 +145,34 @@ export async function getBatchById(coachingCenterId: string, batchId: string) {
 /** Active enrollment count for a batch, computed live (never stored). */
 export async function getBatchActiveStudentCount(batchId: string): Promise<number> {
   return prisma.studentBatch.count({ where: { batchId, status: 'ACTIVE' } });
+}
+
+/**
+ * Phase 10.5: transaction-safe capacity enforcement, callable from inside
+ * ANY existing `$transaction` that is about to insert a new ACTIVE
+ * StudentBatch row (assignStudentToBatch, admission, re-enrollment). A
+ * Postgres advisory lock keyed by the batch id serializes concurrent
+ * assignment attempts for that SAME batch for the rest of the transaction,
+ * so two simultaneous "29/30 full" requests can no longer both read
+ * "still room" and both insert — the second call's capacity check runs
+ * only after the first has committed or rolled back.
+ *
+ * (Duplicate-active-membership for the same student is a separate,
+ * already-closed race — see the partial unique index on StudentBatch in
+ * the Phase 10.5 migration.)
+ */
+export async function assertBatchHasCapacity(
+  tx: Prisma.TransactionClient,
+  batchId: string,
+  capacity: number,
+  overrideCapacity?: boolean
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${batchId})::bigint)`;
+  if (overrideCapacity) return;
+  const activeCount = await tx.studentBatch.count({ where: { batchId, status: 'ACTIVE' } });
+  if (activeCount >= capacity) {
+    throw new Error('BATCH_FULL: This batch is full. Enable override to exceed capacity.');
+  }
 }
 
 export async function createBatch(coachingCenterId: string, input: BatchInput, actorId?: string) {
@@ -318,29 +347,57 @@ export async function assignStudentToBatch(
   const student = await prisma.student.findFirst({ where: { id: input.studentId, coachingCenterId } });
   if (!student) throw new Error('STUDENT_NOT_FOUND');
 
-  const alreadyActive = await prisma.studentBatch.findFirst({
-    where: { studentId: input.studentId, batchId, status: 'ACTIVE' },
-  });
-  if (alreadyActive) throw new Error('Student is already actively assigned to this batch');
-
-  if (!input.overrideCapacity) {
-    const activeCount = await getBatchActiveStudentCount(batchId);
-    if (activeCount >= batch.capacity) {
-      throw new Error('BATCH_FULL');
+  // Phase 10.5: reject a genuine class-time clash with one of the
+  // student's other active batches, unless explicitly overridden — a
+  // student attending two batches whose schedules don't actually overlap
+  // (e.g. Physics + Chemistry on different days) is always allowed.
+  if (!input.overrideConflict) {
+    const conflicts = await detectStudentBatchConflicts(coachingCenterId, input.studentId, batchId);
+    if (conflicts.length > 0) {
+      const err = new Error(`SCHEDULE_CONFLICT: ${conflicts[0].message}`) as Error & { conflicts?: typeof conflicts };
+      err.conflicts = conflicts;
+      throw err;
     }
   }
 
-  const assignment = await prisma.studentBatch.create({
-    data: {
-      coachingCenterId,
-      studentId: input.studentId,
-      batchId,
-      joinedAt: toDate(input.startDate) || new Date(),
-      rollCode: input.rollCode?.trim() || null,
-      notes: input.notes?.trim() || null,
-      status: 'ACTIVE',
-    },
-  });
+  // Phase 10.5: duplicate-active-membership check + capacity check + the
+  // insert itself now all happen inside one transaction, serialized per
+  // batch by assertBatchHasCapacity's advisory lock — previously these
+  // were three separate, unguarded calls, so two concurrent requests could
+  // both pass the checks and both insert, over-filling the batch (or
+  // double-assigning the same student, though that specific case is now
+  // also backstopped by a DB partial unique index either way).
+  let assignment;
+  try {
+    assignment = await prisma.$transaction(async (tx) => {
+      await assertBatchHasCapacity(tx, batchId, batch.capacity, input.overrideCapacity);
+
+      const alreadyActive = await tx.studentBatch.findFirst({
+        where: { studentId: input.studentId, batchId, status: 'ACTIVE' },
+      });
+      if (alreadyActive) throw new Error('Student is already actively assigned to this batch');
+
+      return tx.studentBatch.create({
+        data: {
+          coachingCenterId,
+          studentId: input.studentId,
+          batchId,
+          joinedAt: toDate(input.startDate) || new Date(),
+          rollCode: input.rollCode?.trim() || null,
+          notes: input.notes?.trim() || null,
+          status: 'ACTIVE',
+        },
+      });
+    });
+  } catch (err) {
+    // Backstop: the partial unique index on (studentId, batchId) WHERE
+    // status = 'ACTIVE' rejects a duplicate that somehow reached the
+    // insert anyway (e.g. a concurrent transfer racing this one).
+    if (err instanceof Error && /Unique constraint/i.test(err.message)) {
+      throw new Error('Student is already actively assigned to this batch');
+    }
+    throw err;
+  }
 
   await recordAuditLog({
     coachingCenterId,

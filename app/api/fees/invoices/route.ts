@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { getInvoicesList, createInvoice } from '@/lib/services/invoice.service';
 import { invoiceCreateSchema } from '@/lib/validations/invoice';
+import prisma from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,8 +46,22 @@ export async function POST(request: Request) {
       );
     }
 
+    // Phase 10.5: when branchId is omitted, createInvoice derives it from
+    // the student's own record server-side — but the old code never
+    // re-checked THAT derived value, so a branch-locked STAFF could invoice
+    // a student in a different branch simply by leaving branchId out of
+    // the request. Derive-and-check it here first either way.
     if (validated.data.branchId) {
       assertBranchAccess(user, validated.data.branchId);
+    } else {
+      const student = await prisma.student.findFirst({
+        where: { id: validated.data.studentId, coachingCenterId },
+        select: { branchId: true },
+      });
+      if (!student) {
+        return NextResponse.json({ success: false, error: 'Student not found' }, { status: 404 });
+      }
+      assertBranchAccess(user, student.branchId);
     }
 
     const invoice = await createInvoice(coachingCenterId, validated.data, user.userId);

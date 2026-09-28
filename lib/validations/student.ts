@@ -117,11 +117,13 @@ export const admissionSchema = z.object({
   sscReg: z.string().optional().or(z.literal('')),
 
   // Step 2: Guardian Information
+  guardianId: z.string().optional().or(z.literal('')),
   guardianName: z
     .string()
-    .min(2, 'Guardian name is required')
     .max(100)
-    .refine((val) => !hasBangla(val), {
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || !hasBangla(val), {
       message: 'Guardian name (English) must be in English. Bangla characters are not allowed.',
     }),
   guardianBanglaName: z
@@ -135,8 +137,9 @@ export const admissionSchema = z.object({
   guardianRelationship: z.enum(GUARDIAN_RELATIONS).default('FATHER'),
   guardianPhone: z
     .string()
-    .min(1, 'Guardian mobile number is required')
-    .refine((val) => isValidBdPhone(val), {
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || isValidBdPhone(val), {
       message: 'Valid Bangladeshi mobile number is required for guardian',
     }),
   guardianAltPhone: z
@@ -186,9 +189,66 @@ export const admissionSchema = z.object({
   rollNumber: z.string().optional().or(z.literal('')),
   admissionDate: z.string().optional().or(z.literal('')),
 
-  // Step 4: Batch Assignment
+  // Step 4 & 5: Batch Assignment
   batchId: z.string().optional().or(z.literal('')),
+  overrideCapacity: z.boolean().optional(),
+  overrideConflict: z.boolean().optional(),
   remarks: z.string().optional().or(z.literal('')),
+
+  // Step 6: Fee Assignment
+  feeStructureId: z.string().optional().or(z.literal('')),
+  feeAmount: z.number().min(0).optional(),
+  feeName: z.string().max(150).optional(),
+  feeDueDate: z.string().optional().or(z.literal('')),
+
+  // Step 7: Discount & Waiver
+  discountAmount: z.number().min(0).default(0),
+  waiverAmount: z.number().min(0).default(0),
+  discountReason: z.string().max(500).optional().or(z.literal('')),
+
+  // Step 8: Initial Payment
+  initialPayment: z
+    .object({
+      amount: z.number().min(0),
+      paymentMethod: z.enum(['CASH', 'BKASH', 'NAGAD', 'BANK', 'CARD', 'OTHER']).default('CASH'),
+      transactionId: z.string().max(100).optional().or(z.literal('')),
+      referenceNumber: z.string().max(100).optional().or(z.literal('')),
+      senderMobile: z.string().max(20).optional().or(z.literal('')),
+      bankName: z.string().max(100).optional().or(z.literal('')),
+      chequeNumber: z.string().max(100).optional().or(z.literal('')),
+      notes: z.string().max(500).optional().or(z.literal('')),
+      idempotencyKey: z.string().max(100).optional().or(z.literal('')),
+    })
+    .optional(),
+
+  idempotencyKey: z.string().max(100).optional().or(z.literal('')),
+}).superRefine((data, ctx) => {
+  if (!data.guardianId) {
+    if (!data.guardianName || data.guardianName.trim().length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Guardian name is required',
+        path: ['guardianName'],
+      });
+    }
+    if (!data.guardianPhone || !isValidBdPhone(data.guardianPhone)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Valid Bangladeshi mobile number is required for guardian',
+        path: ['guardianPhone'],
+      });
+    }
+  }
+  if (data.feeAmount !== undefined) {
+    const totalDeductions = (data.discountAmount || 0) + (data.waiverAmount || 0);
+    if (totalDeductions > data.feeAmount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Discount and waiver combined cannot exceed the fee amount',
+        path: ['discountAmount'],
+      });
+    }
+  }
 });
 
 export type AdmissionInput = z.infer<typeof admissionSchema>;

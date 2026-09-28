@@ -51,6 +51,23 @@ export interface NotifyGuardianInput {
   actionUrl?: string | null;
   sourceType?: string | null;
   sourceId?: string | null;
+  /**
+   * Phase 10.5: which child this notification is about, when there is one.
+   * REQUIRED for student-specific events (attendance/fee/exam/result/
+   * material) so a guardian with several children doesn't have their
+   * second child's notification silently dropped as a "duplicate" of the
+   * first. Stored in the dedicated `guardianStudentId` column — deliberately
+   * NOT the same `studentId` column a student's OWN notification row uses
+   * (that has its own, unrelated unique constraint keyed only on studentId;
+   * reusing it here would make two DIFFERENT guardians of the same child
+   * collide with each other). Leave undefined for a genuinely guardian-level
+   * event (e.g. a notice) that is the same regardless of which child it
+   * concerns; callers with several children in scope for the same such
+   * event are responsible for calling this at most once per guardian
+   * themselves (see notice.service.ts) rather than relying on this
+   * function to dedupe across students.
+   */
+  aboutStudentId?: string | null;
 }
 
 export async function notifyGuardian(input: NotifyGuardianInput): Promise<void> {
@@ -59,6 +76,7 @@ export async function notifyGuardian(input: NotifyGuardianInput): Promise<void> 
       data: {
         coachingCenterId: input.coachingCenterId,
         guardianId: input.guardianId,
+        guardianStudentId: input.aboutStudentId ?? null,
         type: input.type,
         title: input.title,
         body: input.body,
@@ -72,7 +90,18 @@ export async function notifyGuardian(input: NotifyGuardianInput): Promise<void> 
   }
 }
 
-/** If a Student/Guardian has a PortalAccount, mirror the event as an in-app notification. */
+/**
+ * If a Student/Guardian has a PortalAccount, mirror the event as an in-app
+ * notification.
+ *
+ * `studentId` means "this event is about this student" and is used for
+ * BOTH branches below: it addresses the student's own notification (when
+ * `studentId` is given with no `guardianId`) AND, when both are given,
+ * tags the guardian's notification with which child it concerns (Phase
+ * 10.5 — see notifyGuardian's doc comment). Passing `guardianId` alone
+ * with no `studentId` is for a genuinely guardian-level event (e.g. a
+ * notice) that doesn't belong to one particular child.
+ */
 export async function notifyPortalAccountsForEvent(params: {
   coachingCenterId: string;
   studentId?: string | null;
@@ -105,6 +134,7 @@ export async function notifyPortalAccountsForEvent(params: {
       await notifyGuardian({
         coachingCenterId: params.coachingCenterId,
         guardianId: params.guardianId,
+        aboutStudentId: params.studentId ?? null,
         type: params.type,
         title: params.title,
         body: params.body,

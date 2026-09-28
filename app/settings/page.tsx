@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import ChartCard from '@/components/ChartCard';
 import StatusBadge from '@/components/StatusBadge';
 import Icon from '@/components/Icon';
+import FileUploadButton from '@/components/FileUploadButton';
 import { useApp } from '@/lib/store';
 import { ROOM_STATUSES } from '@/lib/validations/room';
 
@@ -19,7 +20,7 @@ const SECTIONS = [
 ];
 
 export default function SettingsPage() {
-  const { showToast } = useApp();
+  const { showToast, lang, refreshAuth } = useApp();
   const [sec, setSec] = useState('profile');
   const [loading, setLoading] = useState(false);
 
@@ -231,6 +232,7 @@ export default function SettingsPage() {
       const data = await res.json();
       if (data.success) {
         showToast('Branding updated successfully');
+        await refreshAuth();
       } else {
         showToast(data.error || 'Failed to save branding');
       }
@@ -912,12 +914,37 @@ export default function SettingsPage() {
               </div>
 
               <div className="fld md:col-span-2">
-                <label>Logo Image URL</label>
-                <input
-                  value={branding.logoUrl}
-                  onChange={(e) => setBranding({ ...branding, logoUrl: e.target.value })}
-                  placeholder="https://..."
-                />
+                <label>Logo Image</label>
+                <div className="flex items-center gap-3">
+                  {branding.logoUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={branding.logoUrl} alt="Logo preview" className="w-11 h-11 rounded-lg object-contain border border-[#dce5f0] bg-white" />
+                  )}
+                  <input
+                    value={branding.logoUrl}
+                    onChange={(e) => setBranding({ ...branding, logoUrl: e.target.value })}
+                    placeholder="https://..."
+                    className="grow"
+                  />
+                  <FileUploadButton scope="logo" lang={lang} onUploaded={(url) => setBranding((b) => ({ ...b, logoUrl: url }))} />
+                </div>
+              </div>
+
+              <div className="fld md:col-span-2">
+                <label>Favicon</label>
+                <div className="flex items-center gap-3">
+                  {branding.faviconUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={branding.faviconUrl} alt="Favicon preview" className="w-11 h-11 rounded-lg object-contain border border-[#dce5f0] bg-white" />
+                  )}
+                  <input
+                    value={branding.faviconUrl}
+                    onChange={(e) => setBranding({ ...branding, faviconUrl: e.target.value })}
+                    placeholder="https://..."
+                    className="grow"
+                  />
+                  <FileUploadButton scope="favicon" lang={lang} onUploaded={(url) => setBranding((b) => ({ ...b, faviconUrl: url }))} />
+                </div>
               </div>
 
               {/* Preview Box */}

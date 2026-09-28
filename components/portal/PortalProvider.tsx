@@ -12,12 +12,25 @@ export interface PortalUser {
   guardianId?: string | null;
 }
 
+export interface PortalCenter {
+  name: string;
+  banglaName?: string | null;
+  branding?: {
+    primaryColor: string;
+    secondaryColor: string;
+    accentColor: string;
+    logoUrl?: string | null;
+    faviconUrl?: string | null;
+  } | null;
+}
+
 type Ctx = {
   lang: 'en' | 'bn';
   setLang: (v: 'en' | 'bn') => void;
   toast: Toast;
   showToast: (msg: string) => void;
   portalUser: PortalUser | null;
+  portalCenter: PortalCenter | null;
   loadingUser: boolean;
   refreshPortalUser: () => Promise<void>;
 };
@@ -33,6 +46,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLang] = useState<'en' | 'bn'>('bn');
   const [toast, setToast] = useState<Toast>(null);
   const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
+  const [portalCenter, setPortalCenter] = useState<PortalCenter | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const tt = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
@@ -42,8 +56,10 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch('/api/portal/auth/me');
       const data = await res.json();
       setPortalUser(data.success ? data.user : null);
+      setPortalCenter(data.success ? data.center : null);
     } catch {
       setPortalUser(null);
+      setPortalCenter(null);
     } finally {
       setLoadingUser(false);
     }
@@ -80,7 +96,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <PortalCtx.Provider value={{ lang, setLang, toast, showToast, portalUser, loadingUser, refreshPortalUser }}>
+    <PortalCtx.Provider value={{ lang, setLang, toast, showToast, portalUser, portalCenter, loadingUser, refreshPortalUser }}>
       {children}
       {toast && (
         <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-[#00296b] text-white text-[13.5px] font-semibold px-4 py-2.5 rounded-full shadow-2xl fade-in">

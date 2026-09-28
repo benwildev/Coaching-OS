@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { changePasswordSchema } from '@/lib/validations/portal-auth';
 import { changePassword } from '@/lib/services/portal-auth.service';
-import { requirePortalAuth } from '@/lib/auth/portal-session';
+import { requirePortalAuth, createPortalSessionToken, setPortalSessionCookie } from '@/lib/auth/portal-session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,11 @@ export async function POST(request: Request) {
     const parsed = changePasswordSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);
 
-    await changePassword(session, parsed.data.currentPassword, parsed.data.newPassword);
+    const { sessionVersion } = await changePassword(session, parsed.data.currentPassword, parsed.data.newPassword);
+    // Phase 10.4: changing the password revokes every session for this
+    // account, including this one's cookie — reissue it with the new
+    // sessionVersion so the caller isn't logged out of their own device.
+    await setPortalSessionCookie(await createPortalSessionToken({ portalAccountId: session.portalAccountId, sessionVersion }));
     return NextResponse.json({ success: true });
   } catch (error) {
     return apiErrorResponse(error, '/api/portal/auth/change-password POST');
