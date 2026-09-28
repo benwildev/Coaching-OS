@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requireRole, resolveEffectiveBranchId, assertBranchAccess } from '@/lib/auth/session';
 import {
   getStudentsList,
   createStudentAdmission,
@@ -89,24 +89,39 @@ export async function POST(request: Request) {
       );
     }
 
-    const student = await createStudentAdmission(
+    // Branch authorization: non-OWNER/non-ADMIN cannot admit students to other branches
+    assertBranchAccess(user, validated.data.branchId);
+
+    const result = await createStudentAdmission(
       coachingCenterId,
       validated.data,
-      user.userId
+      user.userId,
+      user.role
     );
 
     return NextResponse.json(
       {
         success: true,
         message: 'Student admitted successfully',
-        student,
+        student: {
+          id: result.id,
+          studentId: result.studentIdCode,
+          name: result.name,
+          banglaName: result.banglaName,
+        },
+        enrollment: result.enrollment,
+        feeAssignment: result.feeAssignment,
+        invoice: result.invoice,
+        payment: result.payment,
+        receiptNumber: result.receiptNumber,
+        discountApproved: !result.isDiscountPending,
       },
       { status: 201 }
     );
   } catch (error: any) {
     console.error('[API /api/students POST] Error:', error);
-    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: error.message === 'FORBIDDEN' ? 403 : 401 });
+    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN' || error?.message === 'FORBIDDEN_BRANCH') {
+      return NextResponse.json({ error: 'Unauthorized or branch forbidden' }, { status: error.message === 'UNAUTHORIZED' ? 401 : 403 });
     }
     const msg = error?.message || 'Failed to process admission';
     return NextResponse.json({ error: msg }, { status: 400 });

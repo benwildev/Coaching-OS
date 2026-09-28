@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
 import { transitionExamStatus } from '@/lib/services/exam.service';
 import { EXAM_STATUS } from '@/lib/validations/exam';
+import prisma from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,12 @@ export async function POST(
     await requireRole(['OWNER', 'ADMIN', 'STAFF']);
     const { examId } = await params;
 
+    // Phase 10.5: previously no branch check — a branch-locked STAFF could
+    // start any branch's exam.
+    const existing = await prisma.exam.findFirst({ where: { id: examId, coachingCenterId }, select: { branchId: true } });
+    if (!existing) return NextResponse.json({ success: false, error: 'Exam not found' }, { status: 404 });
+    assertBranchAccess(user, existing.branchId);
+
     const exam = await transitionExamStatus(
       coachingCenterId,
       examId,
@@ -25,6 +32,7 @@ export async function POST(
     return NextResponse.json({ success: true, exam, status: exam.status });
   } catch (error: any) {
     console.error('[API /api/exams/[examId]/start POST] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to start exam' }, { status: 400 });
+    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
+    return NextResponse.json({ success: false, error: error.message || 'Failed to start exam' }, { status });
   }
 }

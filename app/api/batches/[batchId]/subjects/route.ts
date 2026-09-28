@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
-import { replaceBatchSubjects } from '@/lib/services/batch.service';
+import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { replaceBatchSubjects, getBatchById } from '@/lib/services/batch.service';
 import { batchSubjectsUpdateSchema } from '@/lib/validations/batch';
 
 export const dynamic = 'force-dynamic';
@@ -11,6 +11,12 @@ export async function PUT(request: Request, props: { params: Promise<{ batchId: 
     await requireRole(['OWNER', 'ADMIN', 'STAFF']);
 
     const { batchId } = await props.params;
+
+    // Phase 10.5: previously no branch check.
+    const existingBatch = await getBatchById(coachingCenterId, batchId);
+    if (!existingBatch) return NextResponse.json({ success: false, error: 'Batch not found' }, { status: 404 });
+    assertBranchAccess(user, existingBatch.branchId);
+
     const body = await request.json();
     const validated = batchSubjectsUpdateSchema.safeParse(body);
     if (!validated.success) {

@@ -22,6 +22,7 @@ interface CenterInfo {
     secondaryColor: string;
     accentColor: string;
     logoUrl?: string | null;
+    faviconUrl?: string | null;
   } | null;
 }
 

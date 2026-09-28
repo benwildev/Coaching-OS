@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { getRoomsList, createRoom } from '@/lib/services/room.service';
 import { roomSchema } from '@/lib/validations/room';
 
@@ -7,9 +7,10 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const { coachingCenterId } = await requireTenant();
+    const { coachingCenterId, user } = await requireTenant();
     const { searchParams } = new URL(request.url);
-    const rooms = await getRoomsList(coachingCenterId, searchParams.get('branch') || undefined);
+    // Phase 10.5: previously trusted ?branch= verbatim.
+    const rooms = await getRoomsList(coachingCenterId, resolveEffectiveBranchId(user, searchParams.get('branch') || undefined));
     return NextResponse.json({ success: true, rooms });
   } catch {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

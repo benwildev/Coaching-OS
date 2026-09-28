@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
 import { addExamSubject } from '@/lib/services/exam.service';
 import { addExamSubjectSchema } from '@/lib/validations/exam';
 import prisma from '@/lib/db';
@@ -11,8 +11,15 @@ export async function GET(
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
-    const { coachingCenterId } = await requireTenant();
+    const { coachingCenterId, user } = await requireTenant();
+    // Phase 10.5: previously no role check and no branch check — any
+    // authenticated tenant user could read any branch's exam structure.
+    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
     const { examId } = await params;
+
+    const exam = await prisma.exam.findFirst({ where: { id: examId, coachingCenterId }, select: { branchId: true } });
+    if (!exam) return NextResponse.json({ success: false, error: 'Exam not found' }, { status: 404 });
+    assertBranchAccess(user, exam.branchId);
 
     const subjects = await prisma.examSubject.findMany({
       where: {
@@ -47,6 +54,11 @@ export async function POST(
     await requireRole(['OWNER', 'ADMIN', 'STAFF']);
     const { examId } = await params;
 
+    // Phase 10.5: previously no branch check.
+    const exam = await prisma.exam.findFirst({ where: { id: examId, coachingCenterId }, select: { branchId: true } });
+    if (!exam) return NextResponse.json({ success: false, error: 'Exam not found' }, { status: 404 });
+    assertBranchAccess(user, exam.branchId);
+
     const body = await request.json();
     const validated = addExamSubjectSchema.safeParse(body);
     if (!validated.success) {
@@ -70,6 +82,7 @@ export async function POST(
     return NextResponse.json({ success: true, examSubject }, { status: 201 });
   } catch (error: any) {
     console.error('[API /api/exams/[examId]/subjects POST] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to add exam subject' }, { status: 400 });
+    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
+    return NextResponse.json({ success: false, error: error.message || 'Failed to add exam subject' }, { status });
   }
 }

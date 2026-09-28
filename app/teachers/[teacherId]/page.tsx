@@ -28,6 +28,71 @@ export default function TeacherDetailPage() {
   const [savingAtt, setSavingAtt] = useState(false);
   const [openingId, setOpeningId] = useState<string | null>(null);
 
+  // Phase 10.5: teacher <-> login account linking (OWNER/ADMIN only).
+  const canManageAccount = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const [account, setAccount] = useState<{ linked: boolean; account: { email: string; name: string; status: string } | null; eligibleAccounts: Array<{ id: string; email: string; name: string; status: string }> } | null>(null);
+  const [accountMode, setAccountMode] = useState<'create' | 'link' | null>(null);
+  const [accountForm, setAccountForm] = useState({ name: '', email: '', phone: '', password: '', userId: '' });
+  const [savingAccount, setSavingAccount] = useState(false);
+
+  const loadAccount = useCallback(async () => {
+    if (!canManageAccount) return;
+    try {
+      const res = await fetch(`/api/teachers/${teacherId}/account`);
+      const data = await res.json();
+      if (data.success) setAccount(data);
+    } catch (err) {
+      console.error('Failed to load teacher account', err);
+    }
+  }, [teacherId, canManageAccount]);
+
+  useEffect(() => {
+    loadAccount();
+  }, [loadAccount]);
+
+  const submitAccountLink = async () => {
+    setSavingAccount(true);
+    try {
+      const body =
+        accountMode === 'create'
+          ? { mode: 'create', name: accountForm.name, email: accountForm.email, phone: accountForm.phone, password: accountForm.password }
+          : { mode: 'link', userId: accountForm.userId };
+      const res = await fetch(`/api/teachers/${teacherId}/account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(lang === 'bn' ? 'অ্যাকাউন্ট যুক্ত হয়েছে' : 'Account linked');
+        setAccountMode(null);
+        setAccountForm({ name: '', email: '', phone: '', password: '', userId: '' });
+        loadAccount();
+      } else {
+        showToast(data.message || data.error || 'Failed to link account');
+      }
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
+  const unlinkAccount = async () => {
+    if (!confirm(lang === 'bn' ? 'এই শিক্ষকের লগইন অ্যাকাউন্ট বিচ্ছিন্ন করবেন?' : 'Unlink this teacher’s login account?')) return;
+    setSavingAccount(true);
+    try {
+      const res = await fetch(`/api/teachers/${teacherId}/account`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        showToast(lang === 'bn' ? 'অ্যাকাউন্ট বিচ্ছিন্ন হয়েছে' : 'Account unlinked');
+        loadAccount();
+      } else {
+        showToast(data.message || data.error || 'Failed to unlink account');
+      }
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
   const openAttendance = async (classScheduleId: string) => {
     setOpeningId(classScheduleId);
     try {
@@ -377,6 +442,90 @@ export default function TeacherDetailPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {tab === 'employment' && !redacted && canManageAccount && (
+        <div className="card p-5 md:p-6 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs mt-4">
+          <h2 className="text-lg font-bold text-[#063b78] mb-1">
+            {lang === 'bn' ? 'লগইন অ্যাকাউন্ট' : 'Login account'}
+          </h2>
+          <p className="text-[12px] text-[#8795ab] mb-4">
+            {lang === 'bn'
+              ? 'এই শিক্ষক তাদের অ্যাসাইনমেন্ট, উপস্থিতি ও নম্বর দেখতে লগইন করতে এই অ্যাকাউন্ট ব্যবহার করবেন।'
+              : 'The teacher signs in with this account to see their own assignments, attendance and marks.'}
+          </p>
+
+          {!account ? (
+            <div className="text-[13px] text-[#8795ab]">{lang === 'bn' ? 'লোড হচ্ছে…' : 'Loading…'}</div>
+          ) : account.linked && account.account ? (
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="font-semibold text-[#092f63] text-[14px]">{account.account.name}</div>
+                <div className="text-[12px] text-[#55637a]">{account.account.email}</div>
+                <div className="mt-1"><StatusBadge status={account.account.status} size="sm" dictKey="teacherStatus" /></div>
+              </div>
+              <button
+                type="button"
+                onClick={unlinkAccount}
+                disabled={savingAccount}
+                className="text-[12px] font-bold text-[#b3261e] border border-[#f3c9c6] rounded-lg px-3 py-1.5 hover:bg-[#fdf0ef] disabled:opacity-50"
+              >
+                {lang === 'bn' ? 'বিচ্ছিন্ন করুন' : 'Unlink'}
+              </button>
+            </div>
+          ) : accountMode === null ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setAccountMode('create')}
+                className="text-[12px] font-bold text-white bg-[#063b78] rounded-lg px-3 py-1.5 hover:bg-[#0a4a95]"
+              >
+                {lang === 'bn' ? '+ নতুন অ্যাকাউন্ট তৈরি করুন' : '+ Create new account'}
+              </button>
+              {account.eligibleAccounts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAccountMode('link')}
+                  className="text-[12px] font-bold text-[#063b78] border border-[#c9d7ea] rounded-lg px-3 py-1.5 hover:bg-[#f4f7fb]"
+                >
+                  {lang === 'bn' ? 'বিদ্যমান অ্যাকাউন্ট যুক্ত করুন' : 'Link an existing account'}
+                </button>
+              )}
+            </div>
+          ) : accountMode === 'create' ? (
+            <div className="grid sm:grid-cols-2 gap-3">
+              <input className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] outline-none focus:border-[#063b78] bg-white" placeholder={lang === 'bn' ? 'নাম (ইংরেজি)' : 'Name (English)'} value={accountForm.name} onChange={(e) => setAccountForm((f) => ({ ...f, name: e.target.value }))} />
+              <input className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] outline-none focus:border-[#063b78] bg-white" placeholder="Email" type="email" value={accountForm.email} onChange={(e) => setAccountForm((f) => ({ ...f, email: e.target.value }))} />
+              <input className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] outline-none focus:border-[#063b78] bg-white" placeholder={lang === 'bn' ? 'ফোন' : 'Phone'} value={accountForm.phone} onChange={(e) => setAccountForm((f) => ({ ...f, phone: e.target.value }))} />
+              <input className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] outline-none focus:border-[#063b78] bg-white" placeholder={lang === 'bn' ? 'পাসওয়ার্ড' : 'Password'} type="password" value={accountForm.password} onChange={(e) => setAccountForm((f) => ({ ...f, password: e.target.value }))} />
+              <div className="sm:col-span-2 flex gap-2">
+                <button type="button" disabled={savingAccount} onClick={submitAccountLink} className="text-[12px] font-bold text-white bg-[#063b78] rounded-lg px-3 py-1.5 disabled:opacity-50">
+                  {savingAccount ? '…' : lang === 'bn' ? 'তৈরি করুন ও যুক্ত করুন' : 'Create & link'}
+                </button>
+                <button type="button" onClick={() => setAccountMode(null)} className="text-[12px] font-bold text-[#55637a] px-3 py-1.5">
+                  {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <select className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] text-[#092f63] outline-none focus:border-[#063b78] bg-white" value={accountForm.userId} onChange={(e) => setAccountForm((f) => ({ ...f, userId: e.target.value }))}>
+                <option value="">{lang === 'bn' ? 'একটি অ্যাকাউন্ট নির্বাচন করুন' : 'Select an account'}</option>
+                {account.eligibleAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name} · {a.email}</option>
+                ))}
+              </select>
+              <div className="flex gap-2">
+                <button type="button" disabled={savingAccount || !accountForm.userId} onClick={submitAccountLink} className="text-[12px] font-bold text-white bg-[#063b78] rounded-lg px-3 py-1.5 disabled:opacity-50">
+                  {savingAccount ? '…' : lang === 'bn' ? 'যুক্ত করুন' : 'Link'}
+                </button>
+                <button type="button" onClick={() => setAccountMode(null)} className="text-[12px] font-bold text-[#55637a] px-3 py-1.5">
+                  {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

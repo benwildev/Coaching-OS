@@ -11,6 +11,8 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "*.config.*",
+    "scripts/**",
+    "scratch/**",
   ]),
   {
     rules: {

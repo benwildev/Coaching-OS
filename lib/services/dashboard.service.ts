@@ -672,6 +672,19 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
     heatmap,
     activity: financeVisible ? activity : activity.filter((a) => a.kind !== 'payment'),
     todaysAgenda,
+    // Phase 10.5: an honest "missing attendance" count, distinct from the
+    // agenda's "done" badge (which just means the class period has ended,
+    // whether or not attendance was actually recorded — see statusFor
+    // above) and distinct from the attendance-percentage KPI (which only
+    // ever measures COMPLETED sessions, so a class with no session at all
+    // simply doesn't lower it). completed/pending only count classes whose
+    // scheduled time has already started, so an upcoming class this
+    // afternoon isn't reported as "missing" at 9am.
+    attendanceCompletion: (() => {
+      const started = scopedToday.filter((c) => parseTimeToMinutes(c.schedule.startTime) <= nowMinutes);
+      const completed = started.filter((c) => c.session?.status === 'COMPLETED').length;
+      return { scheduled: scopedToday.length, started: started.length, completed, pending: started.length - completed };
+    })(),
     upcomingExams: upcomingExams.slice(0, 5).map((e) => ({
       id: e.id,
       title: e.title,

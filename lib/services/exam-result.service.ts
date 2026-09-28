@@ -14,6 +14,68 @@ import {
 } from './result-calculation.service';
 
 /**
+ * Recomputes every enrolled student's total marks and Standard Competition
+ * Ranking (1, 2, 2, 4) for an exam, and writes the new `rank` onto every
+ * Result row for that exam — shared by verifyAndPublishExam (first
+ * publish) and, as of Phase 10.5, bulkSaveSubjectResults's post-publication
+ * path (a correction to a PUBLISHED exam's marks must not leave the old
+ * ranking stale until some later, separate re-publish action).
+ *
+ * Must run inside the same transaction as the marks write it follows, so a
+ * reader can never observe updated marks with a not-yet-recomputed rank.
+ */
+async function recomputeExamRanking(
+  tx: Prisma.TransactionClient,
+  coachingCenterId: string,
+  examId: string
+): Promise<{ rankedStudents: number }> {
+  const exam = await tx.exam.findFirst({
+    where: { id: examId, coachingCenterId },
+    include: {
+      examSubjects: { include: { results: true } },
+      examStudents: true,
+    },
+  });
+  if (!exam) throw new Error('EXAM_NOT_FOUND');
+
+  const studentTotalMarks: Array<{ studentId: string; totalMarks: number; isValid: boolean }> = [];
+  for (const es of exam.examStudents) {
+    let studentSum = 0;
+    let hasValidMarks = false;
+    let allAbsent = true;
+
+    for (const sub of exam.examSubjects) {
+      const r = sub.results.find((res) => res.studentId === es.studentId);
+      if (r && r.status === 'PRESENT' && r.marksObtained !== null) {
+        studentSum += Number(r.marksObtained);
+        hasValidMarks = true;
+        allAbsent = false;
+      }
+    }
+
+    studentTotalMarks.push({ studentId: es.studentId, totalMarks: studentSum, isValid: hasValidMarks && !allAbsent });
+  }
+
+  const rankMap = calculateCompetitionRanking(studentTotalMarks);
+
+  for (const [studentId, rank] of rankMap.entries()) {
+    await tx.result.updateMany({
+      where: { studentId, examSubject: { examId } },
+      data: { rank },
+    });
+  }
+  // Students who fell out of ranking eligibility (e.g. a correction turned
+  // their only subject into ABSENT) must not keep a stale rank from before.
+  const rankedIds = Array.from(rankMap.keys());
+  await tx.result.updateMany({
+    where: { examSubject: { examId }, studentId: { notIn: rankedIds.length ? rankedIds : ['__none__'] } },
+    data: { rank: null },
+  });
+
+  return { rankedStudents: rankMap.size };
+}
+
+/**
  * Validate teacher authorization for entering/editing subject marks
  */
 export async function assertTeacherSubjectAccess(
@@ -350,10 +412,22 @@ export async function bulkSaveSubjectResults(
 
   const gradingConfig = await getCoachingCenterGradingConfig(coachingCenterId);
 
+  // Phase 10.5: capture the "before" state for a post-publication audit
+  // diff — a correction to already-published marks should show exactly
+  // what changed, not just how many rows were touched.
+  const existingResults = isPostPublication
+    ? await prisma.result.findMany({
+        where: { examSubjectId, studentId: { in: entries.map((e) => e.studentId) } },
+        select: { studentId: true, marksObtained: true, status: true },
+      })
+    : [];
+  const existingByStudent = new Map(existingResults.map((r) => [r.studentId, r]));
+
   // Perform updates inside transaction
   return prisma.$transaction(
     async (tx) => {
       const processedResults: any[] = [];
+      const marksChanges: Array<{ studentId: string; oldMarks: number | null; newMarks: number | null; oldStatus: string; newStatus: string }> = [];
 
       for (const entry of entries) {
         let marks: number | null = null;
@@ -405,6 +479,14 @@ export async function bulkSaveSubjectResults(
         });
 
         processedResults.push(upserted);
+
+        if (isPostPublication) {
+          const before = existingByStudent.get(entry.studentId);
+          const oldMarks = before?.marksObtained !== null && before?.marksObtained !== undefined ? Number(before.marksObtained) : null;
+          if (before && (oldMarks !== marks || before.status !== entry.status)) {
+            marksChanges.push({ studentId: entry.studentId, oldMarks, newMarks: marks, oldStatus: before.status, newStatus: entry.status });
+          }
+        }
       }
 
       // Calculate and update highest marks across all valid results for this subject
@@ -430,7 +512,18 @@ export async function bulkSaveSubjectResults(
         });
       }
 
-      // Audit Log
+      // Phase 10.5: a correction to an already-PUBLISHED exam's marks must
+      // not leave the exam's competition ranking stale until some later,
+      // separate re-publish — recompute it here, in the same transaction,
+      // so no reader can ever see the new marks alongside the old rank.
+      let rankedStudents: number | undefined;
+      if (isPostPublication) {
+        const rankResult = await recomputeExamRanking(tx, coachingCenterId, examId);
+        rankedStudents = rankResult.rankedStudents;
+      }
+
+      // Audit Log — for a post-publication correction, records exactly
+      // which students' marks/status changed (old -> new), not just a count.
       await recordAuditLog({
         coachingCenterId,
         userId: user.userId,
@@ -443,12 +536,14 @@ export async function bulkSaveSubjectResults(
           count: entries.length,
           isPostPublication,
           highestMark,
+          ...(isPostPublication ? { changes: marksChanges, rankedStudents } : {}),
         },
       });
 
       return {
         savedCount: processedResults.length,
         highestMark,
+        rankRecomputed: isPostPublication,
       };
     },
     { maxWait: 10000, timeout: 45000 }
@@ -554,50 +649,12 @@ export async function verifyAndPublishExam(
     );
   }
 
-  // Calculate overall performance & competition ranking for all enrolled students
-  const studentTotalMarks: Array<{
-    studentId: string;
-    totalMarks: number;
-    isValid: boolean;
-  }> = [];
-
-  for (const es of exam.examStudents) {
-    let studentSum = 0;
-    let hasValidMarks = false;
-    let allAbsent = true;
-
-    for (const sub of exam.examSubjects) {
-      const r = sub.results.find((res) => res.studentId === es.studentId);
-      if (r && r.status === 'PRESENT' && r.marksObtained !== null) {
-        studentSum += Number(r.marksObtained);
-        hasValidMarks = true;
-        allAbsent = false;
-      }
-    }
-
-    studentTotalMarks.push({
-      studentId: es.studentId,
-      totalMarks: studentSum,
-      isValid: hasValidMarks && !allAbsent,
-    });
-  }
-
-  // Standard Competition Ranking: 1, 2, 2, 4
-  const rankMap = calculateCompetitionRanking(studentTotalMarks);
-
-  // Apply ranks and publish inside transaction
+  // Apply ranks and publish inside transaction (Phase 10.5: ranking
+  // computation itself now lives in recomputeExamRanking, shared with the
+  // post-publication correction path in bulkSaveSubjectResults).
   const result = await prisma.$transaction(
     async (tx) => {
-      // Update ranks on results records
-      for (const [studentId, rank] of rankMap.entries()) {
-        await tx.result.updateMany({
-          where: {
-            studentId,
-            examSubject: { examId },
-          },
-          data: { rank },
-        });
-      }
+      const { rankedStudents } = await recomputeExamRanking(tx, coachingCenterId, examId);
 
       // Transition exam to PUBLISHED
       const published = await tx.exam.update({
@@ -617,7 +674,7 @@ export async function verifyAndPublishExam(
         entityId: examId,
         details: {
           totalStudents: exam.examStudents.length,
-          rankedStudents: rankMap.size,
+          rankedStudents,
           incompleteAllowed: allowIncomplete,
           missingCount: publishStatus.totalMissing,
         },

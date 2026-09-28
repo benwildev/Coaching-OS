@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requireRole } from '@/lib/auth/session';
 import { seedStandardSubjectsForCenter } from '@/lib/services/academic.service';
 
 export const dynamic = 'force-dynamic';
@@ -7,6 +7,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const { coachingCenterId } = await requireTenant();
+    // Phase 10.5: previously no role check on this bulk academic-setup action.
+    await requireRole(['OWNER', 'ADMIN']);
     const body = await request.json().catch(() => ({}));
     const { classId } = body;
 

@@ -42,6 +42,21 @@ export async function createPayment(
   input: PaymentCreateInput,
   actorId?: string
 ) {
+  const idempotencyKey = input.idempotencyKey?.trim() || null;
+
+  // Phase 10.5: a double-submit (double-click, or a client retrying after
+  // a timed-out response whose payment actually landed) with the same
+  // idempotencyKey returns the ALREADY-created payment instead of making a
+  // second one. This pre-check handles the common case cheaply; the
+  // (coachingCenterId, idempotencyKey) unique index (caught below) is the
+  // real safety net for two requests racing each other.
+  if (idempotencyKey) {
+    const existing = await prisma.payment.findFirst({ where: { coachingCenterId, idempotencyKey }, include: { invoice: true } });
+    if (existing) {
+      return { payment: existing, invoice: existing.invoice, idempotentReplay: true as const };
+    }
+  }
+
   const invoice = await prisma.feeInvoice.findFirst({
     where: { id: invoiceId, coachingCenterId },
     include: { items: true },
@@ -53,95 +68,109 @@ export async function createPayment(
     throw new Error('Payment amount exceeds the outstanding due amount');
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const receiptNumber = await generateReceiptNumber(tx, coachingCenterId);
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const receiptNumber = await generateReceiptNumber(tx, coachingCenterId);
 
-    const payment = await tx.payment.create({
-      data: {
-        coachingCenterId,
-        branchId: invoice.branchId,
-        studentId: invoice.studentId,
-        invoiceId,
-        receiptNumber,
-        amount: input.amount,
-        paymentMethod: input.paymentMethod,
-        transactionId: input.transactionId?.trim() || null,
-        referenceNumber: input.referenceNumber?.trim() || null,
-        senderMobile: input.senderMobile?.trim() || null,
-        bankName: input.bankName?.trim() || null,
-        chequeNumber: input.chequeNumber?.trim() || null,
-        paymentDate: toDate(input.paymentDate) || new Date(),
-        notes: input.notes?.trim() || null,
-        status: 'COMPLETED',
-        collectedById: actorId,
-      },
-    });
-
-    // Conditional atomic guard — see function docstring.
-    const guarded = await tx.feeInvoice.updateMany({
-      where: {
-        id: invoiceId,
-        coachingCenterId,
-        status: { notIn: ['CANCELLED', 'PAID'] },
-        dueAmount: { gte: input.amount },
-      },
-      data: {
-        paidAmount: { increment: input.amount },
-        dueAmount: { decrement: input.amount },
-      },
-    });
-    if (guarded.count === 0) {
-      throw new Error('Payment amount exceeds the outstanding due amount');
-    }
-
-    const refreshed = await tx.feeInvoice.findUniqueOrThrow({ where: { id: invoiceId } });
-    const dueAmount = n(refreshed.dueAmount);
-    const newStatus =
-      dueAmount <= 0
-        ? 'PAID'
-        : refreshed.dueDate && refreshed.dueDate.getTime() < Date.now()
-          ? 'OVERDUE'
-          : 'PARTIAL';
-
-    const updatedInvoice = await tx.feeInvoice.update({
-      where: { id: invoiceId },
-      data: { status: newStatus },
-    });
-
-    // Update linked StudentFeeAssignment statuses: fully reflects invoice
-    // outcome only once the invoice itself is fully settled; otherwise moves
-    // pending assignments to PARTIAL so the student profile reflects billing
-    // progress without prematurely marking anything PAID.
-    const assignmentIds = Array.from(
-      new Set(invoice.items.map((i) => i.studentFeeAssignmentId).filter((v): v is string => !!v))
-    );
-    if (assignmentIds.length) {
-      await tx.studentFeeAssignment.updateMany({
-        where: { id: { in: assignmentIds }, status: { notIn: ['WAIVED', 'CANCELLED'] } },
-        data: { status: newStatus === 'PAID' ? 'PAID' : 'PARTIAL' },
+      const payment = await tx.payment.create({
+        data: {
+          coachingCenterId,
+          branchId: invoice.branchId,
+          studentId: invoice.studentId,
+          invoiceId,
+          receiptNumber,
+          amount: input.amount,
+          paymentMethod: input.paymentMethod,
+          transactionId: input.transactionId?.trim() || null,
+          referenceNumber: input.referenceNumber?.trim() || null,
+          senderMobile: input.senderMobile?.trim() || null,
+          bankName: input.bankName?.trim() || null,
+          chequeNumber: input.chequeNumber?.trim() || null,
+          paymentDate: toDate(input.paymentDate) || new Date(),
+          notes: input.notes?.trim() || null,
+          status: 'COMPLETED',
+          collectedById: actorId,
+          idempotencyKey,
+        },
       });
-    }
 
-    await recordAuditLog({
-      coachingCenterId,
-      userId: actorId,
-      action: 'PAYMENT_CREATED',
-      entity: 'Payment',
-      entityId: payment.id,
-      details: {
-        invoiceId,
-        invoiceNumber: invoice.invoiceNumber,
-        studentId: invoice.studentId,
-        amount: input.amount,
-        paymentMethod: input.paymentMethod,
-        receiptNumber,
-        transactionId: input.transactionId || null,
-        referenceNumber: input.referenceNumber || null,
-      },
+      // Conditional atomic guard — see function docstring.
+      const guarded = await tx.feeInvoice.updateMany({
+        where: {
+          id: invoiceId,
+          coachingCenterId,
+          status: { notIn: ['CANCELLED', 'PAID'] },
+          dueAmount: { gte: input.amount },
+        },
+        data: {
+          paidAmount: { increment: input.amount },
+          dueAmount: { decrement: input.amount },
+        },
+      });
+      if (guarded.count === 0) {
+        throw new Error('Payment amount exceeds the outstanding due amount');
+      }
+
+      const refreshed = await tx.feeInvoice.findUniqueOrThrow({ where: { id: invoiceId } });
+      const dueAmount = n(refreshed.dueAmount);
+      const newStatus =
+        dueAmount <= 0
+          ? 'PAID'
+          : refreshed.dueDate && refreshed.dueDate.getTime() < Date.now()
+            ? 'OVERDUE'
+            : 'PARTIAL';
+
+      const updatedInvoice = await tx.feeInvoice.update({
+        where: { id: invoiceId },
+        data: { status: newStatus },
+      });
+
+      // Update linked StudentFeeAssignment statuses: fully reflects invoice
+      // outcome only once the invoice itself is fully settled; otherwise moves
+      // pending assignments to PARTIAL so the student profile reflects billing
+      // progress without prematurely marking anything PAID.
+      const assignmentIds = Array.from(
+        new Set(invoice.items.map((i) => i.studentFeeAssignmentId).filter((v): v is string => !!v))
+      );
+      if (assignmentIds.length) {
+        await tx.studentFeeAssignment.updateMany({
+          where: { id: { in: assignmentIds }, status: { notIn: ['WAIVED', 'CANCELLED'] } },
+          data: { status: newStatus === 'PAID' ? 'PAID' : 'PARTIAL' },
+        });
+      }
+
+      await recordAuditLog({
+        coachingCenterId,
+        userId: actorId,
+        action: 'PAYMENT_CREATED',
+        entity: 'Payment',
+        entityId: payment.id,
+        details: {
+          invoiceId,
+          invoiceNumber: invoice.invoiceNumber,
+          studentId: invoice.studentId,
+          amount: input.amount,
+          paymentMethod: input.paymentMethod,
+          receiptNumber,
+          transactionId: input.transactionId || null,
+          referenceNumber: input.referenceNumber || null,
+        },
+      });
+
+      return { payment, invoice: updatedInvoice };
     });
-
-    return { payment, invoice: updatedInvoice };
-  });
+  } catch (err) {
+    // Lost the race to a concurrent request carrying the same
+    // idempotencyKey — return what THAT request created instead of
+    // failing this one (the DB unique index is the real safety net here;
+    // the pre-check above only handles the non-concurrent common case).
+    if (idempotencyKey && err instanceof Error && /Unique constraint/i.test(err.message) && /idempotencyKey/i.test(err.message)) {
+      const winner = await prisma.payment.findFirst({ where: { coachingCenterId, idempotencyKey }, include: { invoice: true } });
+      if (winner) return { payment: winner, invoice: winner.invoice, idempotentReplay: true as const };
+    }
+    throw err;
+  }
 
   const student = await prisma.student.findUnique({ where: { id: invoice.studentId }, select: { name: true } });
   await notifyStudentGuardians({

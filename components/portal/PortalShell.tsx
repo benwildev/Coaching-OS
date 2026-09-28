@@ -18,10 +18,11 @@ import {
 } from 'lucide-react';
 import { usePortal } from './PortalProvider';
 import PortalNotificationBell from './PortalNotificationBell';
+import DynamicFavicon from '../DynamicFavicon';
 import { DICTIONARY } from '@/lib/i18n';
 
 export default function PortalShell({ children }: { children: React.ReactNode }) {
-  const { lang, setLang, portalUser, loadingUser } = usePortal();
+  const { lang, setLang, portalUser, portalCenter, loadingUser } = usePortal();
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -64,6 +65,11 @@ export default function PortalShell({ children }: { children: React.ReactNode })
   const navItems = isStudent ? studentNavItems : guardianNavItems;
   const baseHref = isStudent ? '/portal/student' : '/portal/guardian';
 
+  const centerName = (lang === 'bn' && portalCenter?.banglaName) || portalCenter?.name || 'Coaching OS';
+  const centerLogoUrl = portalCenter?.branding?.logoUrl;
+  const centerAccentColor = portalCenter?.branding?.accentColor || '#ffd200';
+  const centerPrimaryColor = portalCenter?.branding?.primaryColor || '#063b78';
+
   // Get user initials for avatar
   const initials = portalUser.name
     ? portalUser.name
@@ -76,7 +82,8 @@ export default function PortalShell({ children }: { children: React.ReactNode })
 
   return (
     <div className="min-h-screen bg-[#f3f6fa] flex flex-col md:flex-row font-sans">
-      {/* 
+      <DynamicFavicon url={portalCenter?.branding?.faviconUrl} />
+      {/*
         DESKTOP LEFT RAIL SIDEBAR:
         - Deep Navy background (#041e46) matching Figma mockup for student portal
       */}
@@ -89,17 +96,25 @@ export default function PortalShell({ children }: { children: React.ReactNode })
       >
         {/* Top: Brand Header */}
         <div className="flex items-center gap-3 mb-7 px-2 pt-1">
-          <div className="w-9 h-9 rounded-xl bg-[#ffd200] flex items-center justify-center text-[#063b78] shadow-sm font-extrabold text-sm shrink-0">
-            {/* Custom 3-bar Coaching OS chart icon matching original brand badge */}
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="4" y="11" width="4" height="9" rx="1.5" />
-              <rect x="10" y="5" width="4" height="15" rx="1.5" />
-              <rect x="16" y="8" width="4" height="12" rx="1.5" />
-            </svg>
-          </div>
+          {centerLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={centerLogoUrl} alt={centerName} className="w-9 h-9 rounded-xl object-cover shadow-sm shrink-0 bg-white" />
+          ) : (
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm font-extrabold text-sm shrink-0"
+              style={{ backgroundColor: centerAccentColor, color: centerPrimaryColor }}
+            >
+              {/* Custom 3-bar Coaching OS chart icon matching original brand badge */}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="11" width="4" height="9" rx="1.5" />
+                <rect x="10" y="5" width="4" height="15" rx="1.5" />
+                <rect x="16" y="8" width="4" height="12" rx="1.5" />
+              </svg>
+            </div>
+          )}
           <div>
-            <div className="font-extrabold text-[16px] leading-tight tracking-tight">
-              {lang === 'bn' ? 'আলোকিত' : 'Alokito'}
+            <div className="font-extrabold text-[16px] leading-tight tracking-tight truncate max-w-[160px]">
+              {centerName}
             </div>
             <div
               className={`text-[11px] font-medium ${
@@ -181,14 +196,14 @@ export default function PortalShell({ children }: { children: React.ReactNode })
               </div>
               <div className="min-w-0">
                 <div className="font-bold text-[13px] truncate leading-tight">
-                  {portalUser.name || 'Tanvir Ahmed Rafi'}
+                  {portalUser.name}
                 </div>
                 <div
                   className={`text-[11px] truncate mt-0.5 ${
                     isStudent ? 'text-blue-200/60' : 'text-slate-500'
                   }`}
                 >
-                  {isStudent ? 'Class 12 Science · A' : dict.guardianRole}
+                  {isStudent ? dict.studentRole : dict.guardianRole}
                 </div>
               </div>
             </Link>
@@ -271,7 +286,7 @@ export default function PortalShell({ children }: { children: React.ReactNode })
                 <div className="min-w-0">
                   <div className="font-bold text-[13px] truncate">{portalUser.name}</div>
                   <div className="text-[11px] text-blue-200/60">
-                    {isStudent ? 'Class 12 Science · A' : dict.guardianRole}
+                    {isStudent ? dict.studentRole : dict.guardianRole}
                   </div>
                 </div>
               </div>

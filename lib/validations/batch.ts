@@ -57,6 +57,9 @@ export const studentBatchAssignSchema = z.object({
   rollCode: z.string().max(40).optional().or(z.literal('')),
   notes: z.string().max(500).optional().or(z.literal('')),
   overrideCapacity: z.boolean().default(false),
+  // Phase 10.5: a genuine class-time clash with another of the student's
+  // active batches is rejected unless explicitly overridden.
+  overrideConflict: z.boolean().default(false),
 });
 export type StudentBatchAssignInput = z.infer<typeof studentBatchAssignSchema>;
 

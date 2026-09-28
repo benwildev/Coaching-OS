@@ -288,33 +288,48 @@ async function publishSideEffects(scope: NoticeScope, noticeId: string) {
   }
 
   const notifiedStudentIds = new Set<string>();
+  // Phase 10.5: a notice is one message regardless of how many of a
+  // guardian's children it concerns — a guardian who appears more than
+  // once in `recipients.guardians` (e.g. two children in the same
+  // batch/ALL_CENTER audience) must still get exactly one SMS and one
+  // in-app notification, not one per child. This is now an explicit
+  // application-level guard rather than relying on the DB unique
+  // constraint to swallow the "duplicate" (that constraint's identity now
+  // includes studentId — see prisma/schema.prisma — precisely so it no
+  // longer collapses different children's *different* events together;
+  // it must not be relied on to collapse a notice's *same* event either).
+  // Where two links disagree on notification preference, whichever
+  // (guardian, child) pair is encountered first governs — a guardian-level
+  // message has no single "correct" per-child preference to defer to.
+  const notifiedGuardianIds = new Set<string>();
   for (const g of recipients.guardians) {
-    await dispatchToGuardian({
-      coachingCenterId: scope.coachingCenterId,
-      branchId: notice.branchId,
-      guardianId: g.guardianId,
-      studentId: g.studentId,
-      noticeId: notice.id,
-      event: 'NOTICE_PUBLISHED',
-      vars: { noticeTitle: notice.title },
-      triggeredById: scope.user.userId,
-      sourceType: 'Notice',
-      sourceId: notice.id,
-    });
+    if (!notifiedGuardianIds.has(g.guardianId)) {
+      notifiedGuardianIds.add(g.guardianId);
+      await dispatchToGuardian({
+        coachingCenterId: scope.coachingCenterId,
+        branchId: notice.branchId,
+        guardianId: g.guardianId,
+        studentId: g.studentId,
+        noticeId: notice.id,
+        event: 'NOTICE_PUBLISHED',
+        vars: { noticeTitle: notice.title },
+        triggeredById: scope.user.userId,
+        sourceType: 'Notice',
+        sourceId: notice.id,
+      });
 
-    // In-app notification, if a PortalAccount exists (Phase 9). Every
-    // guardian on the list gets one; each linked student gets exactly one
-    // regardless of how many guardians share that child.
-    await notifyPortalAccountsForEvent({
-      coachingCenterId: scope.coachingCenterId,
-      guardianId: g.guardianId,
-      type: 'NOTICE_PUBLISHED',
-      title: notice.title,
-      body: notice.banglaTitle || notice.title,
-      actionUrl: `/portal/guardian/notices`,
-      sourceType: 'Notice',
-      sourceId: notice.id,
-    });
+      // In-app notification, if a PortalAccount exists (Phase 9).
+      await notifyPortalAccountsForEvent({
+        coachingCenterId: scope.coachingCenterId,
+        guardianId: g.guardianId,
+        type: 'NOTICE_PUBLISHED',
+        title: notice.title,
+        body: notice.banglaTitle || notice.title,
+        actionUrl: `/portal/guardian/notices`,
+        sourceType: 'Notice',
+        sourceId: notice.id,
+      });
+    }
     if (!notifiedStudentIds.has(g.studentId)) {
       notifiedStudentIds.add(g.studentId);
       await notifyPortalAccountsForEvent({

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { getBatchesList, createBatch } from '@/lib/services/batch.service';
 import { batchSchema } from '@/lib/validations/batch';
 
@@ -7,12 +7,14 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const { coachingCenterId } = await requireTenant();
+    const { coachingCenterId, user } = await requireTenant();
     const { searchParams } = new URL(request.url);
 
+    // Phase 10.5: a branch-locked STAFF/TEACHER could previously list any
+    // other branch's batches by editing ?branch=.
     const result = await getBatchesList(coachingCenterId, {
       search: searchParams.get('search') || undefined,
-      branchId: searchParams.get('branch') || undefined,
+      branchId: resolveEffectiveBranchId(user, searchParams.get('branch') || undefined),
       sessionId: searchParams.get('session') || undefined,
       programId: searchParams.get('program') || undefined,
       classId: searchParams.get('class') || undefined,

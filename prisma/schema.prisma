@@ -616,6 +616,7 @@ model Student {
   portalAccount    PortalAccount?
   auditLogs        AuditLog[]
   notifications    Notification[]
+  guardianNotificationsAbout Notification[] @relation("NotificationGuardianStudent")
 
   @@unique([coachingCenterId, studentIdCode])
   @@index([coachingCenterId, phone])
@@ -927,6 +928,12 @@ model StudentBatch {
   student          Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
   batch            Batch          @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
+  // Phase 10.5: a student may only have ONE active membership in a given
+  // batch at a time — enforced by a PARTIAL unique index on
+  // (studentId, batchId) WHERE status = 'ACTIVE', created directly in the
+  // migration SQL (history rows with status TRANSFERRED/DROPPED are
+  // unaffected). Not representable in schema.prisma's DSL, so it is not
+  // declared here; do not let a generated `prisma migrate diff` drop it.
   @@index([coachingCenterId, status])
   @@index([studentId, batchId])
   @@index([batchId])
@@ -1041,10 +1048,18 @@ model AttendanceSession {
   reopenedBy        User?               @relation("AttendanceReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
   studentAttendances StudentAttendance[]
 
-  @@unique([batchId, date, type])
+  // Phase 10.5: (batchId, date, type) is intentionally NOT a full unique
+  // constraint here — a batch legitimately has several CLASS sessions on
+  // one date (Physics 9am, Chemistry 11am, ...), distinguished by
+  // classScheduleId below. Non-CLASS types (EXAM/SPECIAL) still get
+  // (batchId, date, type) uniqueness, enforced by a PARTIAL unique index
+  // (`WHERE type <> 'CLASS'`) created directly in the migration SQL — Prisma
+  // schema has no DSL for a filtered unique index, so it is not declared
+  // here; do not remove it when hand-writing a future migration.
   @@unique([classScheduleId, date])
   @@index([coachingCenterId, branchId])
   @@index([coachingCenterId, batchId])
+  @@index([batchId, date, type])
   @@index([coachingCenterId, teacherId])
   @@index([coachingCenterId, date])
   @@index([coachingCenterId, status])
@@ -1273,6 +1288,14 @@ model Payment {
   notes            String?
   status           PaymentStatus @default(COMPLETED)
   collectedById    String?
+  // Phase 10.5: an optional client-generated key (e.g. a UUID minted once
+  // per "Pay" click and resent unchanged on retry) so a double-submit or
+  // network retry of the exact same payment attempt is a no-op instead of
+  // a second Payment row. NULL (no key sent) means no idempotency guarantee
+  // is requested for that call — each NULL is distinct under this unique
+  // index, matching how every other optional-unique column in this schema
+  // behaves.
+  idempotencyKey   String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -1284,6 +1307,12 @@ model Payment {
   refunds          PaymentRefund[]
 
   @@unique([coachingCenterId, receiptNumber])
+  @@unique([coachingCenterId, idempotencyKey])
+  // A given bKash/Nagad/bank transaction reference must not be recorded
+  // twice for the same tenant and method — CASH/OTHER payments normally
+  // leave transactionId null, and NULLs are never considered duplicates of
+  // each other by this index, so cash is unaffected.
+  @@unique([coachingCenterId, paymentMethod, transactionId])
   @@index([coachingCenterId, studentId])
   @@index([coachingCenterId, invoiceId])
   @@index([coachingCenterId, paymentDate])
@@ -1692,6 +1721,15 @@ model Notification {
   userId           String?
   studentId        String?
   guardianId       String?
+  // Phase 10.5: which child a GUARDIAN's notification is about, when it's
+  // about one specific child (attendance/fee/exam/result/material events).
+  // Deliberately a SEPARATE column from `studentId` above — `studentId`
+  // means "this row IS the student's own portal notification" and already
+  // carries its own unique constraint; reusing it for "context on a
+  // guardian's row" would let two different guardians of the SAME child
+  // collide with each other under that unrelated constraint. NULL for a
+  // guardian-level event with no single child (e.g. a notice).
+  guardianStudentId String?
   title            String
   body             String
   type             String         @default("INFO") // INFO, WARNING, SUCCESS, plus centralized event types (see lib/notifications/events.ts)
@@ -1706,12 +1744,22 @@ model Notification {
   user             User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   student          Student?       @relation(fields: [studentId], references: [id], onDelete: SetNull)
   guardian         Guardian?      @relation(fields: [guardianId], references: [id], onDelete: SetNull)
+  guardianStudent  Student?       @relation("NotificationGuardianStudent", fields: [guardianStudentId], references: [id], onDelete: SetNull)
 
   @@unique([userId, sourceType, sourceId, type])
   @@unique([studentId, sourceType, sourceId, type])
-  @@unique([guardianId, sourceType, sourceId, type])
+  // Sibling-safe: two different guardians of the same child (guardianStudentId
+  // equal, guardianId different) never collide; the same guardian notified
+  // twice about two different children (guardianStudentId different) never
+  // collides either — only a true repeat of (this guardian, this child,
+  // this event) is deduped. A guardian-level event with no single child
+  // (guardianStudentId NULL, e.g. a notice) is deduped at the application
+  // layer instead (see notice.service.ts), since NULL is never equal to
+  // NULL under this constraint.
+  @@unique([guardianId, guardianStudentId, sourceType, sourceId, type])
   @@index([userId, isRead])
   @@index([studentId, isRead])
+  @@index([guardianStudentId])
   @@index([guardianId, isRead])
   @@index([coachingCenterId, createdAt])
   @@map("notifications")
@@ -1770,7 +1818,8 @@ model CommunicationLog {
   guardian          Guardian?            @relation(fields: [guardianId], references: [id], onDelete: SetNull)
   triggeredBy       User?                @relation("CommunicationLogTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
 
-  @@unique([guardianId, channel, event, sourceType, sourceId])
+  // See Notification.@@unique above for why studentId is part of this key.
+  @@unique([guardianId, studentId, channel, event, sourceType, sourceId])
   @@index([coachingCenterId, createdAt])
   @@index([coachingCenterId, status])
   @@index([coachingCenterId, sourceType, sourceId])

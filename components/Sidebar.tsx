@@ -33,6 +33,8 @@ function NavLink({
   collapsed,
   active,
   onClick,
+  accentColor,
+  primaryColor,
 }: {
   label: string;
   icon: string;
@@ -40,16 +42,17 @@ function NavLink({
   collapsed: boolean;
   active: boolean;
   onClick?: () => void;
+  accentColor: string;
+  primaryColor: string;
 }) {
   return (
     <Link
       href={href}
       onClick={onClick}
       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] font-semibold transition-colors ${
-        active
-          ? 'bg-[#ffd200] text-[#063b78] shadow-xs'
-          : 'text-[#e9eef7] hover:bg-white/10'
+        active ? 'shadow-xs' : 'text-[#e9eef7] hover:bg-white/10'
       }`}
+      style={active ? { backgroundColor: accentColor, color: primaryColor } : undefined}
       title={collapsed ? label : undefined}
     >
       <Icon name={icon} size={19} className="shrink-0" />
@@ -74,7 +77,7 @@ export function SidebarContent({
   const centerName =
     (lang === 'bn' && currentCenter?.banglaName) ||
     currentCenter?.name ||
-    'Alokito Coaching';
+    'Coaching OS';
 
   const campusName =
     currentCenter?.branches?.[0]?.name ||
@@ -87,19 +90,31 @@ export function SidebarContent({
 
   const userRole = currentUser?.role || 'OWNER';
 
+  const primaryColor = currentCenter?.branding?.primaryColor || '#063b78';
+  const secondaryColor = currentCenter?.branding?.secondaryColor || '#001d4d';
+  const accentColor = currentCenter?.branding?.accentColor || '#ffd200';
+  const logoUrl = currentCenter?.branding?.logoUrl;
+
   return (
     <div
       className="h-full flex flex-col gap-1 p-3 text-[#e9eef7] relative overflow-hidden"
       style={{
-        background:
-          'radial-gradient(120% 60% at 0% 0%, #063b78 0%, rgba(6,59,120,0) 60%), linear-gradient(180deg, #063b78 0%, #001d4d 100%)',
+        background: `radial-gradient(120% 60% at 0% 0%, ${primaryColor} 0%, ${primaryColor}00 60%), linear-gradient(180deg, ${primaryColor} 0%, ${secondaryColor} 100%)`,
       }}
     >
       {/* Brand & Organization Title */}
       <div className={`flex items-center gap-2.5 px-2 py-3 mb-2 ${collapsed ? 'justify-center' : ''}`}>
-        <span className="w-9 h-9 rounded-xl bg-[#ffd200] text-[#063b78] flex items-center justify-center font-black dsp text-lg shrink-0 shadow-sm">
-          {centerName.charAt(0)}
-        </span>
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logoUrl} alt={centerName} className="w-9 h-9 rounded-xl object-cover shrink-0 shadow-sm bg-white" />
+        ) : (
+          <span
+            className="w-9 h-9 rounded-xl flex items-center justify-center font-black dsp text-lg shrink-0 shadow-sm"
+            style={{ backgroundColor: accentColor, color: primaryColor }}
+          >
+            {centerName.charAt(0)}
+          </span>
+        )}
         {!collapsed && (
           <div className="min-w-0 grow">
             <div className="dsp font-bold text-sm text-white truncate">{centerName}</div>
@@ -135,6 +150,8 @@ export function SidebarContent({
               collapsed={collapsed}
               active={isActive}
               onClick={onNavigate}
+              accentColor={accentColor}
+              primaryColor={primaryColor}
             />
           );
         })}
@@ -144,7 +161,7 @@ export function SidebarContent({
       <div className="mt-auto pt-2 flex flex-col gap-2 border-t border-white/10">
         {!collapsed && (
           <div className="rounded-xl p-3 bg-white/5 border border-white/10 flex flex-col gap-1.5">
-            <div className="text-[10px] font-extrabold text-[#ffd200] tracking-wider uppercase">
+            <div className="text-[10px] font-extrabold tracking-wider uppercase" style={{ color: accentColor }}>
               Phase 1 Foundation
             </div>
             <div className="text-[11px] text-[#8fb3de] leading-snug">
@@ -174,7 +191,7 @@ export function SidebarContent({
           {!collapsed && (
             <div className="min-w-0">
               <div className="text-[12.5px] font-semibold text-white truncate">{userDisplayName}</div>
-              <div className="text-[11px] text-[#ffd200] font-bold truncate">{userRole}</div>
+              <div className="text-[11px] font-bold truncate" style={{ color: accentColor }}>{userRole}</div>
             </div>
           )}
         </div>

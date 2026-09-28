@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { getFeeStructuresList, createFeeStructure } from '@/lib/services/fee.service';
 import { feeStructureSchema } from '@/lib/validations/fee';
 
@@ -7,13 +7,14 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const { coachingCenterId } = await requireTenant();
+    const { coachingCenterId, user } = await requireTenant();
     await requireRole(['OWNER', 'ADMIN', 'STAFF']);
     const { searchParams } = new URL(request.url);
 
+    // Phase 10.5: previously trusted ?branch= verbatim.
     const result = await getFeeStructuresList(coachingCenterId, {
       search: searchParams.get('search') || undefined,
-      branchId: searchParams.get('branch') || undefined,
+      branchId: resolveEffectiveBranchId(user, searchParams.get('branch') || undefined),
       academicSessionId: searchParams.get('session') || undefined,
       feeType: searchParams.get('feeType') || undefined,
       isActive: searchParams.get('isActive') || undefined,

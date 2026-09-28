@@ -176,6 +176,13 @@ export async function listCommunicationLogs(scope: CommunicationScope, params: L
   const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
 
   const and: Prisma.CommunicationLogWhereInput[] = [{ coachingCenterId: scope.coachingCenterId }];
+  // Phase 10.5: a branch-locked STAFF could previously see every branch's
+  // SMS/email logs (incl. recipient phone/email and guardian/student
+  // names) despite CommunicationLog having its own branchId column —
+  // nothing here ever filtered by it.
+  if (scope.user.role !== 'OWNER' && scope.user.role !== 'ADMIN' && scope.user.branchId) {
+    and.push({ branchId: scope.user.branchId });
+  }
   if (params.channel) and.push({ channel: params.channel as CommunicationChannel });
   if (params.event) and.push({ event: params.event });
   if (params.status) and.push({ status: params.status });

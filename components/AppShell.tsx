@@ -3,10 +3,11 @@ import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import MobileNav from './MobileNav';
+import DynamicFavicon from './DynamicFavicon';
 import { useApp } from '@/lib/store';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const { toast } = useApp();
+  const { toast, currentCenter } = useApp();
   const pathname = usePathname();
 
   // The login, setup, and student/guardian portal pages have their own full-screen
@@ -17,6 +18,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-[#f5f8fd]">
+      <DynamicFavicon url={currentCenter?.branding?.faviconUrl} />
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col pb-16 md:pb-0">
         <TopBar />

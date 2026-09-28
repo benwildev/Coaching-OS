@@ -2,10 +2,12 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 import { isSetupCompleted } from '@/lib/services/tenant.service';
 import { DASHBOARD_RANGES, getDashboardData, type DashboardRange } from '@/lib/services/dashboard.service';
+import { getTeacherDashboardData } from '@/lib/services/teacher.service';
 import KpiCard, { type Kpi } from '@/components/KpiCard';
 import DashboardFilters from '@/components/dashboard/DashboardFilters';
 import FeeCollectionChart from '@/components/dashboard/FeeCollectionChart';
 import BatchPerformance from '@/components/dashboard/BatchPerformance';
+import TeacherDashboard from '@/components/dashboard/TeacherDashboard';
 import {
   Panel,
   OutstandingFees,
@@ -43,6 +45,32 @@ export default async function DashboardPage({
   if (!(await isSetupCompleted())) redirect('/setup');
   const session = await getSession();
   if (!session) redirect('/login');
+
+  const now0 = new Date();
+  const dhakaHour0 = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Asia/Dhaka' }).format(now0));
+  const greeting0 = dhakaHour0 < 12 ? 'Good morning' : dhakaHour0 < 17 ? 'Good afternoon' : 'Good evening';
+  const firstName0 = session.name.replace(/^Md\.\s*/, '').split(' ')[0];
+  const dateLine0 = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Dhaka' }).format(now0);
+
+  // Phase 10.5: TEACHER gets a real, purpose-built dashboard scoped to
+  // their own assignments — not the owner dashboard with panels hidden.
+  // Resolved from the authenticated session only, never a client-supplied
+  // teacherId.
+  if (session.role === 'TEACHER') {
+    const teacherData = await getTeacherDashboardData(session.coachingCenterId, session.userId);
+    if (!teacherData.linked) {
+      return (
+        <div className="max-w-[720px] mx-auto flex flex-col items-center text-center gap-3 py-20">
+          <h1 className="dsp text-2xl text-[#063b78] tracking-tight">{greeting0}, {firstName0}</h1>
+          <p className="text-[14px] text-[#55637a] max-w-md">
+            Your account isn&apos;t linked to a teacher profile yet. Ask your center owner or admin to link your
+            login under Teachers → your profile → Employment → Login account.
+          </p>
+        </div>
+      );
+    }
+    return <TeacherDashboard data={teacherData} greeting={greeting0} firstName={firstName0} dateLine={dateLine0} lang="en" />;
+  }
 
   const sp = await searchParams;
   const rawRange = Number(sp.range);
@@ -170,7 +198,7 @@ export default async function DashboardPage({
         <div className="lg:col-span-4 flex flex-col gap-5 min-w-0">
           {financeVisible && <OutstandingFees data={data.outstanding} />}
           <RecentActivity items={data.activity} now={now} />
-          <TodaySchedule agenda={data.todaysAgenda} exams={data.upcomingExams} />
+          <TodaySchedule agenda={data.todaysAgenda} exams={data.upcomingExams} completion={data.attendanceCompletion} />
         </div>
       </div>
 

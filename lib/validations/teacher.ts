@@ -57,3 +57,20 @@ export const teacherSchema = z.object({
 export type TeacherInput = z.infer<typeof teacherSchema>;
 export const teacherUpdateSchema = teacherSchema.partial();
 export type TeacherUpdateInput = z.infer<typeof teacherUpdateSchema>;
+
+// Phase 10.5: OWNER/ADMIN-only teacher <-> login account linking.
+export const teacherAccountLinkSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('create'),
+    name: z.string().trim().min(2, 'Name is required'),
+    banglaName: z.string().trim().max(100).optional().or(z.literal('')),
+    email: z.string().trim().email('Enter a valid email address'),
+    phone: z.string().trim().refine((val) => isValidBdPhone(val), { message: 'Enter a valid Bangladesh phone number' }),
+    password: z.string().min(6, 'Password must be at least 6 characters'),
+  }),
+  z.object({
+    mode: z.literal('link'),
+    userId: z.string().min(1, 'Select an account to link'),
+  }),
+]);
+export type TeacherAccountLinkInput = z.infer<typeof teacherAccountLinkSchema>;

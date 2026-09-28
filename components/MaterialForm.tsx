@@ -8,6 +8,7 @@ import type { z } from 'zod';
 import Icon from './Icon';
 import EnglishInput from './EnglishInput';
 import BanglaInput from './BanglaInput';
+import FileUploadButton from './FileUploadButton';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, pickLocalized } from '@/lib/i18n';
 import { useQuestionBankOptions } from '@/lib/hooks/useQuestionBankOptions';
@@ -144,7 +145,10 @@ export default function MaterialForm({ initial }: { initial?: MaterialFormInitia
         </div>
         <div className="fld">
           <label htmlFor="m-url">{m.resourceUrl}{type !== 'NOTE' && ' *'}</label>
-          <input id="m-url" type="url" placeholder="https://" {...register('fileUrl')} />
+          <div className="flex items-center gap-2">
+            <input id="m-url" type="url" placeholder="https://" className="grow" {...register('fileUrl')} />
+            <FileUploadButton scope="material" lang={lang} onUploaded={(url) => setValue('fileUrl', url, { shouldValidate: true, shouldDirty: true })} />
+          </div>
           <span className="text-[11.5px] text-[#64748b]">{m.resourceHint}</span>
           {err(errors.fileUrl?.message)}
         </div>
@@ -173,7 +177,10 @@ export default function MaterialForm({ initial }: { initial?: MaterialFormInitia
         </div>
         <div className="fld sm:col-span-2">
           <label htmlFor="m-thumb">{m.thumbnailUrl} <span className="font-normal text-[#64748b]">({c.optional})</span></label>
-          <input id="m-thumb" type="url" placeholder="https://" {...register('thumbnailUrl')} />
+          <div className="flex items-center gap-2">
+            <input id="m-thumb" type="url" placeholder="https://" className="grow" {...register('thumbnailUrl')} />
+            <FileUploadButton scope="thumbnail" lang={lang} onUploaded={(url) => setValue('thumbnailUrl', url, { shouldValidate: true, shouldDirty: true })} />
+          </div>
           {err(errors.thumbnailUrl?.message)}
         </div>
       </section>

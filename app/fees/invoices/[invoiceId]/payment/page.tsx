@@ -38,6 +38,10 @@ export default function RecordPaymentPage() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // Phase 10.5: one idempotency key per visit to this form — sent unchanged
+  // on every submit attempt (including a retry after a network error), so a
+  // double-click or an accidental resubmit can never create two payments.
+  const [idempotencyKey] = useState(() => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,6 +79,7 @@ export default function RecordPaymentPage() {
           bankName: bankName || undefined,
           chequeNumber: chequeNumber || undefined,
           notes: notes || undefined,
+          idempotencyKey,
         }),
       });
       const data = await res.json();
