@@ -25,7 +25,9 @@ interface StatusBadgeProps {
     | 'paperStatus'
     | 'materialStatus'
     | 'noticeStatus'
-    | 'communicationLogStatus';
+    | 'communicationLogStatus'
+    | 'homeworkStatus'
+    | 'submissionStatus';
 }
 
 // Centralized semantic status → color tokens, shared by StatusBadge and any
@@ -69,6 +71,13 @@ export const STATUS_DOT_COLOR: Record<string, string> = {
   DELIVERED: 'bg-emerald-500',
   FAILED: 'bg-rose-500',
   SKIPPED: 'bg-slate-400',
+  CLOSED: 'bg-slate-400',
+  SUBMITTED: 'bg-sky-500',
+  REVIEWED: 'bg-emerald-500',
+  RETURNED: 'bg-amber-500',
+  NOT_SUBMITTED: 'bg-rose-500',
+  UPCOMING: 'bg-sky-500',
+  DUE_SOON: 'bg-amber-500',
 };
 
 export const STATUS_BG_COLOR: Record<string, string> = {
@@ -109,6 +118,13 @@ export const STATUS_BG_COLOR: Record<string, string> = {
   DELIVERED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   FAILED: 'bg-rose-50 text-rose-700 border-rose-200',
   SKIPPED: 'bg-slate-100 text-slate-600 border-slate-200',
+  CLOSED: 'bg-slate-100 text-slate-600 border-slate-200',
+  SUBMITTED: 'bg-sky-50 text-sky-700 border-sky-200',
+  REVIEWED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  RETURNED: 'bg-amber-50 text-amber-700 border-amber-200',
+  NOT_SUBMITTED: 'bg-rose-50 text-rose-700 border-rose-200',
+  UPCOMING: 'bg-sky-50 text-sky-700 border-sky-200',
+  DUE_SOON: 'bg-amber-50 text-amber-700 border-amber-200',
 };
 
 const DOT_COLOR = STATUS_DOT_COLOR;

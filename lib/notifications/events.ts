@@ -16,6 +16,8 @@ export const NOTIFICATION_EVENTS = [
   'RESULT_PUBLISHED',
   'NOTICE_PUBLISHED',
   'MATERIAL_PUBLISHED',
+  'HOMEWORK_PUBLISHED',
+  'HOMEWORK_REVIEWED',
   'GENERAL_ANNOUNCEMENT',
 ] as const;
 
@@ -105,13 +107,21 @@ export const DEFAULT_EVENT_COPY: Record<NotificationEvent, EventCopy> = {
     en: { title: 'New study material available', body: 'New material for {{subjectName}} in {{batchName}} is now available.' },
     bn: { title: 'নতুন পাঠ্য উপকরণ প্রকাশিত হয়েছে', body: '{{batchName}}-এ {{subjectName}}-এর নতুন উপকরণ প্রকাশিত হয়েছে।' },
   },
+  HOMEWORK_PUBLISHED: {
+    en: { title: 'New homework assigned', body: 'New homework for {{subjectName}} in {{batchName}} has been assigned.' },
+    bn: { title: 'নতুন হোমওয়ার্ক দেওয়া হয়েছে', body: '{{batchName}}-এ {{subjectName}}-এর নতুন হোমওয়ার্ক দেওয়া হয়েছে।' },
+  },
+  HOMEWORK_REVIEWED: {
+    en: { title: 'Homework reviewed', body: 'Your homework for {{subjectName}} in {{batchName}} has been reviewed.' },
+    bn: { title: 'হোমওয়ার্ক পর্যালোচনা হয়েছে', body: '{{batchName}}-এ {{subjectName}}-এর হোমওয়ার্ক পর্যালোচনা করা হয়েছে।' },
+  },
   GENERAL_ANNOUNCEMENT: {
     en: { title: 'Announcement', body: '{{noticeTitle}}' },
     bn: { title: 'ঘোষণা', body: '{{noticeTitle}}' },
   },
 };
 
-export const NOTIFICATION_CATEGORIES = ['ATTENDANCE', 'FEE', 'EXAM', 'RESULT', 'NOTICE', 'MATERIAL'] as const;
+export const NOTIFICATION_CATEGORIES = ['ATTENDANCE', 'FEE', 'EXAM', 'RESULT', 'NOTICE', 'MATERIAL', 'HOMEWORK'] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
 export const EVENT_CATEGORY: Record<NotificationEvent, NotificationCategory> = {
@@ -128,5 +138,7 @@ export const EVENT_CATEGORY: Record<NotificationEvent, NotificationCategory> = {
   RESULT_PUBLISHED: 'RESULT',
   NOTICE_PUBLISHED: 'NOTICE',
   MATERIAL_PUBLISHED: 'MATERIAL',
+  HOMEWORK_PUBLISHED: 'HOMEWORK',
+  HOMEWORK_REVIEWED: 'HOMEWORK',
   GENERAL_ANNOUNCEMENT: 'NOTICE',
 };

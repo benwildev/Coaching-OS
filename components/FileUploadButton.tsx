@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 
-export type UploadScope = 'logo' | 'favicon' | 'photo' | 'thumbnail' | 'material';
+export type UploadScope = 'logo' | 'favicon' | 'photo' | 'thumbnail' | 'material' | 'homework' | 'homeworkSubmission';
 
 const DEFAULT_ACCEPT: Record<UploadScope, string> = {
   logo: 'image/png,image/jpeg,image/webp,image/gif',
@@ -10,6 +10,8 @@ const DEFAULT_ACCEPT: Record<UploadScope, string> = {
   photo: 'image/png,image/jpeg,image/webp,image/gif',
   thumbnail: 'image/png,image/jpeg,image/webp,image/gif',
   material: 'image/png,image/jpeg,image/webp,image/gif,.pdf,.doc,.docx,.ppt,.pptx,video/mp4,video/webm',
+  homework: 'image/png,image/jpeg,image/webp,image/gif,.pdf,.doc,.docx,.ppt,.pptx',
+  homeworkSubmission: 'image/png,image/jpeg,image/webp,image/gif,.pdf,.doc,.docx',
 };
 
 /**

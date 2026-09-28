@@ -50,6 +50,7 @@ export default function GuardianChildProfilePage({ params }: { params: Promise<{
     { href: `/portal/guardian/children/${studentId}/fees`, icon: 'wallet', label: t.portal.nav.fees },
     { href: `/portal/guardian/children/${studentId}/results`, icon: 'award', label: t.portal.nav.results },
     { href: `/portal/guardian/children/${studentId}/materials`, icon: 'book', label: t.portal.nav.materials },
+    { href: `/portal/guardian/children/${studentId}/homework`, icon: 'calcheck', label: t.portal.nav.homework },
   ];
 
   return (

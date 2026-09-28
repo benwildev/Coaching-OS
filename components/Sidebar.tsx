@@ -18,6 +18,7 @@ const NAV_ITEMS: { id: string; icon: string; href: string; staffOnly?: boolean }
   { id: 'questions', icon: 'target', href: '/questions' },
   { id: 'questionPapers', icon: 'file', href: '/question-papers' },
   { id: 'materials', icon: 'book', href: '/materials' },
+  { id: 'homework', icon: 'calcheck', href: '/homework' },
   { id: 'teachers', icon: 'grad', href: '/teachers' },
   { id: 'notifications', icon: 'bell', href: '/notifications' },
   { id: 'notices', icon: 'pin', href: '/notices' },

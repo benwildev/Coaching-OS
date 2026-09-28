@@ -57,6 +57,37 @@ export function getCurrentDhakaDayOfWeek(date: Date = new Date()): DayOfWeek {
   return map[weekday] || JS_DAY_TO_ENUM[date.getUTCDay()];
 }
 
+/**
+ * Converts a `datetime-local` input's raw value ("YYYY-MM-DDTHH:mm", no
+ * timezone) into a proper ISO string carrying Bangladesh's fixed UTC+6
+ * offset (no DST), so `Date.parse` on the server resolves it to the
+ * intended Dhaka wall-clock moment regardless of the server process's own
+ * timezone. Used for homework publish/due date-time fields.
+ */
+export function dhakaLocalToIso(value: string): string {
+  if (!value) return value;
+  const hasSeconds = /T\d{2}:\d{2}:\d{2}/.test(value);
+  return hasSeconds ? `${value}+06:00` : `${value}:00+06:00`;
+}
+
+/** The inverse of dhakaLocalToIso — formats a stored Date/ISO string back
+ * into a `datetime-local` input value showing Dhaka wall-clock time. */
+export function isoToDhakaLocal(value: string | Date): string {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DHAKA_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+}
+
 /** Parses "HH:mm" into minutes-since-midnight. Returns NaN on invalid input. */
 export function parseTimeToMinutes(time: string): number {
   const m = /^(\d{1,2}):(\d{2})$/.exec(time?.trim() || '');

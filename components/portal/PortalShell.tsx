@@ -9,6 +9,7 @@ import {
   Award,
   CheckCircle2,
   BookOpen,
+  ClipboardCheck,
   Bell,
   User,
   LogOut,
@@ -51,6 +52,7 @@ export default function PortalShell({ children }: { children: React.ReactNode })
     { id: 'results', label: lang === 'bn' ? 'পরীক্ষা ও ফলাফল' : 'Exams & results', icon: Award, href: '/portal/student/results' },
     { id: 'attendance', label: lang === 'bn' ? 'উপস্থিতি' : 'Attendance', icon: CheckCircle2, href: '/portal/student/attendance' },
     { id: 'materials', label: lang === 'bn' ? 'স্টাডি মেটেরিয়াল' : 'Study material', icon: BookOpen, href: '/portal/student/materials' },
+    { id: 'homework', label: lang === 'bn' ? 'হোমওয়ার্ক' : 'Homework', icon: ClipboardCheck, href: '/portal/student/homework' },
     { id: 'notices', label: lang === 'bn' ? 'নোটিশ' : 'Notices', icon: Bell, href: '/portal/student/notices' },
   ];
 

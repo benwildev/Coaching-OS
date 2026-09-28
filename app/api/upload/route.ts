@@ -32,6 +32,30 @@ const SCOPES = {
       'video/webm',
     ],
   },
+  homework: {
+    folder: 'homework/attachments',
+    resourceType: 'auto' as const,
+    maxBytes: 25 * 1024 * 1024,
+    mimeTypes: [
+      ...IMAGE_TYPES,
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ],
+  },
+  homeworkSubmission: {
+    folder: 'homework/submissions',
+    resourceType: 'auto' as const,
+    maxBytes: 15 * 1024 * 1024,
+    mimeTypes: [
+      ...IMAGE_TYPES,
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
+  },
 } as const;
 
 type Scope = keyof typeof SCOPES;

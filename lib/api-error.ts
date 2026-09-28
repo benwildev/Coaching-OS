@@ -21,6 +21,12 @@ const CONFLICT_CODES = new Set([
   'TEACHER_ALREADY_LINKED',
   'USER_ALREADY_LINKED',
   'TEACHER_NOT_LINKED',
+  'HOMEWORK_ALREADY_ARCHIVED',
+  'HOMEWORK_HAS_SUBMISSIONS',
+  'HOMEWORK_CLOSED',
+  'HOMEWORK_NOT_DRAFT',
+  'HOMEWORK_NOT_OPEN',
+  'SUBMISSION_ALREADY_REVIEWED',
 ]);
 
 // Portal (student/guardian) auth codes that don't fit the generic suffix
