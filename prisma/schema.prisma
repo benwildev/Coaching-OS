@@ -253,6 +253,7 @@ model User {
   failedLoginAttempts Int         @default(0)
   lockedUntil      DateTime?
   lastLoginAt      DateTime?
+  sessionVersion   Int            @default(0) // bumped on logout/disable/password change to invalidate outstanding JWTs
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
@@ -740,6 +741,7 @@ model PortalAccount {
   failedLoginAttempts Int                 @default(0)
   lockedUntil         DateTime?
   lastLoginAt         DateTime?
+  sessionVersion      Int                 @default(0) // bumped on logout/disable/password change to invalidate outstanding JWTs
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
 

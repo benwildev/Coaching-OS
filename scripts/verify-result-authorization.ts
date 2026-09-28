@@ -67,10 +67,30 @@ async function main() {
     const klass = await prisma.academicClass.findFirstOrThrow({ where: { coachingCenterId: cc, academicProgramId: program.id } });
     const branch2 = await prisma.branch.create({ data: { coachingCenterId: cc, name: `${TAG} Branch 2`, code: 'B2' } });
 
-    const mkUser = (n: string, branchId: string | null) =>
-      prisma.user.create({ data: { coachingCenterId: cc, branchId, email: `${n}-${TAG.toLowerCase()}@verify.local`, passwordHash: 'x', name: `${TAG} ${n}` } });
-    const [adminU, staffU, teacherU, teacher2U] = await Promise.all([mkUser('admin', null), mkUser('staff', main.id), mkUser('teacher', main.id), mkUser('teacher2', main.id)]);
-    const su = (u: { id: string; email: string; name: string }, role: SessionUser['role'], branchId: string | null): SessionUser => ({ userId: u.id, email: u.email, name: u.name, role, coachingCenterId: cc, branchId });
+    // Phase 10.4: sessions are now re-derived from the DB on every request
+    // (see lib/auth/session.ts) — a signed token whose claimed role has no
+    // matching RoleAssignment resolves to no session at all. Each fixture
+    // user below must carry the real RoleAssignment its session token will
+    // later claim.
+    const aRoles = await prisma.role.findMany({ where: { coachingCenterId: cc } });
+    const mkUser = (n: string, branchId: string | null, role: SessionUser['role']) =>
+      prisma.user.create({
+        data: {
+          coachingCenterId: cc,
+          branchId,
+          email: `${n}-${TAG.toLowerCase()}@verify.local`,
+          passwordHash: 'x',
+          name: `${TAG} ${n}`,
+          roleAssignments: { create: { roleId: aRoles.find((r) => r.code === role)!.id, branchId } },
+        },
+      });
+    const [adminU, staffU, teacherU, teacher2U] = await Promise.all([
+      mkUser('admin', null, 'ADMIN'),
+      mkUser('staff', main.id, 'STAFF'),
+      mkUser('teacher', main.id, 'TEACHER'),
+      mkUser('teacher2', main.id, 'TEACHER'),
+    ]);
+    const su = (u: { id: string; email: string; name: string }, role: SessionUser['role'], branchId: string | null): SessionUser => ({ userId: u.id, email: u.email, phone: null, name: u.name, banglaName: null, role, coachingCenterId: cc, branchId, sessionVersion: 0 });
     const owner = su(setup.owner, 'OWNER', main.id);
     const admin = su(adminU, 'ADMIN', null);
     const staff = su(staffU, 'STAFF', main.id);
@@ -124,15 +144,15 @@ async function main() {
     const accA = await provisionPortalAccount({ coachingCenterId: cc, studentId: stA.id, actorUserId: owner.userId });
     const accB = await provisionPortalAccount({ coachingCenterId: cc, studentId: stB.id, actorUserId: owner.userId });
     const accG = await provisionPortalAccount({ coachingCenterId: cc, guardianId: guardian.id, actorUserId: owner.userId });
-    const studentACookie = await portalCookie({ portalAccountId: accA.account.id, portalType: 'STUDENT', studentId: stA.id, coachingCenterId: cc, name: 'A' });
-    const guardianCookie = await portalCookie({ portalAccountId: accG.account.id, portalType: 'GUARDIAN', guardianId: guardian.id, coachingCenterId: cc, name: 'G' });
+    const studentACookie = await portalCookie({ portalAccountId: accA.account.id, portalType: 'STUDENT', studentId: stA.id, coachingCenterId: cc, name: 'A', sessionVersion: 0 });
+    const guardianCookie = await portalCookie({ portalAccountId: accG.account.id, portalType: 'GUARDIAN', guardianId: guardian.id, coachingCenterId: cc, name: 'G', sessionVersion: 0 });
     void accB;
 
     const setupB = await tenant(CODE('B'), `${TAG} Other Center`);
     centerB = setupB.center.id;
     const otherStudent = await prisma.student.create({ data: { coachingCenterId: centerB, branchId: setupB.branch.id, studentIdCode: `${TAG}-OTHER`, name: `${TAG} Other` } });
     const otherBatch = await prisma.batch.findFirst({ where: { coachingCenterId: centerB } });
-    const ownerB: SessionUser = { userId: setupB.owner.id, email: setupB.owner.email, name: setupB.owner.name, role: 'OWNER', coachingCenterId: centerB, branchId: setupB.branch.id };
+    const ownerB: SessionUser = { userId: setupB.owner.id, email: setupB.owner.email, phone: null, name: setupB.owner.name, banglaName: null, role: 'OWNER', coachingCenterId: centerB, branchId: setupB.branch.id, sessionVersion: 0 };
     ok('Fixtures: 2 tenants, 2 branches, OWNER/ADMIN/STAFF/2×TEACHER, students, guardian, published + unpublished exams, portal accounts');
 
     const ownerC = await staffCookie(owner);

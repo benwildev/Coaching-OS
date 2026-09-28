@@ -1,17 +1,18 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
+import prisma from '@/lib/db';
+import { getPortalSecretKey } from './secret';
+import { portalIdentityInclude, toPortalSessionUser } from '@/lib/services/portal-auth.service';
 
 /**
- * Portal (Student/Guardian) session — deliberately separate from staff
- * auth (lib/auth/session.ts). Distinct cookie name + a `portalType` field
- * that never appears on a staff JWT means a staff session can never be
- * misread as a portal session or vice versa, without needing a second
- * signing secret.
+ * Portal (Student/Guardian) session — deliberately separate from staff auth
+ * (lib/auth/session.ts): a distinct cookie name, a distinct `type: 'portal'`
+ * claim, AND (Phase 10.4) a signing key cryptographically independent from
+ * the staff key (see lib/auth/secret.ts) — a portal token cannot verify
+ * against the staff key, or vice versa, even if a caller forgot to check the
+ * `type` claim.
  */
 export const PORTAL_SESSION_COOKIE_NAME = 'coaching_os_portal_session';
-const SECRET_KEY = new TextEncoder().encode(
-  process.env.AUTH_SECRET || 'coaching-os-bangladesh-production-secret-key-32chars'
-);
 
 export type PortalType = 'STUDENT' | 'GUARDIAN';
 
@@ -22,21 +23,59 @@ export interface PortalSessionUser {
   guardianId?: string | null;
   coachingCenterId: string;
   name: string;
+  /** Phase 10.4: must match PortalAccount.sessionVersion for the session to remain valid. */
+  sessionVersion: number;
 }
 
-export async function createPortalSessionToken(user: PortalSessionUser): Promise<string> {
-  return new SignJWT({ ...user })
+interface PortalTokenPayload {
+  type: 'portal';
+  sub: string; // portalAccountId
+  sessionVersion: number;
+}
+
+function isPortalTokenPayload(payload: unknown): payload is PortalTokenPayload {
+  if (!payload || typeof payload !== 'object') return false;
+  const p = payload as Record<string, unknown>;
+  return p.type === 'portal' && typeof p.sub === 'string' && typeof p.sessionVersion === 'number';
+}
+
+/**
+ * The token only asserts "this is portal account <sub>, as of session
+ * version <n>" — portalType, studentId/guardianId, coachingCenterId and name
+ * are never trusted from the token itself; every verification re-reads them
+ * from the database (see `verifyPortalSessionToken`).
+ */
+export async function createPortalSessionToken(user: Pick<PortalSessionUser, 'portalAccountId' | 'sessionVersion'>): Promise<string> {
+  const payload: PortalTokenPayload = { type: 'portal', sub: user.portalAccountId, sessionVersion: user.sessionVersion };
+  return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
-    .sign(SECRET_KEY);
+    .sign(getPortalSecretKey());
 }
 
+/**
+ * Verify a portal JWT and re-derive the session identity from the database.
+ * Rejects (returns null) for a bad/foreign-audience signature, a missing or
+ * wrong `type` claim, an account that no longer exists or is DISABLED, or a
+ * `sessionVersion` that no longer matches the current DB value (logout,
+ * password change/reset/setup, or a status change since the token was
+ * issued).
+ */
 export async function verifyPortalSessionToken(token: string): Promise<PortalSessionUser | null> {
   try {
-    const { payload } = await jwtVerify(token, SECRET_KEY);
-    if (payload.portalType !== 'STUDENT' && payload.portalType !== 'GUARDIAN') return null;
-    return payload as unknown as PortalSessionUser;
+    const { payload } = await jwtVerify(token, getPortalSecretKey());
+    if (!isPortalTokenPayload(payload)) return null;
+
+    const account = await prisma.portalAccount.findUnique({
+      where: { id: payload.sub },
+      include: portalIdentityInclude,
+    });
+    if (!account) return null;
+    if (account.status !== 'ACTIVE') return null;
+    if (account.sessionVersion !== payload.sessionVersion) return null;
+
+    return toPortalSessionUser(account);
   } catch {
     return null;
   }

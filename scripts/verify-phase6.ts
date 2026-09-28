@@ -283,10 +283,13 @@ async function runVerification() {
     const sessionUser = {
       userId: actorId,
       email: adminUser.email,
+      phone: null,
       name: adminUser.name,
+      banglaName: null,
       role: 'OWNER' as const,
       coachingCenterId,
       branchId,
+      sessionVersion: 0,
     };
 
     // Reject marks > totalMarks

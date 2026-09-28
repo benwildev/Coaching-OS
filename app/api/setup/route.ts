@@ -28,18 +28,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await completeInitialSetup(parsed.data);
+    const result = await completeInitialSetup(parsed.data, { enforceSingleton: true });
 
     // Create session token for the new owner
     const token = await createSessionToken({
       userId: result.owner.id,
-      email: result.owner.email,
-      phone: result.owner.phone,
-      name: result.owner.name,
-      banglaName: result.owner.banglaName,
-      role: 'OWNER',
-      coachingCenterId: result.center.id,
-      branchId: result.branch.id,
+      sessionVersion: result.owner.sessionVersion,
     });
 
     await setSessionCookie(token);

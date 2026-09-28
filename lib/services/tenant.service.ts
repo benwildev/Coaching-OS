@@ -10,7 +10,12 @@ export async function isSetupCompleted(): Promise<boolean> {
     return centerCount > 0;
   } catch (error) {
     console.error('[TenantService] Failed to check setup status:', error);
-    return false;
+    // Phase 10.4: fail CLOSED. The old behavior (return false) sent every
+    // visitor to the unauthenticated /setup wizard — which mints a brand
+    // new OWNER account — during any database hiccup. Treating "we could
+    // not confirm" as "setup completed" instead means an outage produces a
+    // visible error page, not an open door to creating a new tenant/owner.
+    return true;
   }
 }
 
@@ -57,7 +62,15 @@ export async function updateCoachingCenter(
   return updated;
 }
 
-export async function completeInitialSetup(input: SetupWizardInput) {
+/**
+ * `enforceSingleton` gates the "only one center may ever be bootstrapped"
+ * rule enforced below. Only `/api/setup` (the actual bootstrap wizard)
+ * passes it — verification scripts call this function directly to create
+ * several independent throwaway tenants for testing, which is a legitimate,
+ * unrelated use of the same "create a coaching center" logic and must not
+ * be blocked by it.
+ */
+export async function completeInitialSetup(input: SetupWizardInput, options: { enforceSingleton?: boolean } = {}) {
   // 1. Check if coaching center with this code already exists
   const existing = await prisma.coachingCenter.findUnique({
     where: { code: input.centerCode },
@@ -71,6 +84,21 @@ export async function completeInitialSetup(input: SetupWizardInput) {
 
   // 3. Perform setup inside a transactional sequence
   const result = await prisma.$transaction(async (tx) => {
+    if (options.enforceSingleton) {
+      // Phase 10.4: serialize concurrent first-run setup attempts. The
+      // route calls isSetupCompleted() before this, but that check-then-act
+      // has a race — two requests landing in the same window could both
+      // pass it and each mint an independent tenant + OWNER. A Postgres
+      // advisory lock held for the rest of this transaction means only one
+      // setup attempt is ever inside this transaction at a time; the loser
+      // re-checks and fails cleanly instead of creating a second center.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(7270010001)`;
+      const alreadySetup = await tx.coachingCenter.count();
+      if (alreadySetup > 0) {
+        throw new Error('Coaching Center setup has already been completed');
+      }
+    }
+
     // A. Create Coaching Center
     const center = await tx.coachingCenter.create({
       data: {

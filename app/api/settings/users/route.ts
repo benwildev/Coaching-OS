@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
 import { userCreateSchema } from '@/lib/validations/auth';
 import { getUsersByTenant, createUser, updateUserStatus } from '@/lib/services/user.service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export async function GET() {
   try {
@@ -30,13 +31,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const newUser = await createUser(coachingCenterId, parsed.data, user.userId);
+    // Phase 10.4: createUser itself re-checks role==='OWNER' vs actorRole —
+    // this call just supplies the caller's real role, never trusting a
+    // client-controlled field for it.
+    const newUser = await createUser(coachingCenterId, parsed.data, user.userId, user.role);
     return NextResponse.json({ success: true, user: newUser });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to create user' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/users POST');
   }
 }
 
@@ -51,6 +52,9 @@ export async function PATCH(req: Request) {
     if (!targetUserId || !status) {
       return NextResponse.json({ success: false, error: 'Missing parameters' }, { status: 400 });
     }
+    if (status !== 'ACTIVE' && status !== 'INACTIVE' && status !== 'SUSPENDED') {
+      return NextResponse.json({ success: false, error: 'Invalid status' }, { status: 400 });
+    }
 
     // Owner cannot deactivate themselves
     if (targetUserId === user.userId) {
@@ -60,12 +64,12 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const updated = await updateUserStatus(coachingCenterId, targetUserId, status, user.userId);
+    // Phase 10.4: updateUserStatus itself checks that only an OWNER may
+    // touch another OWNER's status, and that the last active OWNER can
+    // never be removed — this call just supplies the caller's real role.
+    const updated = await updateUserStatus(coachingCenterId, targetUserId, status, user.userId, user.role);
     return NextResponse.json({ success: true, user: updated });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update user' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/users PATCH');
   }
 }

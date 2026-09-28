@@ -143,7 +143,7 @@ async function run10() {
       mkUser('TEACHER', main.id, 'teacher'),
       mkUser('TEACHER', main.id, 'teacher2'),
     ]);
-    const su = (u: { id: string; email: string; name: string }, role: SessionUser['role'], branchId: string | null): SessionUser => ({ userId: u.id, email: u.email, name: u.name, role, coachingCenterId: cc, branchId });
+    const su = (u: { id: string; email: string; name: string }, role: SessionUser['role'], branchId: string | null): SessionUser => ({ userId: u.id, email: u.email, phone: null, name: u.name, banglaName: null, role, coachingCenterId: cc, branchId, sessionVersion: 0 });
     const owner = su(setup.owner, 'OWNER', main.id);
     const admin = su(adminU, 'ADMIN', null);
     const staff = su(staffU, 'STAFF', main.id);

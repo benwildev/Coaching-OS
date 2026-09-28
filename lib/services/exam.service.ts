@@ -763,6 +763,15 @@ export async function updateExamSubject(
     throw new Error('CANNOT_UPDATE_PUBLISHED: Exam results are already published.');
   }
 
+  // Phase 10.4: the exam is already tenant-scoped above, but examSubjectId
+  // was never confirmed to belong to THIS exam — a caller passing their own
+  // (tenant-scoped, DRAFT) examId with a foreign exam subject id could
+  // otherwise update or delete another tenant's ExamSubject (and, on
+  // delete, cascade-remove its Results). Require the subject to actually
+  // belong to this exam first.
+  const subject = await prisma.examSubject.findFirst({ where: { id: examSubjectId, examId } });
+  if (!subject) throw new Error('EXAM_SUBJECT_NOT_FOUND');
+
   const updated = await prisma.examSubject.update({
     where: { id: examSubjectId },
     data: {
@@ -803,6 +812,11 @@ export async function deleteExamSubject(
   if (exam.status !== EXAM_STATUS.DRAFT && exam.status !== EXAM_STATUS.SCHEDULED) {
     throw new Error('CANNOT_DELETE_SUBJECT: Subjects can only be removed while exam is in DRAFT or SCHEDULED status.');
   }
+
+  // Phase 10.4: see updateExamSubject above — confirm the subject actually
+  // belongs to this (tenant-scoped) exam before deleting it.
+  const subject = await prisma.examSubject.findFirst({ where: { id: examSubjectId, examId } });
+  if (!subject) throw new Error('EXAM_SUBJECT_NOT_FOUND');
 
   await prisma.examSubject.delete({
     where: { id: examSubjectId },

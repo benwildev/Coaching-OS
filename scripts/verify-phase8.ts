@@ -76,10 +76,13 @@ async function run() {
   const admin: SessionUser = {
     userId: adminUser.id,
     email: adminUser.email,
+    phone: null,
     name: adminUser.name,
+    banglaName: null,
     role: 'OWNER',
     coachingCenterId: cc,
     branchId: null,
+    sessionVersion: 0,
   };
 
   const created = {

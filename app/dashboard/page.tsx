@@ -49,9 +49,14 @@ export default async function DashboardPage({
   const range = (DASHBOARD_RANGES as readonly number[]).includes(rawRange) ? (rawRange as DashboardRange) : 3;
   const classId = typeof sp.class === 'string' ? sp.class : 'all';
 
-  const data = await getDashboardData(session.coachingCenterId, { classId, range });
+  const data = await getDashboardData(session.coachingCenterId, { classId, range }, session.role);
   const k = data.kpis;
   const now = data.generatedAt;
+  // Phase 10.4: getDashboardData already zeroes/empties every financial
+  // figure for a role that must not see them (currently TEACHER) — this
+  // flag additionally removes the finance-only cards/panels from the page
+  // instead of rendering them with misleading zeroed values.
+  const financeVisible = data.financeVisible;
 
   const dhakaHour = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Asia/Dhaka' }).format(now));
   const greeting = dhakaHour < 12 ? 'Good morning' : dhakaHour < 17 ? 'Good afternoon' : 'Good evening';
@@ -90,20 +95,23 @@ export default async function DashboardPage({
       sub: k.attendance.avg30 != null ? `vs ${k.attendance.avg30.toFixed(1)}% 30-day avg` : 'no 30-day history yet',
       ...spark(k.attendance.spark),
     },
-    {
-      id: 'fees', label: 'Fees collected', tone: 'cyan', icon: ic('wallet'),
+    // "Fees collected" and "Outstanding fees" are center-level financial
+    // KPIs — omitted entirely (not shown as zero) for a role that must not
+    // see them (Phase 10.4 §15/§16).
+    ...(financeVisible ? [{
+      id: 'fees', label: 'Fees collected', tone: 'cyan' as const, icon: ic('wallet'),
       value: tkCompact(k.collected.value), num: k.collected.value, delta: deltaText(k.collected.delta),
       up: (k.collected.delta ?? 0) >= 0, good: (k.collected.delta ?? 0) >= 0, neutral: k.collected.delta == null, sub: cmp,
       progress: collectedPct ?? undefined,
       progressLabel: collectedPct != null ? `${collectedPct}% of ${tkCompact(k.collected.billed)} billed` : undefined,
       ...spark(k.collected.spark),
-    },
-    {
-      id: 'outstanding', label: 'Outstanding fees', tone: 'pink', icon: ic('alert'),
+    }] : []),
+    ...(financeVisible ? [{
+      id: 'outstanding', label: 'Outstanding fees', tone: 'pink' as const, icon: ic('alert'),
       value: tkCompact(k.outstanding.value), num: k.outstanding.value, delta: `${k.outstanding.lateStudents} students`,
       up: true, good: false, neutral: k.outstanding.lateStudents === 0, sub: '30+ days late',
       ...spark(k.outstanding.spark),
-    },
+    }] : []),
     {
       id: 'exams', label: 'Upcoming exams', tone: 'gold', icon: ic('grad'),
       value: grp(k.exams.value), num: k.exams.value, delta: `${k.exams.thisWeek} this week`,
@@ -149,16 +157,18 @@ export default async function DashboardPage({
       {/* Main two-column area */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         <div className="lg:col-span-8 flex flex-col gap-5 min-w-0">
-          <Panel title="Fee collection" subtitle="Are we collecting what we bill each month?">
-            <FeeCollectionChart months={data.feeChart} range={range} />
-          </Panel>
+          {financeVisible && (
+            <Panel title="Fee collection" subtitle="Are we collecting what we bill each month?">
+              <FeeCollectionChart months={data.feeChart} range={range} />
+            </Panel>
+          )}
           <AttendanceHeatmap weeks={data.heatmap} />
           <Panel title="Batch performance" subtitle="Which batches are thriving and which need support?">
             <BatchPerformance rows={data.batchPerformance} lowScore={data.lowScore} />
           </Panel>
         </div>
         <div className="lg:col-span-4 flex flex-col gap-5 min-w-0">
-          <OutstandingFees data={data.outstanding} />
+          {financeVisible && <OutstandingFees data={data.outstanding} />}
           <RecentActivity items={data.activity} now={now} />
           <TodaySchedule agenda={data.todaysAgenda} exams={data.upcomingExams} />
         </div>

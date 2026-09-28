@@ -98,10 +98,13 @@ async function run() {
   const admin: SessionUser = {
     userId: adminUser.id,
     email: adminUser.email,
+    phone: null,
     name: adminUser.name,
+    banglaName: null,
     role: 'OWNER',
     coachingCenterId: cc,
     branchId: null,
+    sessionVersion: 0,
   };
 
   const created = {
@@ -144,10 +147,13 @@ async function run() {
     const teacherSession: SessionUser = {
       userId: teacherUser.id,
       email: teacherUser.email,
+      phone: null,
       name: teacherUser.name,
+      banglaName: null,
       role: 'TEACHER',
       coachingCenterId: cc,
       branchId: null,
+      sessionVersion: 0,
     };
 
     const adminScope = await resolveQuestionScope(cc, admin);

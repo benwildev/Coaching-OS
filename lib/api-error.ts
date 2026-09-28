@@ -17,6 +17,7 @@ const CONFLICT_CODES = new Set([
   'QUESTION_ALREADY_SELECTED',
   'INVALID_TRANSITION',
   'NOTICE_ALREADY_PUBLISHED',
+  'LAST_OWNER_PROTECTED',
 ]);
 
 // Portal (student/guardian) auth codes that don't fit the generic suffix

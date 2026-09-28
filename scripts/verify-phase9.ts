@@ -103,10 +103,13 @@ async function run() {
     const owner: SessionUser = {
       userId: setup.owner.id,
       email: setup.owner.email,
+      phone: null,
       name: setup.owner.name,
+      banglaName: null,
       role: 'OWNER',
       coachingCenterId: cc,
       branchId: branch.id,
+      sessionVersion: 0,
     };
     ok(`Test tenant created (${setup.center.name})`);
 
