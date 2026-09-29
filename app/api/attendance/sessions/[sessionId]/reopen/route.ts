@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { reopenAttendanceSession } from '@/lib/services/attendance.service';
 import { reopenSessionSchema } from '@/lib/validations/attendance';
 
@@ -24,8 +25,7 @@ export async function POST(request: Request, props: { params: Promise<{ sessionI
 
     const session = await reopenAttendanceSession(coachingCenterId, sessionId, validated.data.reason, user.userId);
     return NextResponse.json({ success: true, session });
-  } catch (error: any) {
-    console.error('[API /api/attendance/sessions/[sessionId]/reopen POST] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to reopen attendance' }, { status: 400 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/attendance/sessions/[sessionId]/reopen POST');
   }
 }

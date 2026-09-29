@@ -10,6 +10,7 @@ import type {
   BatchTeacherUpdateInput,
 } from '@/lib/validations/batch';
 import type { Prisma } from '@prisma/client';
+import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
 
 export interface BatchFilterParams {
   search?: string;
@@ -588,4 +589,131 @@ export async function getBatchFormOptions(coachingCenterId: string) {
   ]);
 
   return { branches, sessions, programs, courses, rooms, teachers, batches };
+}
+
+// ------------------------------------------------------------------
+// Phase 10.10: true batch transfer — unlike assignStudentToBatch (which only
+// ever adds a membership), this atomically closes the student's current
+// ACTIVE membership and opens the new one in one transaction, reusing the
+// exact same advisory-lock capacity guard. The old StudentBatch row is never
+// deleted or overwritten in place — only its status/endDate change, exactly
+// like updateStudentBatchAssignment already does for a standalone removal.
+// ------------------------------------------------------------------
+
+export interface TransferStudentBatchOptions {
+  overrideCapacity?: boolean;
+  overrideConflict?: boolean;
+}
+
+export async function transferStudentBatch(
+  coachingCenterId: string,
+  user: SessionUser,
+  studentId: string,
+  destinationBatchId: string,
+  options: TransferStudentBatchOptions = {}
+) {
+  const [student, destinationBatch] = await Promise.all([
+    prisma.student.findFirst({ where: { id: studentId, coachingCenterId } }),
+    prisma.batch.findFirst({ where: { id: destinationBatchId, coachingCenterId } }),
+  ]);
+  if (!student) throw new Error('STUDENT_NOT_FOUND');
+  if (!destinationBatch) throw new Error('BATCH_NOT_FOUND');
+  if (destinationBatch.status === 'COMPLETED' || destinationBatch.status === 'CANCELLED') {
+    throw new Error(`Cannot transfer students into a ${destinationBatch.status.toLowerCase()} batch`);
+  }
+  assertBranchAccess(user, student.branchId);
+  assertBranchAccess(user, destinationBatch.branchId);
+
+  if (!options.overrideConflict) {
+    const conflicts = await detectStudentBatchConflicts(coachingCenterId, studentId, destinationBatchId);
+    if (conflicts.length > 0) {
+      const err = new Error(`SCHEDULE_CONFLICT: ${conflicts[0].message}`) as Error & { conflicts?: typeof conflicts };
+      err.conflicts = conflicts;
+      throw err;
+    }
+  }
+
+  let created;
+  let fromBatchId: string | null = null;
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      await assertBatchHasCapacity(tx, destinationBatchId, destinationBatch.capacity, options.overrideCapacity);
+
+      const currentActive = await tx.studentBatch.findFirst({ where: { studentId, status: 'ACTIVE' } });
+      if (currentActive?.batchId === destinationBatchId) {
+        throw new Error('Student is already actively assigned to this batch');
+      }
+      if (currentActive) {
+        await tx.studentBatch.update({
+          where: { id: currentActive.id },
+          data: { status: 'TRANSFERRED', endDate: new Date() },
+        });
+      }
+
+      const inserted = await tx.studentBatch.create({
+        data: { coachingCenterId, studentId, batchId: destinationBatchId, joinedAt: new Date(), status: 'ACTIVE' },
+      });
+      return { inserted, fromBatchId: currentActive?.batchId ?? null };
+    });
+    created = result.inserted;
+    fromBatchId = result.fromBatchId;
+  } catch (err) {
+    // Backstop: the partial unique index on (studentId, batchId) WHERE
+    // status = 'ACTIVE' rejects a duplicate that somehow reached the insert
+    // anyway (e.g. a concurrent transfer racing this one into the same batch).
+    if (err instanceof Error && /Unique constraint/i.test(err.message)) {
+      throw new Error('Student is already actively assigned to this batch');
+    }
+    throw err;
+  }
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: user.userId,
+    action: 'STUDENT_BATCH_TRANSFERRED',
+    entity: 'StudentBatch',
+    entityId: created.id,
+    details: { studentId, fromBatchId, toBatchId: destinationBatchId, toBatchName: destinationBatch.name },
+  });
+
+  return created;
+}
+
+export interface BulkBatchTransferInput {
+  studentIds: string[];
+  destinationBatchId: string;
+  overrideCapacity?: boolean;
+  overrideConflict?: boolean;
+}
+
+export interface StudentBulkOpResult {
+  studentId: string;
+  success: boolean;
+  skipped?: boolean;
+  reason?: string;
+}
+
+/**
+ * Each student's transfer is its own independent call — a batch that fills
+ * up partway through the selection must skip only the students that no
+ * longer fit, never fail the whole request (AGENTS.md Phase 10.10 §5/§11/§26).
+ */
+export async function bulkTransferStudentsToBatch(
+  coachingCenterId: string,
+  user: SessionUser,
+  input: BulkBatchTransferInput
+): Promise<StudentBulkOpResult[]> {
+  const results: StudentBulkOpResult[] = [];
+  for (const studentId of input.studentIds) {
+    try {
+      await transferStudentBatch(coachingCenterId, user, studentId, input.destinationBatchId, {
+        overrideCapacity: input.overrideCapacity,
+        overrideConflict: input.overrideConflict,
+      });
+      results.push({ studentId, success: true });
+    } catch (error) {
+      results.push({ studentId, success: false, reason: error instanceof Error ? error.message : 'UNKNOWN_ERROR' });
+    }
+  }
+  return results;
 }

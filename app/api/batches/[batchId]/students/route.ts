@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { assignStudentToBatch, getBatchById } from '@/lib/services/batch.service';
 import { studentBatchAssignSchema } from '@/lib/validations/batch';
 
@@ -30,13 +31,19 @@ export async function POST(request: Request, props: { params: Promise<{ batchId:
     const assignment = await assignStudentToBatch(coachingCenterId, batchId, validated.data, user.userId);
     return NextResponse.json({ success: true, assignment }, { status: 201 });
   } catch (error: any) {
-    console.error('[API /api/batches/[batchId]/students POST] Error:', error);
     const raw = String(error.message || '');
-    const message = raw.startsWith('BATCH_FULL') ? 'This batch is full. Enable override to exceed capacity.' : raw;
-    const status = raw.startsWith('SCHEDULE_CONFLICT') ? 409 : 400;
-    return NextResponse.json(
-      { success: false, error: message || 'Failed to assign student', conflicts: error.conflicts || undefined },
-      { status }
-    );
+    if (raw.startsWith('SCHEDULE_CONFLICT')) {
+      return NextResponse.json(
+        { success: false, error: raw, conflicts: error.conflicts || undefined },
+        { status: 409 }
+      );
+    }
+    if (raw.startsWith('BATCH_FULL')) {
+      return NextResponse.json(
+        { success: false, error: 'This batch is full. Enable override to exceed capacity.' },
+        { status: 400 }
+      );
+    }
+    return apiErrorResponse(error, '/api/batches/[batchId]/students POST');
   }
 }

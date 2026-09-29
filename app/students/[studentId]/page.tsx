@@ -170,13 +170,29 @@ export default function StudentDetailPage() {
           <Icon name="chevronleft" size={16} />
           <span>{dict.profile.back}</span>
         </Link>
-        <Link
-          href={`/students/${student.id}/edit`}
-          className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
-        >
-          <Icon name="sliders" size={15} />
-          <span>{dict.profile.edit}</span>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/students/${student.id}/id-card`}
+            className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
+          >
+            <Icon name="shield" size={15} />
+            <span>{dict.students.idCardLink}</span>
+          </Link>
+          <Link
+            href={`/students/${student.id}/certificates`}
+            className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
+          >
+            <Icon name="award" size={15} />
+            <span>{dict.students.certificatesLink}</span>
+          </Link>
+          <Link
+            href={`/students/${student.id}/edit`}
+            className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
+          >
+            <Icon name="sliders" size={15} />
+            <span>{dict.profile.edit}</span>
+          </Link>
+        </div>
       </div>
 
       {/* Profile Header Card */}

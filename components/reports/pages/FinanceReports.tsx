@@ -17,12 +17,13 @@ const FIELDS: Record<string, FilterField[]> = {
   due: ['branchId', 'academicSessionId', 'programId', 'classId', 'batchId', 'overdueOnly', 'search'],
   discounts: [...BASE, 'adjustmentType', 'search'],
   refunds: [...BASE, 'method', 'search'],
+  collectors: ['dateRange', 'branchId'],
   branches: ['dateRange', 'branchId'],
 };
 
 export default function FinanceReports() {
   const page0 = useReportPage('summary');
-  const views = ['summary', 'due', 'discounts', 'refunds', ...(page0.options?.permissions.compareBranches ? ['branches'] : [])];
+  const views = ['summary', 'due', 'discounts', 'refunds', 'collectors', ...(page0.options?.permissions.compareBranches ? ['branches'] : [])];
   const page = useReportPage('summary', views);
   const { R, view, params, setParams, options } = page;
 
@@ -52,6 +53,8 @@ export default function FinanceReports() {
         <DiscountView page={page} />
       ) : view === 'refunds' ? (
         <RefundView page={page} />
+      ) : view === 'collectors' ? (
+        <CollectorsView page={page} />
       ) : (
         <BranchView page={page} />
       )}
@@ -269,6 +272,36 @@ function RefundView({ page }: { page: Page }) {
             { key: 'a', header: R.col.amount, sortKey: 'amount', align: 'right', cell: (x: any) => fmt.moneyFull(x.amount) },
             { key: 'r', header: R.col.reason, cell: (x: any) => x.reason },
             { key: 'm', header: R.col.method, cell: (x: any) => D.paymentMethod?.[x.method] ?? x.method },
+          ]}
+        />
+      </Section>
+    </>
+  );
+}
+
+function CollectorsView({ page }: { page: Page }) {
+  const { R, fmt, query } = page;
+  const r = useReport<any>('finance', query);
+  if (r.error) return <ReportError code={r.error} />;
+  if (r.loading || !r.data) return <Loading />;
+  const rows = r.data.rows as any[];
+  if (rows.length === 0) return <EmptyState message={R.empty.payments} />;
+  const totalPayments = rows.reduce((s, x) => s + x.paymentsCount, 0);
+  const totalAmount = rows.reduce((s, x) => s + Number(x.total), 0);
+  return (
+    <>
+      <Kpis items={[{ label: R.kpi.total, value: fmt.money(totalAmount), tone: 'green' }, { label: R.col.payments, value: fmt.num(totalPayments) }]} />
+      <Section>
+        <ReportTable
+          rows={rows}
+          rowKey={(x: any) => x.collectorId ?? 'unassigned'}
+          emptyMessage={R.empty.payments}
+          columns={[
+            { key: 'c', header: R.col.collector, primary: true, cell: (x: any) => x.collectorName },
+            { key: 'n', header: R.col.payments, align: 'right', cell: (x: any) => fmt.num(x.paymentsCount) },
+            { key: 'cash', header: R.col.cash, align: 'right', cell: (x: any) => fmt.moneyFull(x.cash) },
+            { key: 'd', header: R.col.digital, align: 'right', cell: (x: any) => fmt.moneyFull(x.digital) },
+            { key: 't', header: R.col.amount, align: 'right', cell: (x: any) => <span className="font-bold">{fmt.moneyFull(x.total)}</span> },
           ]}
         />
       </Section>

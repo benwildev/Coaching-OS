@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getInvoiceById, cancelInvoice } from '@/lib/services/invoice.service';
 
 export const dynamic = 'force-dynamic';
@@ -16,9 +17,7 @@ export async function POST(request: Request, props: { params: Promise<{ invoiceI
 
     const invoice = await cancelInvoice(coachingCenterId, invoiceId, user.userId);
     return NextResponse.json({ success: true, invoice });
-  } catch (error: any) {
-    console.error('[API /api/fees/invoices/[invoiceId]/cancel POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to cancel invoice' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/invoices/[invoiceId]/cancel POST');
   }
 }

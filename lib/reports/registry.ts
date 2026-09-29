@@ -2,7 +2,7 @@ import type { ReportCategory } from './access';
 import type { ViewHandler } from './report-utils';
 import { studentDirectory, studentEnrollment, studentStatus } from './student-reports';
 import { attendanceBatches, attendanceLow, attendanceStudentDetail, attendanceStudents, attendanceSummary } from './attendance-reports';
-import { financeBranches, financeDiscounts, financeDue, financeMethods, financeRefunds, financeSummary, financeTrend } from './finance-reports';
+import { financeBranches, financeCollectors, financeDiscounts, financeDue, financeMethods, financeRefunds, financeSummary, financeTrend } from './finance-reports';
 import { examBatches, examDetail, examGrades, examStudentResult, examSubjects, examSummary } from './exam-reports';
 import { teacherAttendance, teacherDirectory, teacherSchedule } from './teacher-reports';
 import { batchDetail, batchFees, batchList } from './batch-reports';
@@ -34,6 +34,7 @@ export const REPORT_VIEWS: Record<ReportCategory, Record<string, ViewDef>> = {
     due: { handler: financeDue, csv: true },
     discounts: { handler: financeDiscounts, csv: true },
     refunds: { handler: financeRefunds, csv: true },
+    collectors: { handler: financeCollectors, csv: true },
     branches: { handler: financeBranches, csv: true },
   },
   exams: {

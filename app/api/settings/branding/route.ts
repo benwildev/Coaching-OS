@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { brandingSchema } from '@/lib/validations/settings';
 import { getBrandingSettings, updateBrandingSettings } from '@/lib/services/settings.service';
 
@@ -8,8 +9,8 @@ export async function GET() {
     const { coachingCenterId } = await requireTenant();
     const branding = await getBrandingSettings(coachingCenterId);
     return NextResponse.json({ success: true, branding });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/branding GET');
   }
 }
 
@@ -41,10 +42,7 @@ export async function POST(req: Request) {
     );
 
     return NextResponse.json({ success: true, branding: updated });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update branding' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/branding POST');
   }
 }

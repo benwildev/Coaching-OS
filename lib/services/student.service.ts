@@ -9,8 +9,11 @@ import {
   type StudentUpdateInput,
   admissionSchema,
   normalizeBdPhone,
+  STUDENT_STATUSES,
 } from '@/lib/validations/student';
 import type { Prisma, RoleCode } from '@prisma/client';
+import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import type { StudentBulkOpResult } from './bulk-types';
 
 export interface StudentFilterParams {
   search?: string;
@@ -1218,4 +1221,79 @@ export async function getAcademicHierarchyOptions(coachingCenterId: string) {
     boards,
     feeStructures,
   };
+}
+
+// ------------------------------------------------------------------
+// Phase 10.10: dedicated, audited student status changes + bulk operation.
+// Status changes previously went through the generic updateStudent() and
+// were folded into a generic STUDENT_UPDATED audit entry with no
+// previous/new/reason trail — this gives status changes their own audited,
+// bulk-safe path without touching updateStudent's existing behavior.
+// ------------------------------------------------------------------
+
+/** Never deletes the student or any historical record — only the status column changes. */
+export async function updateStudentStatus(
+  coachingCenterId: string,
+  user: SessionUser,
+  studentId: string,
+  newStatus: string,
+  reason?: string
+): Promise<StudentBulkOpResult> {
+  if (!(STUDENT_STATUSES as readonly string[]).includes(newStatus)) {
+    return { studentId, success: false, reason: 'INVALID_STATUS' };
+  }
+
+  const student = await prisma.student.findFirst({ where: { id: studentId, coachingCenterId } });
+  if (!student) return { studentId, success: false, reason: 'STUDENT_NOT_FOUND' };
+
+  try {
+    assertBranchAccess(user, student.branchId);
+  } catch {
+    return { studentId, success: false, reason: 'FORBIDDEN_BRANCH' };
+  }
+
+  if (student.status === newStatus) {
+    return { studentId, success: true, skipped: true, reason: 'UNCHANGED' };
+  }
+
+  await prisma.student.update({ where: { id: studentId }, data: { status: newStatus } });
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: user.userId,
+    action: 'STUDENT_STATUS_CHANGED',
+    entity: 'Student',
+    entityId: studentId,
+    details: { previousStatus: student.status, newStatus, reason: reason?.trim() || null },
+  });
+
+  return { studentId, success: true };
+}
+
+export interface BulkStatusChangeInput {
+  studentIds: string[];
+  newStatus: string;
+  reason?: string;
+}
+
+/**
+ * Each student is its own independent operation (never one all-or-nothing
+ * transaction across the whole selection) — a single unauthorized or
+ * already-in-that-status row must never block or roll back the rest of a
+ * legitimate bulk change (AGENTS.md Phase 10.10 §5/§26/§27).
+ */
+export async function bulkUpdateStudentStatus(
+  coachingCenterId: string,
+  user: SessionUser,
+  input: BulkStatusChangeInput
+): Promise<StudentBulkOpResult[]> {
+  const results: StudentBulkOpResult[] = [];
+  for (const studentId of input.studentIds) {
+    try {
+      results.push(await updateStudentStatus(coachingCenterId, user, studentId, input.newStatus, input.reason));
+    } catch (error) {
+      results.push({ studentId, success: false, reason: error instanceof Error ? error.message : 'UNKNOWN_ERROR' });
+    }
+  }
+  return results;
 }

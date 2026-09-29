@@ -25,9 +25,15 @@ function enrollmentFilter(filters: ReportFilters): Prisma.StudentEnrollmentWhere
   return Object.keys(w).length ? w : null;
 }
 
+const MAX_SELECTED_STUDENT_IDS = 300;
+
 export function studentScopeWhere(scope: ReportScope, filters: ReportFilters): Prisma.StudentWhereInput {
   const and: Prisma.StudentWhereInput[] = [{ coachingCenterId: scope.coachingCenterId }];
   if (scope.branchId) and.push({ branchId: scope.branchId });
+  if (filters.studentIds) {
+    const ids = filters.studentIds.split(',').map((id) => id.trim()).filter(Boolean).slice(0, MAX_SELECTED_STUDENT_IDS);
+    and.push({ id: { in: ids } });
+  }
   if (scope.teacher) {
     const ids = scope.teacher.batchIds.length ? scope.teacher.batchIds : [NO_MATCH_ID];
     and.push({ studentBatches: { some: { batchId: { in: ids }, status: 'ACTIVE' } } });

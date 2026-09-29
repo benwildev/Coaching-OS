@@ -240,7 +240,14 @@ export async function getPaymentsList(coachingCenterId: string, params: PaymentF
       take: pageSize,
       orderBy: { paymentDate: 'desc' },
       include: {
-        student: { select: { id: true, name: true, studentIdCode: true } },
+        student: {
+          select: {
+            id: true,
+            name: true,
+            studentIdCode: true,
+            studentGuardians: { where: { isPrimary: true }, take: 1, select: { guardian: { select: { id: true, name: true, phone: true } } } },
+          },
+        },
         invoice: { select: { id: true, invoiceNumber: true } },
         collectedBy: { select: { id: true, name: true } },
         refunds: true,
@@ -249,7 +256,10 @@ export async function getPaymentsList(coachingCenterId: string, params: PaymentF
   ]);
 
   return {
-    payments,
+    payments: payments.map((p) => {
+      const { studentGuardians, ...student } = p.student;
+      return { ...p, student, guardian: studentGuardians[0]?.guardian ?? null };
+    }),
     total,
     page,
     pageSize,

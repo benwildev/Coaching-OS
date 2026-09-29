@@ -13,8 +13,9 @@ const TABS = [
 
 export default function CommunicationSubNav() {
   const pathname = usePathname();
-  const { lang } = useApp();
+  const { lang, currentUser } = useApp();
   const dict = DICTIONARY[lang].communication;
+  const canManageSettings = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
 
   return (
     <div className="flex items-center gap-1.5 overflow-x-auto hs pb-1">
@@ -26,6 +27,16 @@ export default function CommunicationSubNav() {
           </Link>
         );
       })}
+      {canManageSettings && (
+        <Link href="/settings/communication" className="chip" aria-pressed={pathname.startsWith('/settings/communication')}>
+          {dict.settingsTab}
+        </Link>
+      )}
+      {canManageSettings && (
+        <Link href="/settings/notifications" className="chip" aria-pressed={pathname.startsWith('/settings/notifications')}>
+          {lang === 'bn' ? 'অ্যালার্ট পলিসি' : 'Alert Policies'}
+        </Link>
+      )}
     </div>
   );
 }

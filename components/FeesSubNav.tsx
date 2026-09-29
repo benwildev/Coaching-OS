@@ -7,7 +7,7 @@ import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
 
 interface TabItem {
-  id: 'tabOverview' | 'tabStructures' | 'tabInvoices' | 'tabPayments' | 'tabDue' | 'tabCollection';
+  id: 'tabOverview' | 'tabStructures' | 'tabInvoices' | 'tabPayments' | 'tabDailyCollection' | 'tabDue' | 'tabCollection';
   href: string;
   icon: string;
 }
@@ -17,6 +17,7 @@ const TABS: readonly TabItem[] = [
   { id: 'tabStructures', href: '/fees/structures', icon: 'layers' },
   { id: 'tabInvoices', href: '/fees/invoices', icon: 'file' },
   { id: 'tabPayments', href: '/fees/payments', icon: 'banknote' },
+  { id: 'tabDailyCollection', href: '/fees/collection', icon: 'wallet' },
   { id: 'tabDue', href: '/fees/reports/due', icon: 'alert' },
   { id: 'tabCollection', href: '/fees/reports/collection', icon: 'chart' },
 ] as const;

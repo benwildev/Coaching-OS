@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getCourseById, updateCourse, archiveCourse } from '@/lib/services/course.service';
 import { courseUpdateSchema } from '@/lib/validations/course';
 
@@ -34,9 +35,8 @@ export async function PUT(request: Request, props: { params: Promise<{ courseId:
 
     const course = await updateCourse(coachingCenterId, courseId, validated.data, user.userId);
     return NextResponse.json({ success: true, course });
-  } catch (error: any) {
-    console.error('[API /api/courses/[courseId] PUT] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update course' }, { status: 400 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/courses/[courseId] PUT');
   }
 }
 
@@ -48,8 +48,7 @@ export async function DELETE(request: Request, props: { params: Promise<{ course
     const { courseId } = await props.params;
     const course = await archiveCourse(coachingCenterId, courseId, user.userId);
     return NextResponse.json({ success: true, course });
-  } catch (error: any) {
-    console.error('[API /api/courses/[courseId] DELETE] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to archive course' }, { status: 400 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/courses/[courseId] DELETE');
   }
 }

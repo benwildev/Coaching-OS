@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getExamById, updateExam } from '@/lib/services/exam.service';
 import { updateExamSchema } from '@/lib/validations/exam';
 
@@ -27,7 +28,7 @@ export async function GET(
     if (error.message?.startsWith('FORBIDDEN')) {
       return NextResponse.json({ success: false, error: error.message }, { status: 403 });
     }
-    return NextResponse.json({ success: false, error: error.message || 'Internal server error' }, { status: 500 });
+    return apiErrorResponse(error, '/api/exams/[examId] GET');
   }
 }
 
@@ -63,9 +64,7 @@ export async function PUT(
     );
 
     return NextResponse.json({ success: true, exam: updated });
-  } catch (error: any) {
-    console.error('[API /api/exams/[examId] PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update exam' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/exams/[examId] PUT');
   }
 }

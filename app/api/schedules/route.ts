@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getSchedulesList, createClassSchedule } from '@/lib/services/schedule.service';
 import { classScheduleSchema } from '@/lib/validations/schedule';
 import type { DayOfWeek } from '@prisma/client';
@@ -23,8 +24,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ success: true, schedules });
   } catch (error) {
-    console.error('[API /api/schedules GET] Error:', error);
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    return apiErrorResponse(error, '/api/schedules GET');
   }
 }
 
@@ -47,11 +47,12 @@ export async function POST(request: Request) {
     const schedule = await createClassSchedule(coachingCenterId, validated.data, user.userId);
     return NextResponse.json({ success: true, schedule }, { status: 201 });
   } catch (error: any) {
-    console.error('[API /api/schedules POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : error.conflicts ? 409 : 400;
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to create schedule', conflicts: error.conflicts || undefined },
-      { status }
-    );
+    if (error?.conflicts) {
+      return NextResponse.json(
+        { success: false, error: error.message, conflicts: error.conflicts },
+        { status: 409 }
+      );
+    }
+    return apiErrorResponse(error, '/api/schedules POST');
   }
 }

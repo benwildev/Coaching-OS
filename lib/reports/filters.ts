@@ -42,6 +42,11 @@ export const reportFilterSchema = z.object({
   dateTo: ymd.optional(),
 
   search: z.string().trim().max(100).optional(),
+  // Phase 10.10: "export selected students" from the directory's bulk
+  // toolbar — a comma-separated id list, narrowing (never widening) whatever
+  // the view would otherwise return. Bounded the same as every other bulk
+  // selection in this phase.
+  studentIds: z.string().max(12000).optional(),
   sort: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]{0,39}$/).optional(),
   dir: z.enum(['asc', 'desc']).optional(),
   page: z.coerce.number().int().min(1).max(100000).default(1),

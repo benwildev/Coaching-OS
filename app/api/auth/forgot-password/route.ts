@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { forgotPasswordSchema } from '@/lib/validations/auth';
 import { requestPasswordReset } from '@/lib/services/portal-auth.service';
+import { checkRateLimit, getClientIp } from '@/lib/services/rate-limit.service';
 
 export const dynamic = 'force-dynamic';
+
+// Legitimate use is at most one or two resets in a sitting; this only exists
+// to stop unbounded token-generation/probing volume per source IP.
+const FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const FORGOT_PASSWORD_RATE_LIMIT_MAX = 5;
 
 /**
  * Password recovery entry for every account type (linked from /login).
@@ -15,6 +21,14 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: Request) {
   try {
+    const rateLimit = await checkRateLimit(`forgot-password:${getClientIp(req)}`, FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS, FORGOT_PASSWORD_RATE_LIMIT_MAX);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) } }
+      );
+    }
+
     const body = await req.json().catch(() => null);
     const parsed = forgotPasswordSchema.safeParse(body);
     if (!parsed.success) {

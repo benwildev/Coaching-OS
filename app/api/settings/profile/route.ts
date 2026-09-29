@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { centerProfileSchema } from '@/lib/validations/settings';
 import { updateCoachingCenter, getCoachingCenter } from '@/lib/services/tenant.service';
 
@@ -8,8 +9,8 @@ export async function GET() {
     const { coachingCenterId } = await requireTenant();
     const center = await getCoachingCenter(coachingCenterId);
     return NextResponse.json({ success: true, center });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/profile GET');
   }
 }
 
@@ -45,10 +46,7 @@ export async function POST(req: Request) {
     );
 
     return NextResponse.json({ success: true, center: updated });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update center profile' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/profile POST');
   }
 }

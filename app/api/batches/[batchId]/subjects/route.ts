@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { replaceBatchSubjects, getBatchById } from '@/lib/services/batch.service';
 import { batchSubjectsUpdateSchema } from '@/lib/validations/batch';
 
@@ -28,11 +29,7 @@ export async function PUT(request: Request, props: { params: Promise<{ batchId: 
 
     const batch = await replaceBatchSubjects(coachingCenterId, batchId, validated.data.subjectIds, user.userId);
     return NextResponse.json({ success: true, batch });
-  } catch (error: any) {
-    console.error('[API /api/batches/[batchId]/subjects PUT] Error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update batch subjects' },
-      { status: 400 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/batches/[batchId]/subjects PUT');
   }
 }

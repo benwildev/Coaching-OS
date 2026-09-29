@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getFeeStructuresList, createFeeStructure } from '@/lib/services/fee.service';
 import { feeStructureSchema } from '@/lib/validations/fee';
 
@@ -23,10 +24,8 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({ success: true, ...result });
-  } catch (error: any) {
-    console.error('[API /api/fees/structures GET] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 401;
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/structures GET');
   }
 }
 
@@ -50,9 +49,7 @@ export async function POST(request: Request) {
 
     const structure = await createFeeStructure(coachingCenterId, validated.data, user.userId);
     return NextResponse.json({ success: true, structure }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/fees/structures POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to create fee structure' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/structures POST');
   }
 }

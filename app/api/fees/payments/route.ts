@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getPaymentsList } from '@/lib/services/payment.service';
 
 export const dynamic = 'force-dynamic';
@@ -25,8 +26,7 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({ success: true, ...result });
-  } catch (error: any) {
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 401;
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/payments GET');
   }
 }

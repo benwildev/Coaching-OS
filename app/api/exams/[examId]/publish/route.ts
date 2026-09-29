@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { verifyAndPublishExam } from '@/lib/services/exam-result.service';
 
 export const dynamic = 'force-dynamic';
@@ -30,15 +31,12 @@ export async function POST(
 
     return NextResponse.json({ success: true, exam, status: exam.status });
   } catch (error: any) {
-    console.error('[API /api/exams/[examId]/publish POST] Error:', error);
-    const isIncomplete = error.message?.startsWith('INCOMPLETE_RESULTS');
-    return NextResponse.json(
-      {
-        success: false,
-        error: error.message || 'Failed to publish exam results',
-        isIncomplete,
-      },
-      { status: 400 }
-    );
+    if (error?.message?.startsWith('INCOMPLETE_RESULTS')) {
+      return NextResponse.json(
+        { success: false, error: error.message, isIncomplete: true },
+        { status: 400 }
+      );
+    }
+    return apiErrorResponse(error, '/api/exams/[examId]/publish POST');
   }
 }

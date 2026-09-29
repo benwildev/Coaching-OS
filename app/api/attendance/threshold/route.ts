@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getAttendanceThreshold, setAttendanceThreshold } from '@/lib/services/attendance.service';
 import { thresholdSchema } from '@/lib/validations/attendance';
 
@@ -31,8 +32,7 @@ export async function PUT(request: Request) {
 
     await setAttendanceThreshold(coachingCenterId, validated.data.threshold, user.userId);
     return NextResponse.json({ success: true, threshold: validated.data.threshold });
-  } catch (error: any) {
-    console.error('[API /api/attendance/threshold PUT] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update threshold' }, { status: 400 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/attendance/threshold PUT');
   }
 }

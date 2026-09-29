@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertTeacherSelfAccess, assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getAttendanceSessionDetail, bulkMarkAttendance } from '@/lib/services/attendance.service';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
 import { bulkMarkSchema } from '@/lib/validations/attendance';
@@ -29,10 +30,8 @@ export async function GET(request: Request, props: { params: Promise<{ sessionId
     await assertSessionAccess(coachingCenterId, user, detail.session);
 
     return NextResponse.json({ success: true, ...detail });
-  } catch (error: any) {
-    console.error('[API /api/attendance/sessions/[sessionId] GET] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 401;
-    return NextResponse.json({ success: false, error: error.message || 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/attendance/sessions/[sessionId] GET');
   }
 }
 
@@ -60,9 +59,7 @@ export async function PUT(request: Request, props: { params: Promise<{ sessionId
     const detail = await getAttendanceSessionDetail(coachingCenterId, sessionId);
 
     return NextResponse.json({ success: true, ...detail });
-  } catch (error: any) {
-    console.error('[API /api/attendance/sessions/[sessionId] PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to save attendance' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/attendance/sessions/[sessionId] PUT');
   }
 }

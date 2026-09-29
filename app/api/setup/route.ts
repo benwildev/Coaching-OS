@@ -3,6 +3,7 @@ import { setupWizardSchema } from '@/lib/validations/setup';
 import { completeInitialSetup, isSetupCompleted } from '@/lib/services/tenant.service';
 import { createSessionToken, setSessionCookie } from '@/lib/auth/session';
 import { recordAuditLog } from '@/lib/services/audit.service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export async function POST(req: Request) {
   try {
@@ -52,11 +53,7 @@ export async function POST(req: Request) {
       centerId: result.center.id,
       redirect: '/dashboard',
     });
-  } catch (error: any) {
-    console.error('[SetupRoute] Error during initial setup:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to complete coaching center setup' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/setup POST');
   }
 }

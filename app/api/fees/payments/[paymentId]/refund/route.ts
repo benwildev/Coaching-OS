@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getPaymentById, refundPayment } from '@/lib/services/payment.service';
 import { paymentRefundSchema } from '@/lib/validations/payment';
 
@@ -27,9 +28,7 @@ export async function POST(request: Request, props: { params: Promise<{ paymentI
 
     const refund = await refundPayment(coachingCenterId, paymentId, validated.data, user.userId);
     return NextResponse.json({ success: true, refund }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/fees/payments/[paymentId]/refund POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to process refund' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/payments/[paymentId]/refund POST');
   }
 }

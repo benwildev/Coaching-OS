@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { transitionExamStatus } from '@/lib/services/exam.service';
 import { EXAM_STATUS } from '@/lib/validations/exam';
 
@@ -32,8 +33,7 @@ export async function POST(
     );
 
     return NextResponse.json({ success: true, exam, status: exam.status });
-  } catch (error: any) {
-    console.error('[API /api/exams/[examId]/reopen POST] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to reopen exam' }, { status: 400 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/exams/[examId]/reopen POST');
   }
 }

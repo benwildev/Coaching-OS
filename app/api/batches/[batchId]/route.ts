@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getBatchById, updateBatch } from '@/lib/services/batch.service';
 import { batchUpdateSchema } from '@/lib/validations/batch';
 
@@ -16,9 +17,8 @@ export async function GET(request: Request, props: { params: Promise<{ batchId: 
     // could read any branch's batch (incl. its student roster/phones) by id.
     assertBranchAccess(user, batch.branchId);
     return NextResponse.json({ success: true, batch });
-  } catch (error: any) {
-    const status = error?.message === 'FORBIDDEN_BRANCH' || error?.message === 'FORBIDDEN' ? 403 : 401;
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/batches/[batchId] GET');
   }
 }
 
@@ -51,9 +51,7 @@ export async function PUT(request: Request, props: { params: Promise<{ batchId: 
 
     const batch = await updateBatch(coachingCenterId, batchId, validated.data, user.userId);
     return NextResponse.json({ success: true, batch });
-  } catch (error: any) {
-    console.error('[API /api/batches/[batchId] PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update batch' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/batches/[batchId] PUT');
   }
 }

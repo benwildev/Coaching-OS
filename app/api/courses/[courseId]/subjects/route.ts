@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { replaceCourseSubjects } from '@/lib/services/course.service';
 import { courseSubjectsReplaceSchema } from '@/lib/validations/course';
 
@@ -22,11 +23,7 @@ export async function PUT(request: Request, props: { params: Promise<{ courseId:
 
     const course = await replaceCourseSubjects(coachingCenterId, courseId, validated.data.subjects, user.userId);
     return NextResponse.json({ success: true, course });
-  } catch (error: any) {
-    console.error('[API /api/courses/[courseId]/subjects PUT] Error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update course subjects' },
-      { status: 400 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/courses/[courseId]/subjects PUT');
   }
 }

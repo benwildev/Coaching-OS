@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { updateClassSchedule, deleteClassSchedule } from '@/lib/services/schedule.service';
 import { classScheduleUpdateSchema } from '@/lib/validations/schedule';
 import prisma from '@/lib/db';
@@ -35,12 +36,13 @@ export async function PUT(request: Request, props: { params: Promise<{ scheduleI
     const schedule = await updateClassSchedule(coachingCenterId, scheduleId, validated.data, user.userId);
     return NextResponse.json({ success: true, schedule });
   } catch (error: any) {
-    console.error('[API /api/schedules/[scheduleId] PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : error.conflicts ? 409 : 400;
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update schedule', conflicts: error.conflicts || undefined },
-      { status }
-    );
+    if (error?.conflicts) {
+      return NextResponse.json(
+        { success: false, error: error.message, conflicts: error.conflicts },
+        { status: 409 }
+      );
+    }
+    return apiErrorResponse(error, '/api/schedules/[scheduleId] PUT');
   }
 }
 
@@ -58,9 +60,7 @@ export async function DELETE(request: Request, props: { params: Promise<{ schedu
 
     await deleteClassSchedule(coachingCenterId, scheduleId, user.userId);
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error('[API /api/schedules/[scheduleId] DELETE] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to delete schedule' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/schedules/[scheduleId] DELETE');
   }
 }

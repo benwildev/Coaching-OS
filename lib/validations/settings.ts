@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isHttpOrRelativeUrl, RESOURCE_URL_MESSAGE } from './common';
 
 export const centerProfileSchema = z.object({
   name: z.string().min(2, 'Name is required'),
@@ -16,8 +17,8 @@ export const brandingSchema = z.object({
   primaryColor: z.string().min(4),
   secondaryColor: z.string().min(4),
   accentColor: z.string().min(4),
-  logoUrl: z.string().optional(),
-  faviconUrl: z.string().optional(),
+  logoUrl: z.string().optional().refine(isHttpOrRelativeUrl, { message: RESOURCE_URL_MESSAGE }),
+  faviconUrl: z.string().optional().refine(isHttpOrRelativeUrl, { message: RESOURCE_URL_MESSAGE }),
 });
 
 export const regionSchema = z.object({

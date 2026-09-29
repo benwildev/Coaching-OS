@@ -1,5 +1,7 @@
 import prisma from '@/lib/db';
 import type { Prisma, PaymentMethod } from '@prisma/client';
+import { buildDhakaRange, isIsoDate, todayDhaka } from '@/lib/reports/dates';
+import { getTodaySession } from './cash-session.service';
 
 function n(value: Prisma.Decimal | number | null | undefined): number {
   return value == null ? 0 : Number(value);
@@ -428,4 +430,78 @@ export async function getBatchFinancialSummary(coachingCenterId: string, batchId
   );
 
   return { batch, students, totals };
+}
+
+// ------------------------------------------------------------------
+// Daily Collection Dashboard (Phase 10.9) — an arbitrary selected Dhaka
+// business date, unlike getFeeDashboard's fixed "today + this month". Built
+// on lib/reports/dates.ts (the more complete, already-shared Dhaka-boundary
+// utility) rather than this file's own startOfTodayDhaka/startOfMonthDhaka,
+// which stay untouched to avoid destabilizing the existing dashboard above.
+// ------------------------------------------------------------------
+
+export interface DailyCollectionParams {
+  date?: string; // YYYY-MM-DD, Dhaka calendar date — defaults to today
+  branchId?: string;
+}
+
+export async function getDailyCollectionSummary(coachingCenterId: string, params: DailyCollectionParams = {}) {
+  const date = params.date && isIsoDate(params.date) ? params.date : todayDhaka();
+  const range = buildDhakaRange(date, date);
+  const branchFilter = params.branchId ? { branchId: params.branchId } : {};
+
+  const [paymentsByMethod, refunds] = await Promise.all([
+    prisma.payment.groupBy({
+      by: ['paymentMethod'],
+      where: { coachingCenterId, ...branchFilter, status: { not: 'VOIDED' }, paymentDate: { gte: range.start, lt: range.endExclusive } },
+      _sum: { amount: true },
+      _count: { _all: true },
+    }),
+    prisma.paymentRefund.findMany({
+      where: { coachingCenterId, refundDate: { gte: range.start, lt: range.endExclusive }, payment: { ...branchFilter } },
+      select: { amount: true, payment: { select: { paymentMethod: true } } },
+    }),
+  ]);
+
+  const refundByMethod = new Map<PaymentMethod, number>();
+  for (const r of refunds) {
+    refundByMethod.set(r.payment.paymentMethod, (refundByMethod.get(r.payment.paymentMethod) || 0) + n(r.amount));
+  }
+
+  const methods = METHODS.map((method) => {
+    const g = paymentsByMethod.find((x) => x.paymentMethod === method);
+    const gross = n(g?._sum.amount);
+    const refunded = refundByMethod.get(method) || 0;
+    return { method, count: g?._count._all ?? 0, gross, refunded, net: gross - refunded };
+  });
+
+  const totalCollection = methods.reduce((s, m) => s + m.gross, 0);
+  const refundedAmount = methods.reduce((s, m) => s + m.refunded, 0);
+  const paymentsCount = methods.reduce((s, m) => s + m.count, 0);
+
+  const isToday = date === todayDhaka();
+  const cashSession = isToday && params.branchId ? await getTodaySession(coachingCenterId, params.branchId) : null;
+
+  return {
+    date,
+    branchId: params.branchId ?? null,
+    totalCollection,
+    refundedAmount,
+    netCollection: totalCollection - refundedAmount,
+    paymentsCount,
+    receiptsCount: paymentsCount, // one receipt per payment
+    methods,
+    cashSession: cashSession
+      ? {
+          id: cashSession.id,
+          status: cashSession.status,
+          openingCash: n(cashSession.openingCash),
+          countedCash: cashSession.countedCash != null ? n(cashSession.countedCash) : null,
+          expectedCash: cashSession.expectedCash != null ? n(cashSession.expectedCash) : null,
+          difference: cashSession.difference != null ? n(cashSession.difference) : null,
+          openedBy: cashSession.openedBy,
+          closedBy: cashSession.closedBy,
+        }
+      : null,
+  };
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { updateBatchTeacherAssignment } from '@/lib/services/batch.service';
 import { batchTeacherUpdateSchema } from '@/lib/validations/batch';
 
@@ -25,11 +26,7 @@ export async function PUT(
 
     const assignment = await updateBatchTeacherAssignment(coachingCenterId, assignmentId, validated.data, user.userId);
     return NextResponse.json({ success: true, assignment });
-  } catch (error: any) {
-    console.error('[API /api/batches/[batchId]/teachers/[assignmentId] PUT] Error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update teacher assignment' },
-      { status: 400 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/batches/[batchId]/teachers/[assignmentId] PUT');
   }
 }

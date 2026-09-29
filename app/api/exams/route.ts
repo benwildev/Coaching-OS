@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { listExams, createExam } from '@/lib/services/exam.service';
 import { createExamSchema } from '@/lib/validations/exam';
 
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
     if (error.message?.startsWith('FORBIDDEN')) {
       return NextResponse.json({ success: false, error: error.message }, { status: 403 });
     }
-    return NextResponse.json({ success: false, error: error.message || 'Internal server error' }, { status: 500 });
+    return apiErrorResponse(error, '/api/exams GET');
   }
 }
 
@@ -71,9 +72,7 @@ export async function POST(request: Request) {
     );
 
     return NextResponse.json({ success: true, exam }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/exams POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to create exam' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/exams POST');
   }
 }

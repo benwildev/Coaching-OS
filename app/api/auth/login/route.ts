@@ -4,6 +4,14 @@ import { authenticateByEmail, LOCKOUT_MINUTES, MAX_FAILED_ATTEMPTS, redirectPath
 import { clearSessionCookie, createSessionToken, setSessionCookie } from '@/lib/auth/session';
 import { clearPortalSessionCookie, createPortalSessionToken, setPortalSessionCookie } from '@/lib/auth/portal-session';
 import { recordAuditLog } from '@/lib/services/audit.service';
+import { checkRateLimit, getClientIp } from '@/lib/services/rate-limit.service';
+
+// Per-account lockout (unified-auth.service.ts) already stops brute-forcing
+// ONE account. This IP-scoped limit is the missing defense against the
+// other shape of attack — a script trying many different accounts, few
+// attempts each, from one source — which a per-account counter can't see.
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_RATE_LIMIT_MAX = 30;
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +32,11 @@ const INVALID = {
 
 export async function POST(req: Request) {
   try {
+    const rateLimit = await checkRateLimit(`login:${getClientIp(req)}`, LOGIN_RATE_LIMIT_WINDOW_MS, LOGIN_RATE_LIMIT_MAX);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(INVALID, { status: 429, headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) } });
+    }
+
     const body = await req.json().catch(() => null);
     const parsed = loginSchema.safeParse(body);
     if (!parsed.success) {

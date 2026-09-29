@@ -4,9 +4,12 @@ import type { CommunicationChannel } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
 import { recordAuditLog } from './audit.service';
 import { getCommunicationProvider } from './communication/providers';
-import { interpolate, SAMPLE_TEMPLATE_VARIABLES } from './template-interpolation';
-import { DEFAULT_EVENT_COPY, isNotificationEvent, type NotificationEvent, type TemplateVariable } from '@/lib/notifications/events';
+import { interpolate, interpolateHtml, SAMPLE_TEMPLATE_VARIABLES } from './template-interpolation';
+import { DEFAULT_EVENT_COPY, isNotificationEvent, type NotificationEvent, type TemplateVariable, type NotificationDeliveryChannel } from '@/lib/notifications/events';
 import type { CommunicationTemplateInput } from '@/lib/validations/communication-template';
+import { normalizeBangladeshPhone } from '@/lib/utils/phone';
+import { isCommunicationChannelEnabled, resolveProviderCredentials } from './communication-settings.service';
+import { computeNextRetryAt } from './communication/retry-config';
 
 export interface CommunicationScope {
   coachingCenterId: string;
@@ -169,6 +172,9 @@ export interface LogListParams {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  guardianId?: string;
+  studentId?: string;
+  branchId?: string;
 }
 
 export async function listCommunicationLogs(scope: CommunicationScope, params: LogListParams = {}) {
@@ -182,10 +188,17 @@ export async function listCommunicationLogs(scope: CommunicationScope, params: L
   // nothing here ever filtered by it.
   if (scope.user.role !== 'OWNER' && scope.user.role !== 'ADMIN' && scope.user.branchId) {
     and.push({ branchId: scope.user.branchId });
+  } else if (params.branchId) {
+    // Explicit branch filter — only honored for center-wide (OWNER/ADMIN)
+    // callers; a branch-locked user is already pinned to their own branch
+    // above and must not be able to widen or redirect via this param.
+    and.push({ branchId: params.branchId });
   }
   if (params.channel) and.push({ channel: params.channel as CommunicationChannel });
   if (params.event) and.push({ event: params.event });
   if (params.status) and.push({ status: params.status });
+  if (params.guardianId) and.push({ guardianId: params.guardianId });
+  if (params.studentId) and.push({ studentId: params.studentId });
   if (params.dateFrom || params.dateTo) {
     const range: Prisma.DateTimeFilter = {};
     if (params.dateFrom) range.gte = new Date(params.dateFrom);
@@ -246,6 +259,7 @@ export interface DispatchToGuardianInput {
   triggeredById?: string | null;
   sourceType?: string | null;
   sourceId?: string | null;
+  allowedChannels?: NotificationDeliveryChannel[];
 }
 
 /**
@@ -273,7 +287,8 @@ export async function dispatchToGuardian(input: DispatchToGuardianInput): Promis
 
     const channel = guardian.preferredChannel;
     const recipient = channel === 'EMAIL' ? guardian.email : channel === 'WHATSAPP' ? guardian.whatsapp || guardian.phone : guardian.phone;
-    if (!recipient) {
+
+    async function logSkippedOrFailed(status: 'SKIPPED' | 'FAILED', errorMessage: string, extra: Partial<Prisma.CommunicationLogUncheckedCreateInput> = {}) {
       try {
         await prisma.communicationLog.create({
           data: {
@@ -287,15 +302,50 @@ export async function dispatchToGuardian(input: DispatchToGuardianInput): Promis
             event: input.event,
             sourceType: input.sourceType ?? null,
             sourceId: input.sourceId ?? null,
-            status: 'SKIPPED',
-            errorMessage: 'NO_RECIPIENT_ADDRESS',
+            status,
+            errorMessage,
             message: '',
+            ...extra,
           },
         });
       } catch (error) {
         if (!isDuplicateLogError(error)) throw error;
       }
+    }
+
+    if (!recipient) {
+      await logSkippedOrFailed('SKIPPED', 'NO_RECIPIENT_ADDRESS');
       return;
+    }
+
+    const channelEnabled = await isCommunicationChannelEnabled(input.coachingCenterId, channel);
+    if (!channelEnabled) {
+      await logSkippedOrFailed('SKIPPED', 'CHANNEL_DISABLED');
+      return;
+    }
+
+    if (input.allowedChannels && !input.allowedChannels.includes(channel as unknown as NotificationDeliveryChannel)) {
+      await logSkippedOrFailed('SKIPPED', 'POLICY_CHANNEL_DISABLED');
+      return;
+    }
+
+    // Phone validation for SMS/WHATSAPP happens here, before a log row is
+    // even created as QUEUED — an invalid number is a permanent, non-
+    // retryable failure, never worth a provider round trip.
+    let recipientPhoneNormalized: string | null = null;
+    if (channel !== 'EMAIL') {
+      const phone = normalizeBangladeshPhone(recipient);
+      if (!phone.valid) {
+        await logSkippedOrFailed('FAILED', phone.reason, {
+          recipientPhone: recipient,
+          attemptCount: 1,
+          lastAttemptAt: new Date(),
+          errorCode: 'INVALID_PHONE',
+          retryable: false,
+        });
+        return;
+      }
+      recipientPhoneNormalized = phone.e164;
     }
 
     const template = isNotificationEvent(input.event)
@@ -321,7 +371,7 @@ export async function dispatchToGuardian(input: DispatchToGuardianInput): Promis
           studentId: input.studentId ?? null,
           noticeId: input.noticeId ?? null,
           triggeredById: input.triggeredById ?? null,
-          recipientPhone: channel === 'EMAIL' ? null : recipient,
+          recipientPhone: channel === 'EMAIL' ? null : recipientPhoneNormalized,
           recipientEmail: channel === 'EMAIL' ? recipient : null,
           channel,
           event: input.event,
@@ -346,7 +396,20 @@ export async function dispatchToGuardian(input: DispatchToGuardianInput): Promis
     });
 
     const provider = getCommunicationProvider(channel);
-    const result = await provider.send({ to: recipient, body: message });
+    const sendTo = channel === 'EMAIL' ? recipient : recipientPhoneNormalized!;
+    const credentials = await resolveProviderCredentials(input.coachingCenterId, channel);
+    const result = await provider.send(
+      {
+        to: sendTo,
+        subject: template ? undefined : defaultCopy?.en.title,
+        body: message,
+        htmlBody: channel === 'EMAIL' ? interpolateHtml(`${bodyEn}\n${bodyBn}`, input.vars) : undefined,
+      },
+      credentials
+    );
+
+    const attemptCount = 1;
+    const nextRetryAt = result.status === 'FAILED' && result.retryable ? computeNextRetryAt(attemptCount) : null;
 
     await prisma.communicationLog.update({
       where: { id: log.id },
@@ -354,7 +417,12 @@ export async function dispatchToGuardian(input: DispatchToGuardianInput): Promis
         status: result.status,
         provider: result.provider ?? null,
         providerMessageId: result.providerMessageId ?? null,
+        errorCode: result.errorCode ?? null,
         errorMessage: result.errorMessage ?? null,
+        retryable: result.retryable ?? null,
+        attemptCount,
+        lastAttemptAt: new Date(),
+        nextRetryAt,
         sentAt: result.status === 'SENT' ? new Date() : null,
       },
     });

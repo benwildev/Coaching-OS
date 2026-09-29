@@ -309,6 +309,30 @@ button:disabled {
 }
 
 /* ==========================================
+   ID CARDS (Phase 10.10) — CR80-ish (86mm x 54mm) cards printed onto normal
+   A4/letter sheets (this app has no dedicated card-printer/PDF pipeline —
+   every document here is browser-print, see docs/communication.md's sibling
+   convention for receipts/invoices). Bulk mode lays several cards out in a
+   grid, one per page-break-safe cell.
+   ========================================== */
+.id-card {
+  width: 86mm;
+  height: 54mm;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.id-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 86mm);
+  gap: 6mm;
+}
+@media print {
+  .id-card-grid {
+    gap: 4mm;
+  }
+}
+
+/* ==========================================
    REPORTS (Phase 10) — tables & print layout
    ========================================== */
 .report-table th, .report-table td {

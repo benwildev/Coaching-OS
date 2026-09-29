@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import Icon from '@/components/Icon';
 import PageHeader, { EmptyState, Pager } from '@/components/PageHeader';
 import { useApp } from '@/lib/store';
@@ -17,7 +18,8 @@ interface NotificationRow {
 }
 
 export default function NotificationsPage() {
-  const { lang } = useApp();
+  const { lang, currentUser } = useApp();
+  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
   const t = DICTIONARY[lang];
   const n = t.notifications;
   const c = t.common;
@@ -72,6 +74,12 @@ export default function NotificationsPage() {
           <Icon name="check2" size={14} />
           {n.markAllRead}
         </button>
+        {canManage && (
+          <Link href="/settings/notifications" className="tb" title="Configure Notification Policies">
+            <Icon name="sliders" size={14} />
+            {lang === 'bn' ? 'পলিসি সেটিংস' : 'Alert Policies'}
+          </Link>
+        )}
       </PageHeader>
 
       <div className="card overflow-hidden">

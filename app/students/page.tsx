@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Icon from '@/components/Icon';
 import StatusBadge from '@/components/StatusBadge';
+import BulkActionBar from '@/components/students/BulkActionBar';
 import { useApp } from '@/lib/store';
 import { DICTIONARY, toBanglaNumeral, formatDhakaDate } from '@/lib/i18n';
 import { formatBdPhoneDisplay } from '@/lib/validations/student';
@@ -83,6 +84,9 @@ function StudentsPageContent() {
     newAdmissions: 0,
   });
   const [loading, setLoading] = useState(true);
+  // Selection is always "visible rows on this page" — never all-matching-filter
+  // (AGENTS.md Phase 10.10 §4) — so it's cleared on every new fetch.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Hierarchy options for filters
   const [options, setOptions] = useState<{
@@ -160,6 +164,7 @@ function StudentsPageContent() {
         setStudents(data.students || []);
         setTotalStudents(data.total || 0);
         setTotalPages(data.totalPages || 1);
+        setSelectedIds(new Set());
         if (data.stats) {
           setStats(data.stats);
         }
@@ -196,6 +201,22 @@ function StudentsPageContent() {
     setStatusFilter('all');
     setPage(1);
     router.replace('/students');
+  };
+
+  const allVisibleSelected = students.length > 0 && students.every((s) => selectedIds.has(s.id));
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      if (allVisibleSelected) return new Set();
+      return new Set(students.map((s) => s.id));
+    });
+  };
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   // Derive child classes based on selected program
@@ -437,6 +458,13 @@ function StudentsPageContent() {
         </div>
       </div>
 
+      <BulkActionBar
+        selectedIds={Array.from(selectedIds)}
+        students={students.map((s) => ({ id: s.id, name: s.name, studentIdCode: s.studentIdCode }))}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onActionComplete={fetchStudents}
+      />
+
       {/* Student List View */}
       {loading ? (
         <div className="card p-12 rounded-2xl bg-white border border-[#dce5f0] text-center">
@@ -471,6 +499,9 @@ function StudentsPageContent() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-[#e2e8f0] bg-[#f8fafc] text-[12px] font-bold text-[#64748b] uppercase tracking-wider">
+                    <th className="py-3.5 px-4 w-10">
+                      <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} aria-label={dict.bulkOps.clearSelection} />
+                    </th>
                     <th className="py-3.5 px-4">{dict.students.colId}</th>
                     <th className="py-3.5 px-4">{dict.students.colName}</th>
                     <th className="py-3.5 px-4">{dict.students.colProgram}</th>
@@ -494,6 +525,9 @@ function StudentsPageContent() {
                         key={student.id}
                         className="hover:bg-[#f8fafc]/80 transition-colors group"
                       >
+                        <td className="py-3.5 px-4">
+                          <input type="checkbox" checked={selectedIds.has(student.id)} onChange={() => toggleSelectOne(student.id)} aria-label={student.name} />
+                        </td>
                         {/* Student ID */}
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <Link
@@ -635,6 +669,20 @@ function StudentsPageContent() {
                               title={dict.students.editStudent}
                             >
                               <Icon name="sliders" size={16} />
+                            </Link>
+                            <Link
+                              href={`/students/${student.id}/id-card`}
+                              className="p-1.5 rounded-lg text-[#64748b] hover:text-[#063b78] hover:bg-blue-50 transition-colors"
+                              title={dict.students.idCardLink}
+                            >
+                              <Icon name="shield" size={16} />
+                            </Link>
+                            <Link
+                              href={`/students/${student.id}/certificates`}
+                              className="p-1.5 rounded-lg text-[#64748b] hover:text-[#063b78] hover:bg-blue-50 transition-colors"
+                              title={dict.students.certificatesLink}
+                            >
+                              <Icon name="award" size={16} />
                             </Link>
                           </div>
                         </td>

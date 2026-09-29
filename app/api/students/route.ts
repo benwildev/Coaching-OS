@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, resolveEffectiveBranchId, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import {
   getStudentsList,
   createStudentAdmission,
@@ -62,12 +63,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error('[API /api/students GET] Error:', error);
-    const status = error instanceof Error && error.message === 'FORBIDDEN' ? 403 : 401;
-    return NextResponse.json(
-      { error: status === 403 ? 'Forbidden' : 'Unauthorized' },
-      { status }
-    );
+    return apiErrorResponse(error, '/api/students GET');
   }
 }
 
@@ -118,12 +114,7 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
-    console.error('[API /api/students POST] Error:', error);
-    if (error?.message === 'UNAUTHORIZED' || error?.message === 'FORBIDDEN' || error?.message === 'FORBIDDEN_BRANCH') {
-      return NextResponse.json({ error: 'Unauthorized or branch forbidden' }, { status: error.message === 'UNAUTHORIZED' ? 401 : 403 });
-    }
-    const msg = error?.message || 'Failed to process admission';
-    return NextResponse.json({ error: msg }, { status: 400 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/students POST');
   }
 }

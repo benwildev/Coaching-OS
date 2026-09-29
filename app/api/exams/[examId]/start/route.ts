@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { transitionExamStatus } from '@/lib/services/exam.service';
 import { EXAM_STATUS } from '@/lib/validations/exam';
 import prisma from '@/lib/db';
@@ -30,9 +31,7 @@ export async function POST(
     );
 
     return NextResponse.json({ success: true, exam, status: exam.status });
-  } catch (error: any) {
-    console.error('[API /api/exams/[examId]/start POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to start exam' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/exams/[examId]/start POST');
   }
 }

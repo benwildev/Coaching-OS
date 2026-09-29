@@ -6,6 +6,7 @@ import { notifyUsers } from './notification.service';
 import { dispatchToGuardian } from './communication.service';
 import { resolveNoticeRecipients } from './notice-recipients.service';
 import { notifyPortalAccountsForEvent } from './portal-notification.service';
+import { resolveNotificationRecipients } from './notification-policy.service';
 import { checkNoticeAudienceScope, type CreateNoticeInput, type NoticeFilterParams, type UpdateNoticeInput } from '@/lib/validations/notice';
 
 export interface NoticeScope {
@@ -272,13 +273,30 @@ async function publishSideEffects(scope: NoticeScope, noticeId: string) {
   const notice = await prisma.notice.findFirst({ where: { id: noticeId, coachingCenterId: scope.coachingCenterId } });
   if (!notice) return;
 
+  const isUrgent = notice.title.toLowerCase().includes('urgent') || (notice.banglaTitle && notice.banglaTitle.includes('জরুরি'));
+  const eventType = isUrgent ? 'URGENT_NOTICE' : 'NOTICE_PUBLISHED';
+
+  const resolved = await resolveNotificationRecipients({
+    coachingCenterId: scope.coachingCenterId,
+    notificationType: eventType,
+    context: {},
+  });
+
+  // If the notification type is completely disabled for the organization
+  if (resolved.length === 0) return;
+
+  const studentTarget = resolved.find((r) => r.recipientType === 'STUDENT');
+  const guardianTarget = resolved.find((r) => r.recipientType === 'GUARDIAN');
+  const teacherTarget = resolved.find((r) => r.recipientType === 'TEACHER');
+  const adminTarget = resolved.find((r) => r.recipientType === 'ADMIN');
+
   const recipients = await resolveNoticeRecipients(scope.coachingCenterId, notice);
 
-  if (recipients.userIds.length > 0) {
+  if (recipients.userIds.length > 0 && (teacherTarget || adminTarget)) {
     await notifyUsers({
       coachingCenterId: scope.coachingCenterId,
       userIds: recipients.userIds,
-      type: 'NOTICE_PUBLISHED',
+      type: eventType,
       title: notice.title,
       body: notice.banglaTitle || notice.title,
       actionUrl: `/notices/${notice.id}`,
@@ -288,60 +306,63 @@ async function publishSideEffects(scope: NoticeScope, noticeId: string) {
   }
 
   const notifiedStudentIds = new Set<string>();
-  // Phase 10.5: a notice is one message regardless of how many of a
-  // guardian's children it concerns — a guardian who appears more than
-  // once in `recipients.guardians` (e.g. two children in the same
-  // batch/ALL_CENTER audience) must still get exactly one SMS and one
-  // in-app notification, not one per child. This is now an explicit
-  // application-level guard rather than relying on the DB unique
-  // constraint to swallow the "duplicate" (that constraint's identity now
-  // includes studentId — see prisma/schema.prisma — precisely so it no
-  // longer collapses different children's *different* events together;
-  // it must not be relied on to collapse a notice's *same* event either).
-  // Where two links disagree on notification preference, whichever
-  // (guardian, child) pair is encountered first governs — a guardian-level
-  // message has no single "correct" per-child preference to defer to.
   const notifiedGuardianIds = new Set<string>();
-  for (const g of recipients.guardians) {
-    if (!notifiedGuardianIds.has(g.guardianId)) {
-      notifiedGuardianIds.add(g.guardianId);
-      await dispatchToGuardian({
-        coachingCenterId: scope.coachingCenterId,
-        branchId: notice.branchId,
-        guardianId: g.guardianId,
-        studentId: g.studentId,
-        noticeId: notice.id,
-        event: 'NOTICE_PUBLISHED',
-        vars: { noticeTitle: notice.title },
-        triggeredById: scope.user.userId,
-        sourceType: 'Notice',
-        sourceId: notice.id,
-      });
 
-      // In-app notification, if a PortalAccount exists (Phase 9).
-      await notifyPortalAccountsForEvent({
-        coachingCenterId: scope.coachingCenterId,
-        guardianId: g.guardianId,
-        type: 'NOTICE_PUBLISHED',
-        title: notice.title,
-        body: notice.banglaTitle || notice.title,
-        actionUrl: `/portal/guardian/notices`,
-        sourceType: 'Notice',
-        sourceId: notice.id,
-      });
+  if (guardianTarget) {
+    const allowsExternal = guardianTarget.channels.some((c) => c === 'SMS' || c === 'WHATSAPP' || c === 'EMAIL');
+    const allowsInApp = guardianTarget.channels.includes('IN_APP');
+
+    for (const g of recipients.guardians) {
+      if (!notifiedGuardianIds.has(g.guardianId)) {
+        notifiedGuardianIds.add(g.guardianId);
+
+        if (allowsExternal) {
+          await dispatchToGuardian({
+            coachingCenterId: scope.coachingCenterId,
+            branchId: notice.branchId,
+            guardianId: g.guardianId,
+            studentId: g.studentId,
+            noticeId: notice.id,
+            event: 'NOTICE_PUBLISHED',
+            vars: { noticeTitle: notice.title },
+            triggeredById: scope.user.userId,
+            sourceType: 'Notice',
+            sourceId: notice.id,
+            allowedChannels: guardianTarget.channels,
+          });
+        }
+
+        if (allowsInApp) {
+          await notifyPortalAccountsForEvent({
+            coachingCenterId: scope.coachingCenterId,
+            guardianId: g.guardianId,
+            type: eventType,
+            title: notice.title,
+            body: notice.banglaTitle || notice.title,
+            actionUrl: `/portal/guardian/notices`,
+            sourceType: 'Notice',
+            sourceId: notice.id,
+          });
+        }
+      }
     }
-    if (!notifiedStudentIds.has(g.studentId)) {
-      notifiedStudentIds.add(g.studentId);
-      await notifyPortalAccountsForEvent({
-        coachingCenterId: scope.coachingCenterId,
-        studentId: g.studentId,
-        type: 'NOTICE_PUBLISHED',
-        title: notice.title,
-        body: notice.banglaTitle || notice.title,
-        actionUrl: `/portal/student/notices`,
-        sourceType: 'Notice',
-        sourceId: notice.id,
-      });
+  }
+
+  if (studentTarget && studentTarget.channels.includes('IN_APP')) {
+    for (const g of recipients.guardians) {
+      if (!notifiedStudentIds.has(g.studentId)) {
+        notifiedStudentIds.add(g.studentId);
+        await notifyPortalAccountsForEvent({
+          coachingCenterId: scope.coachingCenterId,
+          studentId: g.studentId,
+          type: eventType,
+          title: notice.title,
+          body: notice.banglaTitle || notice.title,
+          actionUrl: `/portal/student/notices`,
+          sourceType: 'Notice',
+          sourceId: notice.id,
+        });
+      }
     }
   }
 }

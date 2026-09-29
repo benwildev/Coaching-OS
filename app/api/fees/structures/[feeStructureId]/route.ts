@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getFeeStructureById, updateFeeStructure } from '@/lib/services/fee.service';
 import { feeStructureUpdateSchema } from '@/lib/validations/fee';
 
@@ -14,9 +15,8 @@ export async function GET(request: Request, props: { params: Promise<{ feeStruct
     if (!structure) return NextResponse.json({ success: false, error: 'Fee structure not found' }, { status: 404 });
     assertBranchAccess(user, structure.branchId);
     return NextResponse.json({ success: true, structure });
-  } catch (error: any) {
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 401;
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/structures/[feeStructureId] GET');
   }
 }
 
@@ -44,9 +44,7 @@ export async function PUT(request: Request, props: { params: Promise<{ feeStruct
 
     const structure = await updateFeeStructure(coachingCenterId, feeStructureId, validated.data, user.userId);
     return NextResponse.json({ success: true, structure });
-  } catch (error: any) {
-    console.error('[API /api/fees/structures/[feeStructureId] PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update fee structure' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/structures/[feeStructureId] PUT');
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getExamPublishStatus } from '@/lib/services/exam-result.service';
 import prisma from '@/lib/db';
 
@@ -22,9 +23,7 @@ export async function GET(
 
     const status = await getExamPublishStatus(coachingCenterId, examId);
     return NextResponse.json({ success: true, ...status });
-  } catch (error: any) {
-    console.error('[API /api/exams/[examId]/publish-status GET] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to check publish status' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/exams/[examId]/publish-status GET');
   }
 }

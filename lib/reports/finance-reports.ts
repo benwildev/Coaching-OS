@@ -530,6 +530,64 @@ export const financeRefunds: ViewHandler = async ({ scope, filters, forExport })
 };
 
 // ------------------------------------------------------------------
+// Collector summary — groupBy(collectedById, paymentMethod), folded into
+// cash vs digital per collector, exactly like the brief's example table.
+// ------------------------------------------------------------------
+
+export const financeCollectors: ViewHandler = async ({ scope, filters }) => {
+  const range = resolveRange(filters);
+  const grouped = await prisma.payment.groupBy({
+    by: ['collectedById', 'paymentMethod'],
+    where: { ...paymentWhere(scope, { ...filters, method: undefined }), status: { not: 'VOIDED' }, paymentDate: { gte: range.start, lt: range.endExclusive } },
+    _sum: { amount: true },
+    _count: { _all: true },
+  });
+
+  const collectorIds = Array.from(new Set(grouped.map((g) => g.collectedById).filter((v): v is string => !!v)));
+  const users = collectorIds.length
+    ? await prisma.user.findMany({ where: { id: { in: collectorIds } }, select: { id: true, name: true } })
+    : [];
+  const nameOf = (id: string | null) => (id ? users.find((u) => u.id === id)?.name ?? id : null);
+
+  const byCollector = new Map<string | null, { paymentsCount: number; cash: Prisma.Decimal; digital: Prisma.Decimal }>();
+  for (const g of grouped) {
+    const cur = byCollector.get(g.collectedById) ?? { paymentsCount: 0, cash: new Prisma.Decimal(0), digital: new Prisma.Decimal(0) };
+    cur.paymentsCount += g._count._all;
+    if (g.paymentMethod === 'CASH') cur.cash = cur.cash.plus(g._sum.amount ?? 0);
+    else cur.digital = cur.digital.plus(g._sum.amount ?? 0);
+    byCollector.set(g.collectedById, cur);
+  }
+
+  const rows = Array.from(byCollector.entries())
+    .map(([collectedById, agg]) => ({
+      collectorId: collectedById,
+      collectorName: nameOf(collectedById) ?? 'Unassigned',
+      paymentsCount: agg.paymentsCount,
+      cash: money(agg.cash),
+      digital: money(agg.digital),
+      total: money(agg.cash.plus(agg.digital)),
+    }))
+    .sort((a, b) => Number(b.total) - Number(a.total));
+
+  const lang = filters.lang;
+  const R = DICTIONARY[lang].reports;
+  type Row = (typeof rows)[number];
+  return {
+    data: { range: { from: range.from, to: range.to }, rows },
+    export: {
+      rows,
+      columns: [
+        { header: R.col.collector, value: (r: Row) => r.collectorName },
+        { header: R.col.payments, value: (r: Row) => r.paymentsCount },
+        { header: `${R.col.cash} (BDT)`, value: (r: Row) => r.cash },
+        { header: `${R.col.digital} (BDT)`, value: (r: Row) => r.digital },
+        { header: `${R.col.amount} (BDT)`, value: (r: Row) => r.total },
+      ],
+    },
+  };
+};
+
+// ------------------------------------------------------------------
 // Branch comparison (OWNER/ADMIN only) — factual side-by-side, no ranking
 // ------------------------------------------------------------------
 

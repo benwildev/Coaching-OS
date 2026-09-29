@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getInvoiceById } from '@/lib/services/invoice.service';
 import { createPayment } from '@/lib/services/payment.service';
 import { paymentCreateSchema } from '@/lib/validations/payment';
@@ -27,9 +28,7 @@ export async function POST(request: Request, props: { params: Promise<{ invoiceI
 
     const result = await createPayment(coachingCenterId, invoiceId, validated.data, user.userId);
     return NextResponse.json({ success: true, ...result }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/fees/invoices/[invoiceId]/payments POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to record payment' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/invoices/[invoiceId]/payments POST');
   }
 }

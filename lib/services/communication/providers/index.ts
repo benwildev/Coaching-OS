@@ -4,7 +4,16 @@ import { SmsProvider } from './sms.provider';
 import { WhatsAppProvider } from './whatsapp.provider';
 import { EmailProvider } from './email.provider';
 
-export type { CommunicationMessage, CommunicationProvider, CommunicationResult } from './types';
+export type {
+  CommunicationMessage,
+  CommunicationProvider,
+  CommunicationResult,
+  ProviderCredentials,
+  ProviderHealthCheckResult,
+  ProviderBalanceResult,
+  ProviderReportResult,
+  SmsRecipientReport,
+} from './types';
 
 const PROVIDERS: Record<CommunicationChannel, CommunicationProvider> = {
   SMS: new SmsProvider(),

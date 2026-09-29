@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import prisma from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -47,9 +48,8 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({ success: true, subjects });
-  } catch (error: any) {
-    console.error('[API /api/subjects GET] Error:', error);
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/subjects GET');
   }
 }
 
@@ -118,12 +118,8 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ success: true, subject });
-  } catch (error: any) {
-    console.error('[API /api/subjects POST] Error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to create subject' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/subjects POST');
   }
 }
 

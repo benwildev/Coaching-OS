@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getTeachersList, createTeacher } from '@/lib/services/teacher.service';
 import { teacherSchema } from '@/lib/validations/teacher';
 
@@ -20,8 +21,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
-    console.error('[API /api/teachers GET] Error:', error);
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    return apiErrorResponse(error, '/api/teachers GET');
   }
 }
 
@@ -47,9 +47,7 @@ export async function POST(request: Request) {
 
     const teacher = await createTeacher(coachingCenterId, validated.data, user.userId);
     return NextResponse.json({ success: true, teacher }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/teachers POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to create teacher' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/teachers POST');
   }
 }

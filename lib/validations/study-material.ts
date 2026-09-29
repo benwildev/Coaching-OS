@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { hasBangla, hasEnglish } from '../format';
+import { resourceUrl } from './common';
 
 export const MATERIAL_TYPES = ['PDF', 'VIDEO', 'IMAGE', 'DOCUMENT', 'NOTE', 'LINK'] as const;
 export const MATERIAL_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
@@ -23,17 +24,6 @@ const optionalBanglaText = z
     message: 'Bangla field must not contain English characters (বাংলায় লিখুন)',
   })
   .transform((v) => (v ? v : null));
-
-/** http(s) URL or a site-relative path (e.g. "/uploads/..."). Nothing else. */
-const resourceUrl = z
-  .string()
-  .trim()
-  .optional()
-  .nullable()
-  .transform((v) => (v ? v : null))
-  .refine((v) => v === null || /^https?:\/\/\S+$/i.test(v) || /^\/[^\s/][^\s]*$/.test(v), {
-    message: 'Must be an http(s) URL or a site-relative path',
-  });
 
 /**
  * A material must point somewhere: every type except NOTE needs a resource

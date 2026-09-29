@@ -20,6 +20,9 @@ export async function GET(request: Request) {
       dateFrom: sp.get('dateFrom') || undefined,
       dateTo: sp.get('dateTo') || undefined,
       search: sp.get('search') || undefined,
+      guardianId: sp.get('guardianId') || undefined,
+      studentId: sp.get('studentId') || undefined,
+      branchId: sp.get('branchId') || undefined,
     });
     return NextResponse.json({ success: true, ...result });
   } catch (error) {

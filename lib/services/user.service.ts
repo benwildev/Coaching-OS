@@ -175,6 +175,14 @@ export async function updateUserStatus(
   const updated = await prisma.user.update({
     where: { id: userId, coachingCenterId },
     data: { status, sessionVersion: { increment: 1 } },
+    select: {
+      id: true,
+      email: true,
+      phone: true,
+      name: true,
+      banglaName: true,
+      status: true,
+    },
   });
 
   await recordAuditLog({

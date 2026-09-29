@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess, assertTeacherSelfAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getTeacherAttendanceHistory, recordTeacherAttendance } from '@/lib/services/attendance.service';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
 import { teacherAttendanceSchema } from '@/lib/validations/attendance';
@@ -33,10 +34,8 @@ export async function GET(request: Request, props: { params: Promise<{ teacherId
 
     const history = await getTeacherAttendanceHistory(coachingCenterId, teacherId);
     return NextResponse.json({ success: true, history });
-  } catch (error: any) {
-    console.error('[API /api/attendance/teacher/[teacherId] GET] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 401;
-    return NextResponse.json({ success: false, error: error.message || 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/attendance/teacher/[teacherId] GET');
   }
 }
 
@@ -71,9 +70,7 @@ export async function POST(request: Request, props: { params: Promise<{ teacherI
 
     const record = await recordTeacherAttendance(coachingCenterId, validated.data, user.userId);
     return NextResponse.json({ success: true, record });
-  } catch (error: any) {
-    console.error('[API /api/attendance/teacher/[teacherId] POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to record teacher attendance' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/attendance/teacher/[teacherId] POST');
   }
 }

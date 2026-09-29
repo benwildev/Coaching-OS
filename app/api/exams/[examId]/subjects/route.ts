@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { addExamSubject } from '@/lib/services/exam.service';
 import { addExamSubjectSchema } from '@/lib/validations/exam';
 import prisma from '@/lib/db';
@@ -41,7 +42,7 @@ export async function GET(
     if (error.message?.startsWith('FORBIDDEN')) {
       return NextResponse.json({ success: false, error: error.message }, { status: 403 });
     }
-    return NextResponse.json({ success: false, error: error.message || 'Internal server error' }, { status: 500 });
+    return apiErrorResponse(error, '/api/exams/[examId]/subjects GET');
   }
 }
 
@@ -80,9 +81,7 @@ export async function POST(
     );
 
     return NextResponse.json({ success: true, examSubject }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/exams/[examId]/subjects POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to add exam subject' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/exams/[examId]/subjects POST');
   }
 }

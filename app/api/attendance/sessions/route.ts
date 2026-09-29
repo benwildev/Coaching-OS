@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertTeacherSelfAccess, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getOrCreateAttendanceSession, getAttendanceSessionDetail } from '@/lib/services/attendance.service';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
 import { getOrCreateSessionSchema } from '@/lib/validations/attendance';
@@ -43,9 +44,7 @@ export async function POST(request: Request) {
     const detail = await getAttendanceSessionDetail(coachingCenterId, session.id);
 
     return NextResponse.json({ success: true, ...detail }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/attendance/sessions POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to open attendance session' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/attendance/sessions POST');
   }
 }

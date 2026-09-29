@@ -1,18 +1,15 @@
-import prisma from '@/lib/db';
 import { dispatchToGuardian } from './communication.service';
 import { notifyPortalAccountsForEvent } from './portal-notification.service';
 import { DEFAULT_EVENT_COPY, type NotificationEvent, type TemplateVariable } from '@/lib/notifications/events';
 import { interpolate } from './template-interpolation';
+import { resolveNotificationRecipients } from './notification-policy.service';
 
 /**
- * Notifies every notification-enabled guardian of one student for a given
- * event. Shared by the attendance/fee/exam/material event hooks so the
- * "find this student's reachable guardians" logic lives in exactly one
- * place (AGENTS.md §9/§17).
+ * Notifies recipients of one student for a given event, governed by the
+ * center's NotificationAlertPolicy.
  *
- * Also mirrors the event as an in-app Notification for the student's and
- * each guardian's PortalAccount, when one exists (Phase 9) — no new
- * event-detection logic, just a second delivery surface for the same event.
+ * Checks which recipients (STUDENT, GUARDIAN) and which channels (IN_APP,
+ * SMS, WHATSAPP, EMAIL) are permitted by policy before dispatching.
  */
 export async function notifyStudentGuardians(params: {
   coachingCenterId: string;
@@ -24,46 +21,60 @@ export async function notifyStudentGuardians(params: {
   sourceType?: string | null;
   sourceId?: string | null;
 }): Promise<void> {
-  const links = await prisma.studentGuardian.findMany({
-    where: { studentId: params.studentId, canReceiveNotifications: true },
-    select: { guardianId: true },
+  const resolved = await resolveNotificationRecipients({
+    coachingCenterId: params.coachingCenterId,
+    notificationType: params.event,
+    context: { studentId: params.studentId },
   });
 
-  for (const link of links) {
-    await dispatchToGuardian({
-      coachingCenterId: params.coachingCenterId,
-      branchId: params.branchId,
-      guardianId: link.guardianId,
-      studentId: params.studentId,
-      event: params.event,
-      vars: params.vars,
-      triggeredById: params.triggeredById,
-      sourceType: params.sourceType,
-      sourceId: params.sourceId,
-    });
+  if (resolved.length === 0) {
+    // Entire notification event is disabled by policy or has no recipients enabled
+    return;
   }
 
   const copy = DEFAULT_EVENT_COPY[params.event];
-  const title = interpolate(copy.en.title, params.vars);
-  const body = interpolate(copy.en.body, params.vars);
+  const title = copy ? interpolate(copy.en.title, params.vars) : params.event;
+  const body = copy ? interpolate(copy.en.body, params.vars) : '';
 
-  await notifyPortalAccountsForEvent({
-    coachingCenterId: params.coachingCenterId,
-    studentId: params.studentId,
-    type: params.event,
-    title,
-    body,
-    sourceType: params.sourceType,
-    sourceId: params.sourceId,
-  });
-  for (const link of links) {
-    // Phase 10.5: studentId included — this whole function is always about
-    // one specific student, so a guardian with several children (e.g. two
-    // kids in the same exam/batch, giving the same sourceId) must get a
-    // separate notification per child instead of only the first one.
+  const guardianTargets = resolved.filter((r) => r.recipientType === 'GUARDIAN');
+  const studentTarget = resolved.find((r) => r.recipientType === 'STUDENT');
+
+  // 1. Process Guardian notifications if enabled in policy
+  for (const target of guardianTargets) {
+    const hasExternal = target.channels.some((c) => c === 'SMS' || c === 'WHATSAPP' || c === 'EMAIL');
+    if (hasExternal) {
+      await dispatchToGuardian({
+        coachingCenterId: params.coachingCenterId,
+        branchId: params.branchId,
+        guardianId: target.recipientId,
+        studentId: params.studentId,
+        event: params.event,
+        vars: params.vars,
+        triggeredById: params.triggeredById,
+        sourceType: params.sourceType,
+        sourceId: params.sourceId,
+        allowedChannels: target.channels,
+      });
+    }
+
+    if (target.channels.includes('IN_APP')) {
+      await notifyPortalAccountsForEvent({
+        coachingCenterId: params.coachingCenterId,
+        guardianId: target.recipientId,
+        studentId: params.studentId,
+        type: params.event,
+        title,
+        body,
+        sourceType: params.sourceType,
+        sourceId: params.sourceId,
+      });
+    }
+  }
+
+  // 2. Process Student in-app portal notification if enabled in policy
+  if (studentTarget && studentTarget.channels.includes('IN_APP')) {
     await notifyPortalAccountsForEvent({
       coachingCenterId: params.coachingCenterId,
-      guardianId: link.guardianId,
       studentId: params.studentId,
       type: params.event,
       title,

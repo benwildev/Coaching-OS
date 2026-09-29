@@ -129,6 +129,16 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
   const attendanceWindowStart = new Date(today.getTime() - 35 * DAY_MS);
   const resultsWindowStart = new Date(today.getTime() - 120 * DAY_MS);
 
+  // Phase 11: `students`/`enrollments` below are deliberately NOT date-windowed
+  // — `studentsAtMonthEnd` (further down) needs every currently-ACTIVE
+  // student's admission date, however long ago it was, to reconstruct past
+  // month-end headcounts; a rolling window would silently undercount older
+  // students in the chart. DASHBOARD_ROW_SAFETY_CAP is only a defensive
+  // ceiling against pathological unbounded growth over a center's lifetime —
+  // it is not expected to be reached by any real tenant and does not change
+  // the numbers below unless it is.
+  const DASHBOARD_ROW_SAFETY_CAP = 20000;
+
   const [
     center,
     students,
@@ -152,10 +162,12 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
     prisma.student.findMany({
       where: { coachingCenterId: cc, ...(scopedStudentIds ? { id: { in: scopedStudentIds } } : {}) },
       select: { id: true, name: true, status: true, createdAt: true },
+      take: DASHBOARD_ROW_SAFETY_CAP,
     }),
     prisma.studentEnrollment.findMany({
       where: { coachingCenterId: cc, ...studentScope },
       select: { studentId: true, admissionDate: true, academicClass: { select: { name: true } } },
+      take: DASHBOARD_ROW_SAFETY_CAP,
     }),
     prisma.batch.findMany({
       where: { coachingCenterId: cc, status: 'ACTIVE', ...(classId ? { academicClassId: classId } : {}) },

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { hasBangla, hasEnglish, toEnglishNumeral } from '../format';
+import { isHttpOrRelativeUrl, RESOURCE_URL_MESSAGE } from './common';
 
 /**
  * Normalizes a Bangladeshi phone number into canonical 11-digit format (01XXXXXXXXX)
@@ -107,7 +108,7 @@ export const admissionSchema = z.object({
       message: 'Invalid Bangladeshi mobile number (must be 01XXXXXXXXX or +8801XXXXXXXXX)',
     }),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
-  photoUrl: z.string().optional().or(z.literal('')),
+  photoUrl: z.string().optional().or(z.literal('')).refine(isHttpOrRelativeUrl, { message: RESOURCE_URL_MESSAGE }),
   address: z.string().optional().or(z.literal('')),
   permanentAddress: z.string().optional().or(z.literal('')),
   schoolName: z.string().optional().or(z.literal('')),
@@ -285,7 +286,7 @@ export const studentUpdateSchema = z.object({
       message: 'Invalid Bangladeshi mobile number',
     }),
   email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
-  photoUrl: z.string().optional().nullable().or(z.literal('')),
+  photoUrl: z.string().optional().nullable().or(z.literal('')).refine(isHttpOrRelativeUrl, { message: RESOURCE_URL_MESSAGE }),
   address: z.string().optional().nullable().or(z.literal('')),
   permanentAddress: z.string().optional().nullable().or(z.literal('')),
   schoolName: z.string().optional().nullable().or(z.literal('')),

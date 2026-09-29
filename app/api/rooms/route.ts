@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getRoomsList, createRoom } from '@/lib/services/room.service';
 import { roomSchema } from '@/lib/validations/room';
 
@@ -12,8 +13,8 @@ export async function GET(request: Request) {
     // Phase 10.5: previously trusted ?branch= verbatim.
     const rooms = await getRoomsList(coachingCenterId, resolveEffectiveBranchId(user, searchParams.get('branch') || undefined));
     return NextResponse.json({ success: true, rooms });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/rooms GET');
   }
 }
 
@@ -35,9 +36,7 @@ export async function POST(request: Request) {
 
     const room = await createRoom(coachingCenterId, validated.data, user.userId);
     return NextResponse.json({ success: true, room }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/rooms POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to create room' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/rooms POST');
   }
 }

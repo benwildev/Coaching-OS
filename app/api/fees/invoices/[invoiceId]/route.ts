@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getInvoiceById, updateInvoice } from '@/lib/services/invoice.service';
 import { invoiceUpdateSchema } from '@/lib/validations/invoice';
 
@@ -14,9 +15,8 @@ export async function GET(request: Request, props: { params: Promise<{ invoiceId
     if (!invoice) return NextResponse.json({ success: false, error: 'Invoice not found' }, { status: 404 });
     assertBranchAccess(user, invoice.branchId);
     return NextResponse.json({ success: true, invoice });
-  } catch (error: any) {
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 401;
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/invoices/[invoiceId] GET');
   }
 }
 
@@ -41,9 +41,7 @@ export async function PUT(request: Request, props: { params: Promise<{ invoiceId
 
     const invoice = await updateInvoice(coachingCenterId, invoiceId, validated.data, user.userId);
     return NextResponse.json({ success: true, invoice });
-  } catch (error: any) {
-    console.error('[API /api/fees/invoices/[invoiceId] PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update invoice' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/invoices/[invoiceId] PUT');
   }
 }

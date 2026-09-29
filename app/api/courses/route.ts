@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getCoursesList, createCourse } from '@/lib/services/course.service';
 import { courseSchema } from '@/lib/validations/course';
 
@@ -22,8 +23,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
-    console.error('[API /api/courses GET] Error:', error);
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    return apiErrorResponse(error, '/api/courses GET');
   }
 }
 
@@ -43,9 +43,7 @@ export async function POST(request: Request) {
 
     const course = await createCourse(coachingCenterId, validated.data, user.userId);
     return NextResponse.json({ success: true, course }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/courses POST] Error:', error);
-    const status = error.message === 'FORBIDDEN' ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to create course' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/courses POST');
   }
 }

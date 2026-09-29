@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getRoomById, updateRoom } from '@/lib/services/room.service';
 import { roomUpdateSchema } from '@/lib/validations/room';
 
@@ -14,9 +15,8 @@ export async function GET(request: Request, props: { params: Promise<{ roomId: s
     // Phase 10.5: previously no branch check at all.
     assertBranchAccess(user, room.branchId);
     return NextResponse.json({ success: true, room });
-  } catch (error: any) {
-    const status = error?.message === 'FORBIDDEN_BRANCH' ? 403 : 401;
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/rooms/[roomId] GET');
   }
 }
 
@@ -47,9 +47,7 @@ export async function PUT(request: Request, props: { params: Promise<{ roomId: s
 
     const room = await updateRoom(coachingCenterId, roomId, validated.data, user.userId);
     return NextResponse.json({ success: true, room });
-  } catch (error: any) {
-    console.error('[API /api/rooms/[roomId] PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update room' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/rooms/[roomId] PUT');
   }
 }

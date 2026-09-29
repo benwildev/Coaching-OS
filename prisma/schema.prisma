@@ -123,6 +123,21 @@ enum DayOfWeek {
   SATURDAY
 }
 
+enum NotificationRecipientType {
+  STUDENT
+  GUARDIAN
+  TEACHER
+  ADMIN
+}
+
+enum NotificationDeliveryChannel {
+  IN_APP
+  SMS
+  WHATSAPP
+  EMAIL
+  PUSH
+}
+
 // ==========================================
 // CORE TENANT & ORGANIZATION
 // ==========================================
@@ -191,6 +206,10 @@ model CoachingCenter {
   subscriptions           Subscription[]
   studentIdSequences      StudentIdSequence[]
   portalAccounts          PortalAccount[]
+  cashSessions            CashSession[]
+  communicationProviderConfigs CommunicationProviderConfig[]
+  certificates            Certificate[]
+  notificationPolicies    NotificationPolicy[]
 
   @@map("coaching_centers")
 }
@@ -232,6 +251,8 @@ model Branch {
   homeworks               Homework[]
   notices                 Notice[]
   communicationLogs       CommunicationLog[]
+  cashSessions            CashSession[]
+  certificates            Certificate[]
 
   @@unique([coachingCenterId, code])
   @@map("branches")
@@ -291,6 +312,10 @@ model User {
   createdCommunicationTemplates CommunicationTemplate[]  @relation("CommunicationTemplateCreatedBy")
   triggeredCommunicationLogs    CommunicationLog[]       @relation("CommunicationLogTriggeredBy")
   notificationPreferences       NotificationPreference[]
+  openedCashSessions            CashSession[]            @relation("CashSessionOpenedBy")
+  closedCashSessions            CashSession[]            @relation("CashSessionClosedBy")
+  updatedProviderConfigs        CommunicationProviderConfig[] @relation("CommunicationProviderConfigUpdatedBy")
+  issuedCertificates            Certificate[]            @relation("CertificateIssuedBy")
 
   @@unique([coachingCenterId, email])
   @@index([coachingCenterId, phone])
@@ -625,12 +650,41 @@ model Student {
   notifications              Notification[]
   homeworkSubmissions        HomeworkSubmission[]
   guardianNotificationsAbout Notification[]         @relation("NotificationGuardianStudent")
+  certificates               Certificate[]
 
   @@unique([coachingCenterId, studentIdCode])
   @@index([coachingCenterId, phone])
   @@index([coachingCenterId, branchId])
   @@index([coachingCenterId, status])
   @@map("students")
+}
+
+// Phase 10.10: an issued certificate's stable, reprintable identity. Content
+// (student name, class, branding, etc.) is always rendered live from
+// Student/StudentEnrollment/BrandingSetting at view/reprint time — only the
+// number/type/date/issuer are persisted here, so a reprint always shows
+// current official details under the same permanent certificate number.
+// Numbering reuses the existing FinancialSequence atomic-upsert pattern
+// (type: 'CERTIFICATE') rather than a new sequence table.
+model Certificate {
+  id                String   @id @default(uuid())
+  coachingCenterId String
+  branchId          String?
+  studentId         String
+  type              String // ENROLLMENT, COMPLETION, CHARACTER
+  certificateNumber String // e.g. CERT-2026-000001
+  issueDate         DateTime @default(now())
+  issuedById        String?
+  createdAt         DateTime @default(now())
+
+  coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  student        Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  branch         Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  issuedBy       User?          @relation("CertificateIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+
+  @@unique([coachingCenterId, certificateNumber])
+  @@index([coachingCenterId, studentId])
+  @@map("certificates")
 }
 
 model StudentIdSequence {
@@ -1328,6 +1382,7 @@ model Payment {
   @@index([coachingCenterId, paymentDate])
   @@index([coachingCenterId, status])
   @@index([coachingCenterId, branchId])
+  @@index([coachingCenterId, collectedById])
   @@map("payments")
 }
 
@@ -1352,6 +1407,38 @@ model PaymentRefund {
   @@index([coachingCenterId])
   @@index([paymentId])
   @@map("payment_refunds")
+}
+
+// Phase 10.9: shift-less, one-per-branch-per-day cash reconciliation. Not a
+// generalized POS/till system — just enough to answer "does the physical
+// cash drawer match what the system recorded today." Never recomputes
+// expectedCash after close, and never silently adjusts a nonzero difference
+// to force balance — a discrepancy stays visible in the record forever.
+model CashSession {
+  id               String    @id @default(uuid())
+  coachingCenterId String
+  branchId         String
+  businessDate     DateTime  @db.Date // Dhaka calendar date this session covers
+  status           String    @default("OPEN") // OPEN, CLOSED
+  openingCash      Decimal   @db.Decimal(10, 2)
+  openedById       String?
+  openedAt         DateTime  @default(now())
+  countedCash      Decimal?  @db.Decimal(10, 2) // "actual" cash counted at close
+  expectedCash     Decimal?  @db.Decimal(10, 2) // snapshot computed at close time
+  difference       Decimal?  @db.Decimal(10, 2) // countedCash - expectedCash
+  note             String?   @db.Text // required when difference != 0
+  closedById       String?
+  closedAt         DateTime?
+  createdAt        DateTime  @default(now())
+
+  coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  openedBy       User?          @relation("CashSessionOpenedBy", fields: [openedById], references: [id], onDelete: SetNull)
+  closedBy       User?          @relation("CashSessionClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+
+  @@unique([coachingCenterId, branchId, businessDate])
+  @@index([coachingCenterId, status])
+  @@map("cash_sessions")
 }
 
 // Tenant-scoped, transaction-safe sequence counter for human-readable
@@ -1850,6 +1937,30 @@ model Notification {
   @@map("notifications")
 }
 
+// Per-tenant provider credentials, settable from the Communication Settings
+// UI. `credentialsEncrypted` is a single AES-256-GCM-encrypted JSON blob
+// (see lib/services/crypto.service.ts) — the plaintext fields are
+// channel-specific (e.g. SMS: apiKey/senderId/baseUrl) and are never
+// returned by any API response once saved. When no row exists for a given
+// (coachingCenterId, channel), providers fall back to the server-side env
+// vars documented in .env.example — this is additive to, not a replacement
+// for, that Phase 10.8 convention.
+model CommunicationProviderConfig {
+  id                   String               @id @default(uuid())
+  coachingCenterId     String
+  channel              CommunicationChannel
+  credentialsEncrypted String               @db.Text
+  updatedById          String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  updatedBy      User?          @relation("CommunicationProviderConfigUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([coachingCenterId, channel])
+  @@map("communication_provider_configs")
+}
+
 model CommunicationTemplate {
   id               String               @id @default(uuid())
   coachingCenterId String
@@ -1894,6 +2005,19 @@ model CommunicationLog {
   sentAt            DateTime?
   createdAt         DateTime             @default(now())
   cost              Decimal?             @db.Decimal(5, 2)
+  // Phase 10.8: retry engine + richer delivery-status tracking. attemptCount
+  // starts at 0 (never attempted) and increments once per send/retry try.
+  // nextRetryAt is set only while a FAILED+retryable attempt is still under
+  // MAX_RETRY_ATTEMPTS; it is cleared once exhausted or non-retryable.
+  // deliveredAt/errorCode are set only by a provider result or delivery
+  // webhook — never guessed. retryable is null when not applicable (e.g. a
+  // channel that was SKIPPED never got a provider verdict at all).
+  attemptCount  Int       @default(0)
+  lastAttemptAt DateTime?
+  nextRetryAt   DateTime?
+  deliveredAt   DateTime?
+  errorCode     String?
+  retryable     Boolean?
 
   coachingCenter CoachingCenter         @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
   branch         Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
@@ -1908,6 +2032,7 @@ model CommunicationLog {
   @@index([coachingCenterId, createdAt])
   @@index([coachingCenterId, status])
   @@index([coachingCenterId, sourceType, sourceId])
+  @@index([status, nextRetryAt])
   @@map("communication_logs")
 }
 
@@ -1927,6 +2052,49 @@ model NotificationPreference {
 
   @@unique([userId, category])
   @@map("notification_preferences")
+}
+
+model NotificationPolicy {
+  id               String                        @id @default(uuid())
+  coachingCenterId String
+  notificationType String
+  isMandatory      Boolean                       @default(false)
+  isEnabled        Boolean                       @default(true)
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+
+  coachingCenter   CoachingCenter                @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  recipients       NotificationRecipientPolicy[]
+
+  @@unique([coachingCenterId, notificationType])
+  @@index([coachingCenterId])
+  @@map("notification_policies")
+}
+
+model NotificationRecipientPolicy {
+  id            String                      @id @default(uuid())
+  policyId      String
+  recipientType NotificationRecipientType
+  isEnabled     Boolean                     @default(true)
+  isMandatory   Boolean                     @default(false)
+
+  policy        NotificationPolicy          @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  channels      NotificationChannelPolicy[]
+
+  @@unique([policyId, recipientType])
+  @@map("notification_recipient_policies")
+}
+
+model NotificationChannelPolicy {
+  id                String                      @id @default(uuid())
+  recipientPolicyId String
+  channel           NotificationDeliveryChannel
+  isEnabled         Boolean                     @default(true)
+
+  recipientPolicy   NotificationRecipientPolicy @relation(fields: [recipientPolicyId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientPolicyId, channel])
+  @@map("notification_channel_policies")
 }
 
 // ==========================================
@@ -2036,4 +2204,26 @@ model Subscription {
   plan           SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@map("subscriptions")
+}
+
+// ==========================================
+// PHASE 11: RATE LIMITING (no Redis — fixed-window counters in Postgres)
+// ==========================================
+
+// Not tenant-scoped: rate limiting must apply before we know which tenant
+// (or whether any) the caller belongs to (e.g. the login endpoint itself).
+// `key` carries its own scope, e.g. "login:203.0.113.5". Concurrent requests
+// in the same window increment the same row via an atomic upsert — never a
+// read-then-write race, matching every other counter pattern in this schema
+// (FinancialSequence, cash session close, payment overpayment guard).
+model RateLimitBucket {
+  id          String   @id @default(uuid())
+  key         String
+  windowStart DateTime
+  count       Int      @default(1)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([key, windowStart])
+  @@index([windowStart])
+  @@map("rate_limit_buckets")
 }

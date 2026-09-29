@@ -16,6 +16,31 @@ export function interpolate(template: string, vars: Partial<Record<TemplateVaria
   });
 }
 
+const HTML_ESCAPE_MAP: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+
+export function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char]);
+}
+
+/**
+ * Renders a fully-interpolated message for use as an email HTML body.
+ * CommunicationTemplate bodies are plain text by contract (no intentional
+ * markup — schema stores them as plain @db.Text), so it's safe and simplest
+ * to HTML-escape the entire rendered string (guarding against injected
+ * markup from any interpolated value, e.g. a guardian/student name) rather
+ * than trying to distinguish "trusted template text" from "escaped values"
+ * at the placeholder level. Newlines become <br> for basic HTML rendering.
+ */
+export function interpolateHtml(template: string, vars: Partial<Record<TemplateVariable, string>>): string {
+  return escapeHtml(interpolate(template, vars)).replace(/\n/g, '<br>');
+}
+
 export const SAMPLE_TEMPLATE_VARIABLES: Record<TemplateVariable, string> = {
   studentName: 'Rahim Uddin',
   guardianName: 'Karim Uddin',
@@ -29,4 +54,7 @@ export const SAMPLE_TEMPLATE_VARIABLES: Record<TemplateVariable, string> = {
   noticeTitle: 'Notice: Class Reschedule for Eid Holiday',
   batchName: 'HSC Physics Morning',
   subjectName: 'Physics',
+  className: 'Class 11',
+  date: '30/09/2026',
+  time: '10:00 AM',
 };

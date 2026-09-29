@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import {
   getAcademicPrograms,
   getAcademicSessions,
@@ -24,8 +25,8 @@ export async function GET() {
       sessions,
       boards,
     });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/academic GET');
   }
 }
 
@@ -63,10 +64,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: false, error: 'Unknown entity type' }, { status: 400 });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Academic setup failed' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/academic POST');
   }
 }

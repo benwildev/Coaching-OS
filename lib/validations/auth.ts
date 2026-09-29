@@ -21,7 +21,7 @@ export const userCreateSchema = z.object({
   banglaName: z.string().optional(),
   email: z.string().email('Invalid email address'),
   phone: z.string().min(10, 'Valid Bangladesh phone number required (e.g. 01712345678)'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
   role: z.enum(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']),
   branchId: z.string().optional(),
 });

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { assignFeeToStudent, getStudentBranchId } from '@/lib/services/fee.service';
 import { studentFeeAssignSchema } from '@/lib/validations/fee';
 
@@ -26,9 +27,7 @@ export async function POST(request: Request, props: { params: Promise<{ studentI
 
     const assignment = await assignFeeToStudent(coachingCenterId, studentId, validated.data, user.userId);
     return NextResponse.json({ success: true, assignment }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/fees/students/[studentId]/assignments POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to assign fee' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/fees/students/[studentId]/assignments POST');
   }
 }

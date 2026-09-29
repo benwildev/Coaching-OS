@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import ChartCard from '@/components/ChartCard';
 import StatusBadge from '@/components/StatusBadge';
 import Icon from '@/components/Icon';
@@ -8,12 +9,20 @@ import FileUploadButton from '@/components/FileUploadButton';
 import { useApp } from '@/lib/store';
 import { ROOM_STATUSES } from '@/lib/validations/room';
 
-const SECTIONS = [
+const SECTIONS: {
+  id: string;
+  label: string;
+  bnLabel: string;
+  href?: string;
+  badge?: string;
+}[] = [
   { id: 'profile', label: 'Centre Profile', bnLabel: 'সেন্টার প্রোফাইল' },
   { id: 'academic', label: 'Academic Setup', bnLabel: 'একাডেমিক সেটআপ' },
   { id: 'rooms', label: 'Rooms', bnLabel: 'কক্ষসমূহ' },
   { id: 'branding', label: 'Branding & Theme', bnLabel: 'ব্র্যান্ডিং ও থিম' },
   { id: 'users', label: 'Users & Permissions', bnLabel: 'ব্যবহারকারী ও অনুমতি' },
+  { id: 'notifications', label: 'Notification Policies', bnLabel: 'নোটিফিকেশন পলিসি', href: '/settings/notifications', badge: 'Alerts 🔔' },
+  { id: 'communication', label: 'SMS & Gateway', bnLabel: 'এসএমএস ও গেটওয়ে', href: '/settings/communication' },
   { id: 'region', label: 'Language & Region', bnLabel: 'ভাষা ও অঞ্চল' },
   { id: 'security', label: 'Security & Roles', bnLabel: 'নিরাপত্তা ও ভূমিকা' },
   { id: 'system', label: 'System Audit', bnLabel: 'সিস্টেম অডিট' },
@@ -417,20 +426,48 @@ export default function SettingsPage() {
     <div className="max-w-[1400px] mx-auto flex flex-col md:flex-row gap-5">
       {/* Settings Navigation Sidebar */}
       <div className="card p-3 md:w-64 shrink-0 flex flex-row md:flex-col gap-1 overflow-x-auto hs self-start">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setSec(s.id)}
-            className={`rounded-xl px-3 py-2.5 text-[13px] font-semibold text-left whitespace-nowrap transition-colors ${
-              sec === s.id
-                ? 'bg-[#063b78] text-white shadow-xs'
-                : 'text-[#092f63] hover:bg-[#eef3fa]'
-            }`}
-          >
-            <span>{s.label}</span>
-            <span className="block text-[11px] opacity-80 font-bangla">{s.bnLabel}</span>
-          </button>
-        ))}
+        {SECTIONS.map((s) => {
+          const isCurrent = sec === s.id;
+          const innerContent = (
+            <div className="flex items-center justify-between gap-1.5 w-full">
+              <div className="min-w-0">
+                <span className="block truncate">{s.label}</span>
+                <span className="block text-[11px] opacity-80 font-bangla truncate">{s.bnLabel}</span>
+              </div>
+              {s.badge && (
+                <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-black rounded-md bg-amber-100 text-amber-900 border border-amber-200">
+                  {s.badge}
+                </span>
+              )}
+            </div>
+          );
+
+          if (s.href) {
+            return (
+              <Link
+                key={s.id}
+                href={s.href}
+                className="rounded-xl px-3 py-2.5 text-[13px] font-semibold text-left whitespace-nowrap transition-colors text-[#092f63] hover:bg-[#eef3fa] flex items-center justify-between"
+              >
+                {innerContent}
+              </Link>
+            );
+          }
+
+          return (
+            <button
+              key={s.id}
+              onClick={() => setSec(s.id)}
+              className={`rounded-xl px-3 py-2.5 text-[13px] font-semibold text-left whitespace-nowrap transition-colors ${
+                isCurrent
+                  ? 'bg-[#063b78] text-white shadow-xs'
+                  : 'text-[#092f63] hover:bg-[#eef3fa]'
+              }`}
+            >
+              {innerContent}
+            </button>
+          );
+        })}
       </div>
 
       {/* Settings Content Area */}
@@ -1234,6 +1271,40 @@ export default function SettingsPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </ChartCard>
+        )}
+
+        {/* 9. Notification Policies */}
+        {sec === 'notifications' && (
+          <ChartCard title="Notification Policies & Alert Control" subtitle="নিয়ন্ত্রণ করুন কোন অ্যালার্ট কার কাছে কোন মাধ্যমে যাবে">
+            <div className="p-6 flex flex-col items-start gap-4">
+              <p className="text-[13.5px] text-slate-600 max-w-xl leading-relaxed">
+                Configure centralized notification alert policies for Student, Guardian, Teacher, and Admin across In-App, SMS, WhatsApp, and Email channels. Mandatory alerts are locked to safeguard institutional compliance.
+              </p>
+              <Link
+                href="/settings/notifications"
+                className="btn btn-primary px-5 py-2.5 text-sm font-bold flex items-center gap-2 rounded-xl shadow-sm"
+              >
+                <span>Open Notification Policies Manager</span>
+              </Link>
+            </div>
+          </ChartCard>
+        )}
+
+        {/* 10. SMS & Communication Gateway */}
+        {sec === 'communication' && (
+          <ChartCard title="SMS & Communication Gateway" subtitle="এসএমএস প্রোভাইডার, ব্যালেন্স ও ডেলিভারি গেটওয়ে কনফিগারেশন">
+            <div className="p-6 flex flex-col items-start gap-4">
+              <p className="text-[13.5px] text-slate-600 max-w-xl leading-relaxed">
+                Connect and manage your SMS gateway (sms.net.bd, etc.), verify live account balance, inspect recent delivery reports, and configure credentials.
+              </p>
+              <Link
+                href="/settings/communication"
+                className="btn btn-primary px-5 py-2.5 text-sm font-bold flex items-center gap-2 rounded-xl shadow-sm"
+              >
+                <span>Open SMS & Gateway Settings</span>
+              </Link>
             </div>
           </ChartCard>
         )}

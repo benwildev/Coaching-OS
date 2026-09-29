@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertTeacherSelfAccess, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { markStudentAttendance, getAttendanceSessionDetail } from '@/lib/services/attendance.service';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
 import { markStudentSchema } from '@/lib/validations/attendance';
@@ -35,9 +36,7 @@ export async function PUT(
 
     const mark = await markStudentAttendance(coachingCenterId, sessionId, studentId, validated.data, user.userId);
     return NextResponse.json({ success: true, mark });
-  } catch (error: any) {
-    console.error('[API /api/attendance/sessions/[sessionId]/students/[studentId] PUT] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to mark attendance' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/attendance/sessions/[sessionId]/students/[studentId] PUT');
   }
 }

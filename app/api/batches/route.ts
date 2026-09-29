@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getBatchesList, createBatch } from '@/lib/services/batch.service';
 import { batchSchema } from '@/lib/validations/batch';
 
@@ -50,9 +51,7 @@ export async function POST(request: Request) {
 
     const batch = await createBatch(coachingCenterId, validated.data, user.userId);
     return NextResponse.json({ success: true, batch }, { status: 201 });
-  } catch (error: any) {
-    console.error('[API /api/batches POST] Error:', error);
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to create batch' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/batches POST');
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getEligibleStudents } from '@/lib/services/exam.service';
 
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,6 @@ export async function GET(request: Request) {
     if (error.message?.startsWith('FORBIDDEN')) {
       return NextResponse.json({ success: false, error: error.message }, { status: 403 });
     }
-    return NextResponse.json({ success: false, error: error.message || 'Internal server error' }, { status: 500 });
+    return apiErrorResponse(error, '/api/exams/eligible-students GET');
   }
 }

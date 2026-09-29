@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { seedStandardSubjectsForCenter } from '@/lib/services/academic.service';
 
 export const dynamic = 'force-dynamic';
@@ -20,11 +21,7 @@ export async function POST(request: Request) {
       createdCount: created.length,
       subjects: created,
     });
-  } catch (error: any) {
-    console.error('[API /api/subjects/seed POST] Error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to seed subjects' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return apiErrorResponse(error, '/api/subjects/seed POST');
   }
 }

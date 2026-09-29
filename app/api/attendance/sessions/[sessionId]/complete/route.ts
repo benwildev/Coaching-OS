@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertTeacherSelfAccess, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { completeAttendanceSession, getAttendanceSessionDetail } from '@/lib/services/attendance.service';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
 import { completeSessionSchema } from '@/lib/validations/attendance';
@@ -33,7 +34,6 @@ export async function POST(request: Request, props: { params: Promise<{ sessionI
     const session = await completeAttendanceSession(coachingCenterId, sessionId, validated.data.allowIncomplete, user.userId);
     return NextResponse.json({ success: true, session });
   } catch (error: any) {
-    console.error('[API /api/attendance/sessions/[sessionId]/complete POST] Error:', error);
     if (error.message === 'UNMARKED_STUDENTS') {
       return NextResponse.json(
         {
@@ -45,7 +45,6 @@ export async function POST(request: Request, props: { params: Promise<{ sessionI
         { status: 409 }
       );
     }
-    const status = error.message?.startsWith('FORBIDDEN') ? 403 : 400;
-    return NextResponse.json({ success: false, error: error.message || 'Failed to complete attendance' }, { status });
+    return apiErrorResponse(error, '/api/attendance/sessions/[sessionId]/complete POST');
   }
 }

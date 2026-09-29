@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isValidBdPhone } from './student';
 import { hasBangla, hasEnglish } from '../format';
+import { isHttpOrRelativeUrl, RESOURCE_URL_MESSAGE } from './common';
 
 export const TEACHER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 
@@ -41,7 +42,7 @@ export const teacherSchema = z.object({
   designation: z.string().trim().max(100).optional().or(z.literal('')),
   qualification: z.string().trim().max(200).optional().or(z.literal('')),
   bio: z.string().trim().max(1000).optional().or(z.literal('')),
-  photoUrl: z.string().trim().optional().or(z.literal('')),
+  photoUrl: z.string().trim().optional().or(z.literal('')).refine(isHttpOrRelativeUrl, { message: RESOURCE_URL_MESSAGE }),
   status: z.enum(TEACHER_STATUSES).default('ACTIVE'),
   joiningDate: z
     .string()

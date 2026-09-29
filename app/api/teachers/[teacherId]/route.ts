@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import { getTeacherById, updateTeacher, getTeacherByUserId } from '@/lib/services/teacher.service';
 import { teacherUpdateSchema } from '@/lib/validations/teacher';
 
@@ -31,9 +32,8 @@ export async function GET(request: Request, props: { params: Promise<{ teacherId
     }
 
     return NextResponse.json({ success: true, teacher });
-  } catch (error: any) {
-    const status = error?.message === 'FORBIDDEN_BRANCH' ? 403 : 401;
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/teachers/[teacherId] GET');
   }
 }
 
@@ -60,8 +60,7 @@ export async function PUT(request: Request, props: { params: Promise<{ teacherId
 
     const teacher = await updateTeacher(coachingCenterId, teacherId, validated.data, user.userId);
     return NextResponse.json({ success: true, teacher });
-  } catch (error: any) {
-    console.error('[API /api/teachers/[teacherId] PUT] Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to update teacher' }, { status: 400 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/teachers/[teacherId] PUT');
   }
 }
