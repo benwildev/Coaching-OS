@@ -115,6 +115,9 @@ export async function createAcademicClass(
   },
   userId?: string
 ) {
+  const program = await prisma.academicProgram.findFirst({ where: { id: data.academicProgramId, coachingCenterId } });
+  if (!program) throw new Error('ACADEMIC_PROGRAM_NOT_FOUND');
+
   const academicClass = await prisma.academicClass.create({
     data: {
       coachingCenterId,
@@ -148,6 +151,9 @@ export async function createAcademicGroup(
   },
   userId?: string
 ) {
+  const parentClass = await prisma.academicClass.findFirst({ where: { id: data.academicClassId, coachingCenterId } });
+  if (!parentClass) throw new Error('ACADEMIC_CLASS_NOT_FOUND');
+
   const group = await prisma.academicGroup.create({
     data: {
       coachingCenterId,

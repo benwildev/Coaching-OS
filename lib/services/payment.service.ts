@@ -51,7 +51,12 @@ export async function createPayment(
   // (coachingCenterId, idempotencyKey) unique index (caught below) is the
   // real safety net for two requests racing each other.
   if (idempotencyKey) {
-    const existing = await prisma.payment.findFirst({ where: { coachingCenterId, idempotencyKey }, include: { invoice: true } });
+    // Scoped to this invoiceId too, not just (coachingCenterId,
+    // idempotencyKey) — otherwise a key that collided with a payment made
+    // against a DIFFERENT invoice (a different branch/student) would be
+    // replayed back here, bypassing the branch check the caller already
+    // ran against THIS invoiceId.
+    const existing = await prisma.payment.findFirst({ where: { coachingCenterId, invoiceId, idempotencyKey }, include: { invoice: true } });
     if (existing) {
       return { payment: existing, invoice: existing.invoice, idempotentReplay: true as const };
     }
@@ -166,7 +171,13 @@ export async function createPayment(
     // failing this one (the DB unique index is the real safety net here;
     // the pre-check above only handles the non-concurrent common case).
     if (idempotencyKey && err instanceof Error && /Unique constraint/i.test(err.message) && /idempotencyKey/i.test(err.message)) {
-      const winner = await prisma.payment.findFirst({ where: { coachingCenterId, idempotencyKey }, include: { invoice: true } });
+      // The unique index is (coachingCenterId, idempotencyKey) only — but
+      // only treat this as a same-invoice replay when the winning row
+      // actually matches THIS invoiceId too. If the key collided with a
+      // payment made against a different invoice, that's a genuine
+      // client-side key-reuse bug, not a same-request race — surface the
+      // original error rather than handing back an unrelated invoice.
+      const winner = await prisma.payment.findFirst({ where: { coachingCenterId, invoiceId, idempotencyKey }, include: { invoice: true } });
       if (winner) return { payment: winner, invoice: winner.invoice, idempotentReplay: true as const };
     }
     throw err;
@@ -292,6 +303,15 @@ export async function getPaymentById(coachingCenterId: string, paymentId: string
  * Refunds part or all of a completed payment. The original Payment row is
  * never modified — a PaymentRefund row is added, and the payment's status
  * plus the invoice's paid/due totals are recalculated transactionally.
+ *
+ * Refund-balance safety: a cheap pre-check runs first (below), but the
+ * authoritative check happens INSIDE the transaction after taking a
+ * `SELECT ... FOR UPDATE` row lock on the payment — a second concurrent
+ * refund request for the same payment blocks until the first commits, then
+ * re-reads the now-updated sum of refunds before deciding whether its own
+ * amount still fits. Without this lock, two refunds racing on the same
+ * payment could both pass a stale "already refunded" check and together
+ * refund more than the payment ever collected.
  */
 export async function refundPayment(
   coachingCenterId: string,
@@ -313,6 +333,15 @@ export async function refundPayment(
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ amount: Prisma.Decimal }[]>`SELECT amount FROM payments WHERE id = ${paymentId} FOR UPDATE`;
+    if (locked.length === 0) throw new Error('PAYMENT_NOT_FOUND');
+    const refundedAgg = await tx.paymentRefund.aggregate({ where: { paymentId }, _sum: { amount: true } });
+    const refundedSoFar = n(refundedAgg._sum.amount);
+    const stillRefundable = n(locked[0].amount) - refundedSoFar;
+    if (input.amount > stillRefundable) {
+      throw new Error('Refund amount exceeds the refundable balance for this payment');
+    }
+
     const refund = await tx.paymentRefund.create({
       data: {
         coachingCenterId,
@@ -325,8 +354,8 @@ export async function refundPayment(
       },
     });
 
-    const totalRefundedNow = alreadyRefunded + input.amount;
-    const newPaymentStatus = totalRefundedNow >= n(payment.amount) ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+    const totalRefundedNow = refundedSoFar + input.amount;
+    const newPaymentStatus = totalRefundedNow >= n(locked[0].amount) ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
 
     await tx.payment.update({
       where: { id: paymentId },

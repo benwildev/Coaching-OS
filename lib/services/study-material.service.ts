@@ -3,8 +3,9 @@ import type { Prisma } from '@prisma/client';
 import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
 import { recordAuditLog } from './audit.service';
 import { resolveAcademicContext } from './academic.service';
-import { assertTeacherSubjectAccess, getTeacherAuthorizedSubjectIds } from './exam-result.service';
+import { assertTeacherSubjectAccess, getTeacherAuthorizedBatchSubjectPairs, getTeacherClassWideSubjectIds } from './exam-result.service';
 import { notifyStudentGuardians } from './guardian-notify.service';
+import { mapWithConcurrency } from '@/lib/utils/concurrency';
 import {
   checkMaterialResource,
   type CreateMaterialInput,
@@ -41,7 +42,7 @@ async function notifyMaterialPublished(
         })
       ).map((r) => r.studentId);
 
-  for (const studentId of studentIds) {
+  await mapWithConcurrency(studentIds, 10, async (studentId) => {
     await notifyStudentGuardians({
       coachingCenterId,
       branchId: material.branchId,
@@ -52,17 +53,22 @@ async function notifyMaterialPublished(
       sourceType: 'StudyMaterial',
       sourceId: material.id,
     });
-  }
+  });
 }
 
 export interface MaterialScope {
   coachingCenterId: string;
   user: SessionUser;
-  teacherSubjectIds: string[] | null;
+  teacherBatchSubjectPairs: { batchId: string; subjectId: string }[] | null;
+  teacherClassWideSubjectIds: string[] | null;
 }
 
 export async function resolveMaterialScope(coachingCenterId: string, user: SessionUser): Promise<MaterialScope> {
-  return { coachingCenterId, user, teacherSubjectIds: await getTeacherAuthorizedSubjectIds(coachingCenterId, user) };
+  const [teacherBatchSubjectPairs, teacherClassWideSubjectIds] = await Promise.all([
+    getTeacherAuthorizedBatchSubjectPairs(coachingCenterId, user),
+    getTeacherClassWideSubjectIds(coachingCenterId, user),
+  ]);
+  return { coachingCenterId, user, teacherBatchSubjectPairs, teacherClassWideSubjectIds };
 }
 
 function isBranchScoped(user: SessionUser) {
@@ -72,17 +78,29 @@ function isBranchScoped(user: SessionUser) {
 function materialVisibilityWhere(scope: MaterialScope): Prisma.StudyMaterialWhereInput {
   const and: Prisma.StudyMaterialWhereInput[] = [{ coachingCenterId: scope.coachingCenterId }];
   if (isBranchScoped(scope.user)) and.push({ OR: [{ branchId: scope.user.branchId }, { branchId: null }] });
-  if (scope.teacherSubjectIds) and.push({ subjectId: { in: scope.teacherSubjectIds } });
+  if (scope.teacherBatchSubjectPairs) {
+    // Batch-bound materials must match an exact (batch, subject) the
+    // teacher is assigned to; class-wide (batchId === null) materials fall
+    // back to the teacher's direct subject assignments only — a
+    // batch-specific assignment must not leak visibility into a DIFFERENT
+    // batch's materials just because the subject matches.
+    const or: Prisma.StudyMaterialWhereInput[] = scope.teacherBatchSubjectPairs.map((p) => ({ batchId: p.batchId, subjectId: p.subjectId }));
+    if (scope.teacherClassWideSubjectIds?.length) {
+      or.push({ batchId: null, subjectId: { in: scope.teacherClassWideSubjectIds } });
+    }
+    and.push(or.length ? { OR: or } : { id: { in: [] } });
+  }
   return { AND: and };
 }
 
 /**
  * Teacher subject authorization reuses the Phase 6 helper: a batch-bound
  * material needs an ACTIVE BatchTeacherAssignment for that batch + subject;
- * a class-wide material needs the subject in the teacher's scope.
+ * a class-wide material needs the subject in the teacher's class-wide
+ * (TeacherSubject) scope.
  */
 async function assertSubjectAuthorized(scope: MaterialScope, subjectId: string, batchId: string | null) {
-  if (!scope.teacherSubjectIds) return;
+  if (!scope.teacherBatchSubjectPairs) return;
   if (batchId) {
     try {
       await assertTeacherSubjectAccess(scope.coachingCenterId, scope.user, batchId, subjectId);
@@ -91,7 +109,7 @@ async function assertSubjectAuthorized(scope: MaterialScope, subjectId: string, 
     }
     return;
   }
-  if (!scope.teacherSubjectIds.includes(subjectId)) {
+  if (!scope.teacherClassWideSubjectIds?.includes(subjectId)) {
     throw new Error('MATERIAL_ACCESS_DENIED: you are not assigned to teach this subject');
   }
 }

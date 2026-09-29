@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant, requireRole } from '@/lib/auth/session';
+import { apiErrorResponse } from '@/lib/api-error';
 import prisma from '@/lib/db';
 import { normalizeBdPhone, isValidBdPhone } from '@/lib/validations/student';
 
@@ -7,9 +8,13 @@ export const dynamic = 'force-dynamic';
 
 const ALLOWED_ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
 
+function isBranchScoped(user: { role: string; branchId: string | null }) {
+  return user.role !== 'OWNER' && user.role !== 'ADMIN' && !!user.branchId;
+}
+
 export async function GET(request: Request) {
   try {
-    const { coachingCenterId } = await requireTenant();
+    const { coachingCenterId, user } = await requireTenant();
     await requireRole([...ALLOWED_ROLES]);
 
     const { searchParams } = new URL(request.url);
@@ -51,6 +56,22 @@ export async function GET(request: Request) {
       return NextResponse.json({ found: false, guardian: null });
     }
 
+    // Branch-locked staff must only see this guardian's children in their own
+    // branch — otherwise a phone-number lookup becomes a cross-branch PII
+    // oracle for every other child linked to the same guardian.
+    const visibleStudentGuardians = isBranchScoped(user)
+      ? guardian.studentGuardians.filter((sg) => sg.student.branch?.id === user.branchId)
+      : guardian.studentGuardians;
+
+    const childList = visibleStudentGuardians.map((sg) => ({
+      studentId: sg.student.id,
+      name: sg.student.name,
+      banglaName: sg.student.banglaName,
+      studentIdCode: sg.student.studentIdCode,
+      status: sg.student.status,
+      branchName: sg.student.branch?.name,
+    }));
+
     return NextResponse.json({
       found: true,
       guardian: {
@@ -65,27 +86,11 @@ export async function GET(request: Request) {
         address: guardian.address,
         relationship: guardian.relationship,
         preferredChannel: guardian.preferredChannel,
-        children: guardian.studentGuardians.map((sg) => ({
-          studentId: sg.student.id,
-          name: sg.student.name,
-          banglaName: sg.student.banglaName,
-          studentIdCode: sg.student.studentIdCode,
-          status: sg.student.status,
-          branchName: sg.student.branch?.name,
-        })),
-        students: guardian.studentGuardians.map((sg) => ({
-          studentId: sg.student.id,
-          name: sg.student.name,
-          banglaName: sg.student.banglaName,
-          studentIdCode: sg.student.studentIdCode,
-          status: sg.student.status,
-          branchName: sg.student.branch?.name,
-        })),
+        children: childList,
+        students: childList,
       },
     });
-  } catch (error: any) {
-    console.error('[API /api/guardians/lookup GET] Error:', error);
-    const status = error?.message === 'FORBIDDEN' ? 403 : 401;
-    return NextResponse.json({ error: error?.message || 'Unauthorized' }, { status });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/guardians/lookup GET');
   }
 }

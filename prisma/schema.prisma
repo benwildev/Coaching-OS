@@ -656,6 +656,7 @@ model Student {
   @@index([coachingCenterId, phone])
   @@index([coachingCenterId, branchId])
   @@index([coachingCenterId, status])
+  @@index([coachingCenterId, createdAt])
   @@map("students")
 }
 

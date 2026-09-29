@@ -162,6 +162,30 @@ export async function getTeacherAuthorizedSubjectIds(
 }
 
 /**
+ * A TEACHER's class-wide (batch-less) subject scope — TeacherSubject
+ * records only, not BatchTeacherAssignment. Used for resources that can be
+ * batch-bound OR class-wide (e.g. StudyMaterial.batchId === null): a
+ * class-wide resource isn't tied to any one batch, so the only thing that
+ * legitimately grants visibility is a direct subject assignment, not a
+ * specific batch's assignment. Returns null for OWNER/ADMIN/STAFF.
+ */
+export async function getTeacherClassWideSubjectIds(
+  coachingCenterId: string,
+  user: SessionUser
+): Promise<string[] | null> {
+  if (user.role !== 'TEACHER') return null;
+
+  const teacher = await prisma.teacher.findFirst({
+    where: { coachingCenterId, userId: user.userId },
+    select: { id: true },
+  });
+  if (!teacher) return [];
+
+  const teacherSubjects = await prisma.teacherSubject.findMany({ where: { teacherId: teacher.id }, select: { subjectId: true } });
+  return teacherSubjects.map((t) => t.subjectId);
+}
+
+/**
  * Result-read scope for a TEACHER, as a Result filter: exactly the rule
  * assertTeacherSubjectAccess applies to marks entry — a batch exam's subject
  * requires an ACTIVE BatchTeacherAssignment for that (batch, subject); a
@@ -169,6 +193,32 @@ export async function getTeacherAuthorizedSubjectIds(
  * Returns null for OWNER/ADMIN/STAFF (no teacher restriction). A teacher
  * with no profile/assignments gets a filter that matches nothing.
  */
+/**
+ * The exact (batchId, subjectId) pairs a TEACHER is actively assigned to
+ * teach — used anywhere visibility must be batch-scoped, not just
+ * subject-scoped (unlike getTeacherAuthorizedSubjectIds, which flattens
+ * away the batch and over-grants across every batch sharing that subject).
+ * Returns null for OWNER/ADMIN/STAFF (no teacher restriction).
+ */
+export async function getTeacherAuthorizedBatchSubjectPairs(
+  coachingCenterId: string,
+  user: SessionUser
+): Promise<{ batchId: string; subjectId: string }[] | null> {
+  if (user.role !== 'TEACHER') return null;
+
+  const teacher = await prisma.teacher.findFirst({
+    where: { coachingCenterId, userId: user.userId },
+    select: { id: true },
+  });
+  if (!teacher) return [];
+
+  const assignments = await prisma.batchTeacherAssignment.findMany({
+    where: { coachingCenterId, teacherId: teacher.id, status: 'ACTIVE' },
+    select: { batchId: true, subjectId: true },
+  });
+  return assignments;
+}
+
 export async function getTeacherResultAccessWhere(
   coachingCenterId: string,
   user: SessionUser

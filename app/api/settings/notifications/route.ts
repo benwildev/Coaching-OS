@@ -11,10 +11,15 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    // Personal notification preferences are every authenticated user's own
+    // to view/edit; the tenant-wide policy configuration and channel-setup
+    // status are admin-only settings — a TEACHER has no legitimate reason
+    // to read them and previously could, since this route had no role gate.
+    const isAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
     const [policies, preferences, channelsConfigured] = await Promise.all([
-      getNotificationPolicies(coachingCenterId),
+      isAdmin ? getNotificationPolicies(coachingCenterId) : Promise.resolve(undefined),
       getNotificationPreferences(coachingCenterId, user),
-      getCommunicationChannelConfiguredStatus(coachingCenterId),
+      isAdmin ? getCommunicationChannelConfiguredStatus(coachingCenterId) : Promise.resolve(undefined),
     ]);
     return NextResponse.json({
       success: true,

@@ -32,6 +32,12 @@ npx prisma generate
 
 There is currently **no automated `migrate deploy` step wired into any deploy pipeline** (no `vercel.json`, no CI workflow in this repo) — every schema migration is a deliberate, manually-run, gated step against the real database. This is a decision the deploying team should make explicitly (automatic migrate-on-deploy vs. manual gate) rather than leave implicit; as of this audit it is manual-only, which is the safer default for a financial/student-data system.
 
+**Phase 11 audit finding (MEDIUM, deploy-time risk, not a data-loss risk):** `20260928140000_phase10_5_data_integrity/migration.sql` adds new UNIQUE indexes to tables that may already hold rows (`payments(coachingCenterId, paymentMethod, transactionId)`, a partial unique index on `student_batches` for active membership) with no dedup step. If a genuine pre-existing duplicate exists in a target database, `migrate deploy` will fail atomically (not corrupt data) at that step. Before running `migrate deploy` against any database that predates this migration, check for duplicates first, e.g.:
+```sql
+SELECT "coachingCenterId", "paymentMethod", "transactionId", count(*) FROM payments WHERE "transactionId" IS NOT NULL GROUP BY 1,2,3 HAVING count(*) > 1;
+```
+This dev database had none — deploy succeeded clean — but a fresh production database seeded independently should be checked before its first deploy of this migration.
+
 ## 3. Build
 
 ```bash
@@ -44,7 +50,7 @@ npm start         # next start
 
 ## 4. Seed / Initial Setup
 
-There is no seeded "demo tenant" used in production. The real onboarding path is the `/setup` page → `POST /api/setup` → `completeInitialSetup()` (`lib/services/tenant.service.ts`), which creates the first coaching center, its main branch, the OWNER account, and (optionally) seeds standard SSC/HSC/Admission academic programs. `scripts/setup-admin-account.ts` and `scripts/seed-*.ts` are **development-only** convenience scripts hardcoded against a specific dev tenant code (`ACC`) — do not run them against production data.
+There is no seeded "demo tenant" used in production. The real onboarding path is the `/setup` page → `POST /api/setup` → `completeInitialSetup()` (`lib/services/tenant.service.ts`), which creates the first coaching center, its main branch, the OWNER account, and (optionally) seeds standard SSC/HSC/Admission academic programs. `scripts/setup-admin-account.ts` and `scripts/seed-*.ts` are **development-only** convenience scripts hardcoded against a specific dev tenant code (`ACC`) — do not run them against production data. `setup-admin-account.ts` (Phase 11 fix) now refuses to run at all unless `CONFIRM_DEV_SCRIPT=yes-reset-dev-passwords` is set, so it can no longer silently overwrite a real owner/admin password if `DATABASE_URL` is accidentally pointed at production.
 
 ## 5. Authentication
 
@@ -110,3 +116,7 @@ Both the staff (`coaching_os_session`) and portal (`coaching_os_portal_session`)
 **Explicit decisions the deploying team must make (not defects, just undecided):** automated vs. manual migration deploy (§2), Neon backup/PITR configuration (§9), which error-monitoring SDK to add (§10), domain/TLS setup (§13).
 
 **Known non-blocking gaps carried forward for future work:** orphaned Cloudinary media on replace/delete, the non-functional portal homework-upload button, SMS.BD/WhatsApp-template items already tracked since Phase 10.8, and the owner dashboard's data-fetching approach (functionally correct and bounded, but architecturally heavier than the reports module's SQL-aggregation style — see the Phase 11 completion report's Performance Findings for detail).
+
+**Re-audited this pass (a second Phase 11 security/production-readiness audit, independent of the one referenced above):** eight parallel read-only agents re-traced every Prisma call across tenant isolation, branch isolation, portal/teacher authorization, financial concurrency, communication/webhook/upload security, auth/cookies/headers, input validation/performance, and migrations/secrets. One CRITICAL (a refund-concurrency race that could let total refunds exceed a payment's amount) and several HIGH/MEDIUM cross-branch or cross-tenant gaps were found and fixed — see the corresponding Phase 11 completion report for the full list. Two items were deliberately left as **documented, deferred risk** rather than fixed in this pass, because both would require changing a helper used in ~100+ call sites without dedicated regression coverage for every affected flow:
+- `assertBranchAccess` is a no-op whenever the target resource's `branchId` is `null` (e.g. a student/invoice/payment with no branch assigned) — a branch-locked STAFF can act on such a resource even though it isn't in their own branch. This may be an intentional "unassigned = global" design choice; it has not been confirmed either way.
+- `enrollStudentsToExam` (`lib/services/exam.service.ts`) never checks the exam's branch — currently unreachable (no route calls it), so not exploitable today, but should get the same `assertBranchAccess` fix as `updateExamSubject`/`deleteExamSubject` before any route is added for it.

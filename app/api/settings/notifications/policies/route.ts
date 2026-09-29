@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requireRole } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getNotificationPolicies, updateNotificationPolicies } from '@/lib/services/notification-policy.service';
 import { z } from 'zod';
@@ -14,6 +14,7 @@ const updatePoliciesBodySchema = z.object({
 export async function GET() {
   try {
     const { coachingCenterId } = await requireTenant();
+    await requireRole(['OWNER', 'ADMIN']);
     const policies = await getNotificationPolicies(coachingCenterId);
     return NextResponse.json({ success: true, policies });
   } catch (error) {

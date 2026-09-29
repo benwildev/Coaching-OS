@@ -2,6 +2,21 @@ import prisma from '../lib/db';
 import { hashPassword } from '../lib/auth/password';
 import { authenticateByEmail } from '../lib/services/unified-auth.service';
 
+// Dev-only convenience script: resets a specific dev tenant's Owner/Admin
+// passwords to a hardcoded well-known value. Whatever DATABASE_URL is
+// active in the shell when this runs is what gets mutated — with no guard,
+// accidentally running this against a production connection string would
+// silently overwrite the real owner/admin's password. Require an explicit
+// opt-in every time, rather than trusting NODE_ENV (which isn't reliably
+// 'development' in every local setup).
+if (process.env.CONFIRM_DEV_SCRIPT !== 'yes-reset-dev-passwords') {
+  console.error(
+    'Refusing to run: this script resets a dev tenant\'s passwords to a hardcoded value.\n' +
+    'Re-run with CONFIRM_DEV_SCRIPT=yes-reset-dev-passwords only against a development database.'
+  );
+  process.exit(1);
+}
+
 async function main() {
   const center = await prisma.coachingCenter.findFirst({
     where: { code: 'ACC' },

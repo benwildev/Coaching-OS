@@ -12,10 +12,11 @@ export async function GET(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
     const { examId } = await params;
     const branchId = resolveEffectiveBranchId(user);
 
-    const exam = await getExamById(coachingCenterId, examId, branchId);
+    const exam = await getExamById(coachingCenterId, examId, branchId, user);
     return NextResponse.json({ success: true, exam });
   } catch (error: any) {
     console.error('[API /api/exams/[examId] GET] Error:', error);

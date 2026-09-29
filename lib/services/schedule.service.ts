@@ -252,6 +252,31 @@ function toDate(value?: string | null): Date | null {
   return value ? new Date(value) : null;
 }
 
+/**
+ * Verifies every id referenced by a ClassSchedule actually belongs to this
+ * tenant before it's persisted. `assertBranchAccess` alone only checks a
+ * branch-locked caller's own branch — it never verifies an id belongs to
+ * the caller's tenant at all, and OWNER/ADMIN (or any center-wide caller)
+ * bypass it entirely, so without this a valid cuid guessed/known from
+ * another tenant would be silently accepted by the database (plain FKs,
+ * no tenant-composite constraint).
+ */
+async function assertScheduleRefsBelongToTenant(
+  coachingCenterId: string,
+  input: Pick<ClassScheduleInput, 'branchId' | 'subjectId' | 'teacherId' | 'roomId'>
+) {
+  const [branch, subject, teacher, room] = await Promise.all([
+    prisma.branch.findFirst({ where: { id: input.branchId, coachingCenterId } }),
+    prisma.subject.findFirst({ where: { id: input.subjectId, coachingCenterId } }),
+    input.teacherId ? prisma.teacher.findFirst({ where: { id: input.teacherId, coachingCenterId } }) : null,
+    input.roomId ? prisma.room.findFirst({ where: { id: input.roomId, coachingCenterId } }) : null,
+  ]);
+  if (!branch) throw new Error('BRANCH_NOT_FOUND');
+  if (!subject) throw new Error('SUBJECT_NOT_FOUND');
+  if (input.teacherId && !teacher) throw new Error('TEACHER_NOT_FOUND');
+  if (input.roomId && !room) throw new Error('ROOM_NOT_FOUND');
+}
+
 export async function createClassSchedule(
   coachingCenterId: string,
   input: ClassScheduleInput,
@@ -259,6 +284,7 @@ export async function createClassSchedule(
 ) {
   const batch = await prisma.batch.findFirst({ where: { id: input.batchId, coachingCenterId } });
   if (!batch) throw new Error('BATCH_NOT_FOUND');
+  await assertScheduleRefsBelongToTenant(coachingCenterId, input);
 
   const effectiveStartDate = toDate(input.effectiveStartDate);
   const effectiveEndDate = toDate(input.effectiveEndDate);
@@ -319,6 +345,10 @@ export async function updateClassSchedule(
 ) {
   const existing = await prisma.classSchedule.findFirst({ where: { id: scheduleId, coachingCenterId } });
   if (!existing) throw new Error('SCHEDULE_NOT_FOUND');
+
+  const batch = await prisma.batch.findFirst({ where: { id: input.batchId, coachingCenterId } });
+  if (!batch) throw new Error('BATCH_NOT_FOUND');
+  await assertScheduleRefsBelongToTenant(coachingCenterId, input);
 
   const effectiveStartDate = toDate(input.effectiveStartDate);
   const effectiveEndDate = toDate(input.effectiveEndDate);

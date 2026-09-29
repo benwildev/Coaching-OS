@@ -1,14 +1,19 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requireRole } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { createTemplate, listTemplates, resolveCommunicationScope } from '@/lib/services/communication.service';
 import { communicationTemplateSchema } from '@/lib/validations/communication-template';
 
 export const dynamic = 'force-dynamic';
 
+// Templates carry the tenant's SMS/WhatsApp/Email message bodies — this is
+// communication configuration, not something a TEACHER needs to read.
+const TEMPLATE_ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
+
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requireRole([...TEMPLATE_ROLES]);
     const sp = new URL(request.url).searchParams;
     const scope = resolveCommunicationScope(coachingCenterId, user);
     const result = await listTemplates(scope, {
@@ -27,6 +32,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requireRole([...TEMPLATE_ROLES]);
     const body = await request.json().catch(() => null);
     const parsed = communicationTemplateSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

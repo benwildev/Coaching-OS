@@ -22,6 +22,11 @@ const TAG = `P105-${Date.now()}`;
 const PW = 'CorrectHorse9';
 let passed = 0;
 
+// assignStudentToBatch now takes a SessionUser to enforce branch access on
+// the enrolling student (Phase 11 fix) — these direct service calls run as
+// a center-wide OWNER, for whom assertBranchAccess is always a no-op.
+const OWNER_USER = { role: 'OWNER', branchId: null } as unknown as SessionUser;
+
 function ok(label: string) {
   passed += 1;
   console.log(`✔ ${label}`);
@@ -251,7 +256,7 @@ async function main() {
     ok('12. Student portal dashboard/timetable are real and honestly empty when there is no data');
 
     // Assign the portal student to batchA and verify the timetable now reflects it for real.
-    await assignStudentToBatch(cc, batchA.id, { studentId: spStudent.id, startDate: '2026-01-01', overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
+    await assignStudentToBatch(cc, OWNER_USER, batchA.id, { studentId: spStudent.id, startDate: '2026-01-01', overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
     const spTimetable2 = await get('/api/portal/student/timetable', spCookie);
     const entries2 = (spTimetable2.body as any).timetable as Array<{ subjectName: string }>;
     assert(entries2.some((x) => x.subjectName === subjectPhysics.name), 'after being assigned to a batch, the student’s real ClassSchedule rows appear in their timetable');
@@ -358,10 +363,10 @@ async function main() {
     const capStudent1 = await prisma.student.create({ data: { coachingCenterId: cc, branchId: a.branch.id, studentIdCode: `${TAG}-CAP1`, name: `${TAG} Cap1` } });
     const capStudent2 = await prisma.student.create({ data: { coachingCenterId: cc, branchId: a.branch.id, studentIdCode: `${TAG}-CAP2`, name: `${TAG} Cap2` } });
 
-    await assignStudentToBatch(cc, tinyBatch.id, { studentId: capStudent1.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
+    await assignStudentToBatch(cc, OWNER_USER, tinyBatch.id, { studentId: capStudent1.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
     let capacityRejected = false;
     try {
-      await assignStudentToBatch(cc, tinyBatch.id, { studentId: capStudent2.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
+      await assignStudentToBatch(cc, OWNER_USER, tinyBatch.id, { studentId: capStudent2.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
     } catch (err) {
       capacityRejected = err instanceof Error && err.message.startsWith('BATCH_FULL');
     }
@@ -373,8 +378,8 @@ async function main() {
     const raceStudent1 = await prisma.student.create({ data: { coachingCenterId: cc, branchId: a.branch.id, studentIdCode: `${TAG}-RACE1`, name: `${TAG} Race1` } });
     const raceStudent2 = await prisma.student.create({ data: { coachingCenterId: cc, branchId: a.branch.id, studentIdCode: `${TAG}-RACE2`, name: `${TAG} Race2` } });
     const raceResults = await Promise.allSettled([
-      assignStudentToBatch(cc, raceBatch.id, { studentId: raceStudent1.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id),
-      assignStudentToBatch(cc, raceBatch.id, { studentId: raceStudent2.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id),
+      assignStudentToBatch(cc, OWNER_USER, raceBatch.id, { studentId: raceStudent1.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id),
+      assignStudentToBatch(cc, OWNER_USER, raceBatch.id, { studentId: raceStudent2.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id),
     ]);
     const succeeded = raceResults.filter((r) => r.status === 'fulfilled').length;
     assert(succeeded === 1, `exactly one of two concurrent assignments to a capacity=1 batch succeeds (got ${succeeded})`);
@@ -386,8 +391,8 @@ async function main() {
     const multiStudent = await prisma.student.create({ data: { coachingCenterId: cc, branchId: a.branch.id, studentIdCode: `${TAG}-MULTI`, name: `${TAG} Multi` } });
     const nonConflictBatch = await prisma.batch.create({ data: { coachingCenterId: cc, branchId: a.branch.id, academicSessionId: a.session.id, academicProgramId: program.id, academicClassId: klass.id, name: `${TAG} NoConflict`, code: `${TAG}-NC`, status: 'ACTIVE', capacity: 40 } });
     await prisma.classSchedule.create({ data: { coachingCenterId: cc, branchId: a.branch.id, batchId: nonConflictBatch.id, subjectId: subjectChem.id, dayOfWeek: 'TUESDAY', startTime: '09:00', endTime: '10:00' } });
-    await assignStudentToBatch(cc, batchA.id, { studentId: multiStudent.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
-    await assignStudentToBatch(cc, nonConflictBatch.id, { studentId: multiStudent.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
+    await assignStudentToBatch(cc, OWNER_USER, batchA.id, { studentId: multiStudent.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
+    await assignStudentToBatch(cc, OWNER_USER, nonConflictBatch.id, { studentId: multiStudent.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
     ok('24. A student may legitimately join two batches whose schedules do not conflict');
 
     // Genuine schedule conflict rejected.
@@ -395,7 +400,7 @@ async function main() {
     await prisma.classSchedule.create({ data: { coachingCenterId: cc, branchId: a.branch.id, batchId: conflictBatch.id, subjectId: subjectChem.id, dayOfWeek: 'MONDAY', startTime: '09:00', endTime: '10:00' } }); // clashes with schedulePhysics (batchA, MONDAY 09:00-10:00)
     let conflictRejected = false;
     try {
-      await assignStudentToBatch(cc, conflictBatch.id, { studentId: multiStudent.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
+      await assignStudentToBatch(cc, OWNER_USER, conflictBatch.id, { studentId: multiStudent.id, overrideCapacity: false, overrideConflict: false } as any, a.owner.id);
     } catch (err) {
       conflictRejected = err instanceof Error && err.message.startsWith('SCHEDULE_CONFLICT');
     }

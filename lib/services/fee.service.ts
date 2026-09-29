@@ -189,10 +189,19 @@ export async function updateFeeStructure(
 }
 
 /** Options payload for fee structure / assignment / invoice creation screens. */
-export async function getFeeFormOptions(coachingCenterId: string) {
+/**
+ * `branchId` is the caller's resolved effective branch (from
+ * resolveEffectiveBranchId) — when set, the branches dropdown and the fee
+ * structure catalog are both scoped to that branch (plus center-wide/null
+ * structures), mirroring every other branch-locked list in the fees module.
+ * Without this, a branch-locked STAFF could see every other branch's name
+ * and priced fee catalog through this options endpoint even though the
+ * scoped list/detail endpoints correctly hide them.
+ */
+export async function getFeeFormOptions(coachingCenterId: string, branchId?: string) {
   const [branches, sessions, classes, courses, activeStructures] = await Promise.all([
     prisma.branch.findMany({
-      where: { coachingCenterId, status: 'ACTIVE' },
+      where: { coachingCenterId, status: 'ACTIVE', ...(branchId ? { id: branchId } : {}) },
       orderBy: { isMain: 'desc' },
       select: { id: true, name: true, banglaName: true, code: true, isMain: true },
     }),
@@ -212,7 +221,11 @@ export async function getFeeFormOptions(coachingCenterId: string) {
       select: { id: true, name: true, banglaName: true, fee: true },
     }),
     prisma.feeStructure.findMany({
-      where: { coachingCenterId, isActive: true },
+      where: {
+        coachingCenterId,
+        isActive: true,
+        ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}),
+      },
       orderBy: { name: 'asc' },
       select: {
         id: true,

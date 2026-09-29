@@ -77,6 +77,12 @@ export async function PUT(
       );
     }
 
+    // A branch-locked STAFF must not be able to relocate a student (or a
+    // new enrollment) to a branch outside their own, even though they're
+    // allowed to edit this particular student (checked above).
+    if (validated.data.branchId) assertBranchAccess(user, validated.data.branchId);
+    if (validated.data.newEnrollment?.branchId) assertBranchAccess(user, validated.data.newEnrollment.branchId);
+
     const student = await updateStudent(
       coachingCenterId,
       studentId,
@@ -97,7 +103,12 @@ export async function PUT(
     if (error?.message === 'UNAUTHORIZED') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    const msg = error?.message || 'Failed to update student profile';
+    // Known, safe-to-surface validation failures raised by updateStudent
+    // (e.g. duplicate studentIdCode) are short "CODE" or "CODE: detail"
+    // strings; anything else (a raw Prisma/db error) must not reach the
+    // client verbatim.
+    const raw = String(error?.message || '');
+    const msg = /^[A-Z][A-Z0-9_]+(:.*)?$/.test(raw) ? raw : 'Failed to update student profile';
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

@@ -52,6 +52,11 @@ export async function createUser(
     throw new Error('FORBIDDEN_OWNER_PROTECTED: Only an OWNER can create another OWNER account.');
   }
 
+  if (data.branchId) {
+    const branch = await prisma.branch.findFirst({ where: { id: data.branchId, coachingCenterId } });
+    if (!branch) throw new Error('BRANCH_NOT_FOUND');
+  }
+
   const existing = await prisma.user.findUnique({
     where: {
       coachingCenterId_email: {

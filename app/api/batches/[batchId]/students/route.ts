@@ -28,7 +28,7 @@ export async function POST(request: Request, props: { params: Promise<{ batchId:
       );
     }
 
-    const assignment = await assignStudentToBatch(coachingCenterId, batchId, validated.data, user.userId);
+    const assignment = await assignStudentToBatch(coachingCenterId, user, batchId, validated.data, user.userId);
     return NextResponse.json({ success: true, assignment }, { status: 201 });
   } catch (error: any) {
     const raw = String(error.message || '');

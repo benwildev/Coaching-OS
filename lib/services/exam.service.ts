@@ -1,6 +1,8 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
 import { notifyStudentGuardians } from './guardian-notify.service';
+import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import { assertTeacherSubjectAccess } from './exam-result.service';
 import {
   ALLOWED_STATUS_TRANSITIONS,
   EXAM_STATUS,
@@ -165,7 +167,7 @@ export async function getStudentExams(coachingCenterId: string, studentId: strin
 /**
  * Get detailed exam by ID with subjects, students, marks completion progress
  */
-export async function getExamById(coachingCenterId: string, examId: string, branchId?: string) {
+export async function getExamById(coachingCenterId: string, examId: string, branchId?: string, user?: SessionUser) {
   const where: any = { id: examId, coachingCenterId };
   if (branchId) where.branchId = branchId;
 
@@ -214,6 +216,23 @@ export async function getExamById(coachingCenterId: string, examId: string, bran
 
   if (!exam) {
     throw new Error('EXAM_NOT_FOUND');
+  }
+
+  // A TEACHER may only see per-student marks for subjects they're actually
+  // assigned to teach in this exam's batch — the same rule
+  // assertTeacherSubjectAccess enforces for marks entry/results-list.
+  // Without this, any TEACHER in the branch could read every other
+  // subject's per-student marksObtained through the exam-detail view.
+  if (user?.role === 'TEACHER') {
+    await Promise.all(
+      exam.examSubjects.map(async (es) => {
+        try {
+          await assertTeacherSubjectAccess(coachingCenterId, user, exam.batchId, es.subjectId);
+        } catch {
+          es.results = [];
+        }
+      })
+    );
   }
 
   // Calculate completion statistics per subject
@@ -749,6 +768,7 @@ export async function addExamSubject(
  */
 export async function updateExamSubject(
   coachingCenterId: string,
+  user: SessionUser,
   examId: string,
   examSubjectId: string,
   input: UpdateExamSubjectInput,
@@ -758,6 +778,7 @@ export async function updateExamSubject(
     where: { id: examId, coachingCenterId },
   });
   if (!exam) throw new Error('EXAM_NOT_FOUND');
+  assertBranchAccess(user, exam.branchId);
 
   if (exam.status === EXAM_STATUS.PUBLISHED) {
     throw new Error('CANNOT_UPDATE_PUBLISHED: Exam results are already published.');
@@ -800,6 +821,7 @@ export async function updateExamSubject(
  */
 export async function deleteExamSubject(
   coachingCenterId: string,
+  user: SessionUser,
   examId: string,
   examSubjectId: string,
   actorId: string
@@ -808,6 +830,7 @@ export async function deleteExamSubject(
     where: { id: examId, coachingCenterId },
   });
   if (!exam) throw new Error('EXAM_NOT_FOUND');
+  assertBranchAccess(user, exam.branchId);
 
   if (exam.status !== EXAM_STATUS.DRAFT && exam.status !== EXAM_STATUS.SCHEDULED) {
     throw new Error('CANNOT_DELETE_SUBJECT: Subjects can only be removed while exam is in DRAFT or SCHEDULED status.');

@@ -335,6 +335,7 @@ export async function replaceBatchSubjects(
  */
 export async function assignStudentToBatch(
   coachingCenterId: string,
+  user: SessionUser,
   batchId: string,
   input: StudentBatchAssignInput,
   actorId?: string
@@ -347,6 +348,11 @@ export async function assignStudentToBatch(
 
   const student = await prisma.student.findFirst({ where: { id: input.studentId, coachingCenterId } });
   if (!student) throw new Error('STUDENT_NOT_FOUND');
+  // A branch-locked STAFF is already checked against the target batch's
+  // branch by the caller (assertBranchAccess on batch.branchId) — this
+  // closes the other half: the student being enrolled must also be in
+  // that same branch, mirroring transferStudentBatch's existing pattern.
+  assertBranchAccess(user, student.branchId);
 
   // Phase 10.5: reject a genuine class-time clash with one of the
   // student's other active batches, unless explicitly overridden — a
@@ -414,15 +420,24 @@ export async function assignStudentToBatch(
 
 export async function updateStudentBatchAssignment(
   coachingCenterId: string,
+  user: SessionUser,
+  batchId: string,
   studentBatchId: string,
   input: StudentBatchUpdateInput,
   actorId?: string
 ) {
   const existing = await prisma.studentBatch.findFirst({
     where: { id: studentBatchId, coachingCenterId },
-    include: { batch: { select: { id: true, name: true } } },
+    include: { batch: { select: { id: true, name: true, branchId: true } } },
   });
   if (!existing) throw new Error('ASSIGNMENT_NOT_FOUND');
+  // The URL names a batchId separately from the studentBatchId being
+  // mutated — verify the assignment actually belongs to that batch (not
+  // just to this tenant), otherwise a branch-locked caller authorized
+  // against their own batch could reach an assignment row in a different
+  // batch/branch entirely.
+  if (existing.batchId !== batchId) throw new Error('ASSIGNMENT_NOT_FOUND');
+  assertBranchAccess(user, existing.batch.branchId);
 
   const updated = await prisma.studentBatch.update({
     where: { id: studentBatchId },
@@ -499,6 +514,7 @@ export async function assignTeacherToBatch(
 
 export async function updateBatchTeacherAssignment(
   coachingCenterId: string,
+  batchId: string,
   assignmentId: string,
   input: BatchTeacherUpdateInput,
   actorId?: string
@@ -507,6 +523,11 @@ export async function updateBatchTeacherAssignment(
     where: { id: assignmentId, coachingCenterId },
   });
   if (!existing) throw new Error('ASSIGNMENT_NOT_FOUND');
+  // Parent-child check: the assignment must actually belong to the batch
+  // named in the URL, not just to this tenant (defense-in-depth — both
+  // routes are currently OWNER/ADMIN-only, for whom assertBranchAccess is a
+  // no-op, but this closes the gap should either route's role ever widen).
+  if (existing.batchId !== batchId) throw new Error('ASSIGNMENT_NOT_FOUND');
 
   const updated = await prisma.batchTeacherAssignment.update({
     where: { id: assignmentId },

@@ -14,7 +14,7 @@ export async function PUT(
     const { coachingCenterId, user } = await requireTenant();
     await requireRole(['OWNER', 'ADMIN']);
 
-    const { assignmentId } = await props.params;
+    const { batchId, assignmentId } = await props.params;
     const body = await request.json();
     const validated = batchTeacherUpdateSchema.safeParse(body);
     if (!validated.success) {
@@ -24,7 +24,7 @@ export async function PUT(
       );
     }
 
-    const assignment = await updateBatchTeacherAssignment(coachingCenterId, assignmentId, validated.data, user.userId);
+    const assignment = await updateBatchTeacherAssignment(coachingCenterId, batchId, assignmentId, validated.data, user.userId);
     return NextResponse.json({ success: true, assignment });
   } catch (error) {
     return apiErrorResponse(error, '/api/batches/[batchId]/teachers/[assignmentId] PUT');

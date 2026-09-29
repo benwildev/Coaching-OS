@@ -418,6 +418,26 @@ async function main() {
     ok('21. Financial concurrency: concurrent overpayment race still admits exactly one winner (light re-confirmation)');
 
     // ----------------------------------------------------
+    // Scenario 30: Refund concurrency (Phase 11 fix — refundPayment.ts
+    // previously read the payment's already-refunded total outside any
+    // lock, so two concurrent refunds could together exceed the payment's
+    // own amount. Now a SELECT...FOR UPDATE row lock forces the second
+    // refund to re-read the post-first-commit total before deciding.)
+    // ----------------------------------------------------
+    const wonPayment = (raceResults.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<{ payment: { id: string } }>).value.payment;
+    const { refundPayment } = await import('../lib/services/payment.service');
+    const refundRaceResults = await Promise.allSettled([
+      refundPayment(cc, wonPayment.id, { amount: 400, reason: 'Race test A' } as any, a.owner.id),
+      refundPayment(cc, wonPayment.id, { amount: 400, reason: 'Race test B' } as any, a.owner.id),
+    ]);
+    const refundSuccesses = refundRaceResults.filter((r) => r.status === 'fulfilled').length;
+    assert(
+      refundSuccesses === 1,
+      `Scenario 30 failed: two concurrent 400 refunds against a 700 payment must not both succeed, got ${refundSuccesses} successes`
+    );
+    ok('30. Refund concurrency (Phase 11 fix): concurrent refunds against the same payment can never together exceed its amount');
+
+    // ----------------------------------------------------
     // Scenario 26: Rate limiting
     // ----------------------------------------------------
     const rateLimitIp = `198.51.100.${Math.floor(Math.random() * 200) + 1}`;
@@ -473,6 +493,74 @@ async function main() {
     });
     assert(s29Res.status === 400, `Scenario 29 failed: a javascript: URI in photoUrl must be rejected, got ${s29Res.status}: ${JSON.stringify(s29Res.body)}`);
     ok('29. photoUrl validation: a javascript:/arbitrary-scheme value is rejected, only http(s) or a relative path is accepted');
+
+    // ----------------------------------------------------
+    // Scenario 31: Guardian lookup branch scoping (Phase 11 fix —
+    // /api/guardians/lookup previously returned every linked child
+    // center-wide with no branch filter; a branch-locked STAFF could use a
+    // phone-number search as a cross-branch PII oracle).
+    // ----------------------------------------------------
+    const student3 = await prisma.student.create({
+      data: { coachingCenterId: cc, branchId: branchA2.id, studentIdCode: `${TAG}-S3`, name: `${TAG} Student Three`, phone: '01700000099' },
+    });
+    await prisma.studentGuardian.create({ data: { studentId: student3.id, guardianId: guardian1.id, relationship: 'Father', isPrimary: false, canReceiveNotifications: true, preferredChannel: 'SMS' } });
+    const s31StaffRes = await get(`/api/guardians/lookup?phone=${encodeURIComponent(guardian1.phone!)}`, staffA1Cookie);
+    const s31StaffChildIds = (s31StaffRes.body.guardian?.children ?? []).map((c: any) => c.studentId);
+    const s31OwnerRes = await get(`/api/guardians/lookup?phone=${encodeURIComponent(guardian1.phone!)}`, ownerCookie);
+    const s31OwnerChildIds = (s31OwnerRes.body.guardian?.children ?? []).map((c: any) => c.studentId);
+    assert(
+      s31StaffRes.status === 200 && s31StaffChildIds.includes(student1.id) && !s31StaffChildIds.includes(student3.id),
+      `Scenario 31 failed: branch-locked staff must see only branch A1's child, got ${JSON.stringify(s31StaffChildIds)}`
+    );
+    assert(
+      s31OwnerRes.status === 200 && s31OwnerChildIds.includes(student1.id) && s31OwnerChildIds.includes(student3.id),
+      `Scenario 31 failed: center-wide OWNER must see both children, got ${JSON.stringify(s31OwnerChildIds)}`
+    );
+    ok('31. Guardian lookup branch scoping (Phase 11 fix): a branch-locked STAFF sees only same-branch children, OWNER sees all');
+
+    // ----------------------------------------------------
+    // Scenario 32: Cross-branch enrollment blocked (Phase 11 fix —
+    // assignStudentToBatch previously never checked the enrolling
+    // student's own branch, only the target batch's).
+    // ----------------------------------------------------
+    const { assignStudentToBatch, createBatch } = await import('../lib/services/batch.service');
+    const academicProgram = await prisma.academicProgram.findFirstOrThrow({ where: { coachingCenterId: cc } });
+    const academicClass = await prisma.academicClass.findFirstOrThrow({ where: { coachingCenterId: cc, academicProgramId: academicProgram.id } });
+    const branchA1Batch = await createBatch(
+      cc,
+      { name: `${TAG} Branch A1 Batch`, code: `BA1-${Date.now().toString().slice(-4)}`, branchId: branchA1.id, academicSessionId: a.session.id, academicProgramId: academicProgram.id, academicClassId: academicClass.id, capacity: 30 } as any,
+      a.owner.id
+    );
+    const staffA1SessionUser = { role: 'STAFF', branchId: branchA1.id, userId: staffA1.id, coachingCenterId: cc } as any;
+    let s32Blocked = false;
+    try {
+      await assignStudentToBatch(cc, staffA1SessionUser, branchA1Batch.id, { studentId: student2.id, overrideConflict: true } as any, staffA1.id);
+    } catch (err) {
+      s32Blocked = err instanceof Error && err.message.startsWith('FORBIDDEN_BRANCH');
+    }
+    assert(s32Blocked, 'Scenario 32 failed: a branch-locked STAFF must not be able to enroll a foreign-branch student into their own batch');
+    ok('32. Cross-branch enrollment blocked (Phase 11 fix): assignStudentToBatch now checks the enrolling student\'s own branch too');
+
+    // ----------------------------------------------------
+    // Scenario 33: Fee options branch scoping (Phase 11 fix —
+    // /api/fees/options previously returned every branch's name and every
+    // active fee structure's amount center-wide, even to a branch-locked
+    // STAFF who cannot reach those records via the scoped endpoints).
+    // ----------------------------------------------------
+    const { createFeeStructure } = await import('../lib/services/fee.service');
+    const branchA2Structure = await createFeeStructure(
+      cc,
+      { name: `${TAG} Branch A2 Fee`, feeType: 'MONTHLY', amount: 5000, frequency: 'MONTHLY', branchId: branchA2.id, academicSessionId: a.session.id } as any,
+      a.owner.id
+    );
+    const s33Res = await get('/api/fees/options', staffA1Cookie);
+    const s33BranchIds = (s33Res.body.branches ?? []).map((b: any) => b.id);
+    const s33StructureIds = (s33Res.body.activeStructures ?? []).map((s: any) => s.id);
+    assert(
+      s33Res.status === 200 && s33BranchIds.every((id: string) => id === branchA1.id) && !s33StructureIds.includes(branchA2Structure.id),
+      `Scenario 33 failed: branch-locked staff must not see branch A2's name/fee structures, got branches=${JSON.stringify(s33BranchIds)} structures=${JSON.stringify(s33StructureIds)}`
+    );
+    ok('33. Fee options branch scoping (Phase 11 fix): a branch-locked STAFF no longer sees other branches\' names or fee catalog');
 
     console.log('\n========================================================');
     console.log(`PHASE 11 VERIFICATION COMPLETE (${passed} scenarios passed)`);

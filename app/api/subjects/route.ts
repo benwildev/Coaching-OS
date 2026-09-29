@@ -1,9 +1,18 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireTenant, requireRole } from '@/lib/auth/session';
-import { apiErrorResponse } from '@/lib/api-error';
+import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import prisma from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+const createSubjectSchema = z.object({
+  academicClassId: z.string().min(1),
+  academicGroupId: z.string().min(1).optional().or(z.literal('')),
+  name: z.string().trim().min(1).max(200),
+  banglaName: z.string().trim().max(200).optional().or(z.literal('')),
+  code: z.string().trim().min(1).max(30),
+});
 
 export async function GET(request: Request) {
   try {
@@ -59,15 +68,10 @@ export async function POST(request: Request) {
     // Phase 10.5: previously any authenticated tenant user (incl. TEACHER)
     // could create subjects; academic setup is an office-staff action.
     await requireRole(['OWNER', 'ADMIN', 'STAFF']);
-    const body = await request.json();
-    const { academicClassId, academicGroupId, name, banglaName, code } = body;
-
-    if (!academicClassId || !name?.trim() || !code?.trim()) {
-      return NextResponse.json(
-        { success: false, error: 'academicClassId, name, and code are required' },
-        { status: 400 }
-      );
-    }
+    const body = await request.json().catch(() => null);
+    const parsed = createSubjectSchema.safeParse(body);
+    if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);
+    const { academicClassId, academicGroupId, name, banglaName, code } = parsed.data;
 
     // Verify class belongs to this coaching center
     const targetClass = await prisma.academicClass.findFirst({

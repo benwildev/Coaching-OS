@@ -7,6 +7,7 @@ import { dispatchToGuardian } from './communication.service';
 import { resolveNoticeRecipients } from './notice-recipients.service';
 import { notifyPortalAccountsForEvent } from './portal-notification.service';
 import { resolveNotificationRecipients } from './notification-policy.service';
+import { mapWithConcurrency } from '@/lib/utils/concurrency';
 import { checkNoticeAudienceScope, type CreateNoticeInput, type NoticeFilterParams, type UpdateNoticeInput } from '@/lib/validations/notice';
 
 export interface NoticeScope {
@@ -36,6 +37,58 @@ function noticeVisibilityWhere(scope: NoticeScope): Prisma.NoticeWhereInput {
   const and: Prisma.NoticeWhereInput[] = [{ coachingCenterId: scope.coachingCenterId }];
   if (isBranchScoped(scope.user)) and.push({ OR: [{ branchId: scope.user.branchId }, { branchId: null }] });
   return { AND: and };
+}
+
+/**
+ * Verifies every academic/batch id a notice references actually belongs to
+ * this tenant. These are plain FK columns with no tenant-composite
+ * constraint at the DB level, and `assertBranchAccess` never checks
+ * anything but the branch — without this, any authenticated user (a
+ * TEACHER included, since POST /api/notices has no role restriction beyond
+ * audience) could target a foreign tenant's batch/class/group id and have
+ * its name disclosed back through the notice's own read views.
+ */
+async function assertNoticeRefsBelongToTenant(
+  coachingCenterId: string,
+  input: Pick<CreateNoticeInput, 'academicSessionId' | 'academicProgramId' | 'academicClassId' | 'academicGroupId' | 'batchId'>
+) {
+  const checks: Array<Promise<void>> = [];
+  if (input.academicSessionId) {
+    checks.push(
+      prisma.academicSession.findFirst({ where: { id: input.academicSessionId, coachingCenterId } }).then((r) => {
+        if (!r) throw new Error('ACADEMIC_SESSION_NOT_FOUND');
+      })
+    );
+  }
+  if (input.academicProgramId) {
+    checks.push(
+      prisma.academicProgram.findFirst({ where: { id: input.academicProgramId, coachingCenterId } }).then((r) => {
+        if (!r) throw new Error('ACADEMIC_PROGRAM_NOT_FOUND');
+      })
+    );
+  }
+  if (input.academicClassId) {
+    checks.push(
+      prisma.academicClass.findFirst({ where: { id: input.academicClassId, coachingCenterId } }).then((r) => {
+        if (!r) throw new Error('ACADEMIC_CLASS_NOT_FOUND');
+      })
+    );
+  }
+  if (input.academicGroupId) {
+    checks.push(
+      prisma.academicGroup.findFirst({ where: { id: input.academicGroupId, coachingCenterId } }).then((r) => {
+        if (!r) throw new Error('ACADEMIC_GROUP_NOT_FOUND');
+      })
+    );
+  }
+  if (input.batchId) {
+    checks.push(
+      prisma.batch.findFirst({ where: { id: input.batchId, coachingCenterId } }).then((r) => {
+        if (!r) throw new Error('BATCH_NOT_FOUND');
+      })
+    );
+  }
+  await Promise.all(checks);
 }
 
 function assertCanModify(scope: NoticeScope, notice: { createdById: string | null; branchId: string | null }) {
@@ -128,6 +181,7 @@ export async function createNotice(scope: NoticeScope, input: CreateNoticeInput)
 
   const branchId = input.branchId || (isBranchScoped(user) ? user.branchId! : null);
   assertBranchAccess(user, branchId);
+  await assertNoticeRefsBelongToTenant(coachingCenterId, input);
 
   const created = await prisma.notice.create({
     data: {
@@ -181,6 +235,7 @@ export async function updateNotice(scope: NoticeScope, noticeId: string, input: 
 
   const branchId = input.branchId || existing.branchId;
   assertBranchAccess(user, branchId);
+  await assertNoticeRefsBelongToTenant(coachingCenterId, input);
 
   await prisma.notice.update({
     where: { id: noticeId },
@@ -312,57 +367,67 @@ async function publishSideEffects(scope: NoticeScope, noticeId: string) {
     const allowsExternal = guardianTarget.channels.some((c) => c === 'SMS' || c === 'WHATSAPP' || c === 'EMAIL');
     const allowsInApp = guardianTarget.channels.includes('IN_APP');
 
-    for (const g of recipients.guardians) {
-      if (!notifiedGuardianIds.has(g.guardianId)) {
-        notifiedGuardianIds.add(g.guardianId);
+    const uniqueGuardians = recipients.guardians.filter((g) => {
+      if (notifiedGuardianIds.has(g.guardianId)) return false;
+      notifiedGuardianIds.add(g.guardianId);
+      return true;
+    });
 
-        if (allowsExternal) {
-          await dispatchToGuardian({
-            coachingCenterId: scope.coachingCenterId,
-            branchId: notice.branchId,
-            guardianId: g.guardianId,
-            studentId: g.studentId,
-            noticeId: notice.id,
-            event: 'NOTICE_PUBLISHED',
-            vars: { noticeTitle: notice.title },
-            triggeredById: scope.user.userId,
-            sourceType: 'Notice',
-            sourceId: notice.id,
-            allowedChannels: guardianTarget.channels,
-          });
-        }
-
-        if (allowsInApp) {
-          await notifyPortalAccountsForEvent({
-            coachingCenterId: scope.coachingCenterId,
-            guardianId: g.guardianId,
-            type: eventType,
-            title: notice.title,
-            body: notice.banglaTitle || notice.title,
-            actionUrl: `/portal/guardian/notices`,
-            sourceType: 'Notice',
-            sourceId: notice.id,
-          });
-        }
+    // Bounded fan-out: this can be every guardian in the center (a
+    // center-wide notice), so dispatching one at a time would hold the
+    // publish request open for recipients × per-item latency (a DB write
+    // plus, for SMS/WhatsApp/Email, an external provider call each); fully
+    // unbounded parallelism risks spiking DB connections/provider rate
+    // limits instead. 10 in flight balances both.
+    await mapWithConcurrency(uniqueGuardians, 10, async (g) => {
+      if (allowsExternal) {
+        await dispatchToGuardian({
+          coachingCenterId: scope.coachingCenterId,
+          branchId: notice.branchId,
+          guardianId: g.guardianId,
+          studentId: g.studentId,
+          noticeId: notice.id,
+          event: 'NOTICE_PUBLISHED',
+          vars: { noticeTitle: notice.title },
+          triggeredById: scope.user.userId,
+          sourceType: 'Notice',
+          sourceId: notice.id,
+          allowedChannels: guardianTarget.channels,
+        });
       }
-    }
-  }
 
-  if (studentTarget && studentTarget.channels.includes('IN_APP')) {
-    for (const g of recipients.guardians) {
-      if (!notifiedStudentIds.has(g.studentId)) {
-        notifiedStudentIds.add(g.studentId);
+      if (allowsInApp) {
         await notifyPortalAccountsForEvent({
           coachingCenterId: scope.coachingCenterId,
-          studentId: g.studentId,
+          guardianId: g.guardianId,
           type: eventType,
           title: notice.title,
           body: notice.banglaTitle || notice.title,
-          actionUrl: `/portal/student/notices`,
+          actionUrl: `/portal/guardian/notices`,
           sourceType: 'Notice',
           sourceId: notice.id,
         });
       }
-    }
+    });
+  }
+
+  if (studentTarget && studentTarget.channels.includes('IN_APP')) {
+    const uniqueStudents = recipients.guardians.filter((g) => {
+      if (notifiedStudentIds.has(g.studentId)) return false;
+      notifiedStudentIds.add(g.studentId);
+      return true;
+    });
+    await mapWithConcurrency(uniqueStudents, 10, async (g) => {
+      await notifyPortalAccountsForEvent({
+        coachingCenterId: scope.coachingCenterId,
+        studentId: g.studentId,
+        type: eventType,
+        title: notice.title,
+        body: notice.banglaTitle || notice.title,
+        actionUrl: `/portal/student/notices`,
+        sourceType: 'Notice',
+        sourceId: notice.id,
+      });
+    });
   }
 }

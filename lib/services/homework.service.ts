@@ -2,8 +2,9 @@ import prisma from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
 import { recordAuditLog } from './audit.service';
-import { assertTeacherSubjectAccess, getTeacherAuthorizedSubjectIds } from './exam-result.service';
+import { assertTeacherSubjectAccess, getTeacherAuthorizedBatchSubjectPairs } from './exam-result.service';
 import { notifyStudentGuardians } from './guardian-notify.service';
+import { mapWithConcurrency } from '@/lib/utils/concurrency';
 import type {
   CreateHomeworkInput,
   HomeworkFilterParams,
@@ -23,11 +24,11 @@ function isUniqueConstraintError(error: unknown): boolean {
 export interface HomeworkScope {
   coachingCenterId: string;
   user: SessionUser;
-  teacherSubjectIds: string[] | null;
+  teacherBatchSubjectPairs: { batchId: string; subjectId: string }[] | null;
 }
 
 export async function resolveHomeworkScope(coachingCenterId: string, user: SessionUser): Promise<HomeworkScope> {
-  return { coachingCenterId, user, teacherSubjectIds: await getTeacherAuthorizedSubjectIds(coachingCenterId, user) };
+  return { coachingCenterId, user, teacherBatchSubjectPairs: await getTeacherAuthorizedBatchSubjectPairs(coachingCenterId, user) };
 }
 
 function isBranchScoped(user: SessionUser) {
@@ -76,7 +77,13 @@ export async function getHomeworkAuthoringOptions(coachingCenterId: string, user
 function homeworkVisibilityWhere(scope: HomeworkScope): Prisma.HomeworkWhereInput {
   const and: Prisma.HomeworkWhereInput[] = [{ coachingCenterId: scope.coachingCenterId }];
   if (isBranchScoped(scope.user)) and.push({ branchId: scope.user.branchId! });
-  if (scope.teacherSubjectIds) and.push({ subjectId: { in: scope.teacherSubjectIds } });
+  if (scope.teacherBatchSubjectPairs) {
+    // Batch+subject scoped, not subject-only — a teacher assigned to Math
+    // in Batch A must not see Math homework in Batch B just because the
+    // subject matches.
+    const or = scope.teacherBatchSubjectPairs.map((p) => ({ batchId: p.batchId, subjectId: p.subjectId }));
+    and.push(or.length ? { OR: or } : { id: { in: [] } });
+  }
   return { AND: and };
 }
 
@@ -86,7 +93,7 @@ function homeworkVisibilityWhere(scope: HomeworkScope): Prisma.HomeworkWhereInpu
  * same as study-material.service.ts's assertSubjectAuthorized.
  */
 async function assertHomeworkSubjectAuthorized(scope: HomeworkScope, batchId: string, subjectId: string) {
-  if (!scope.teacherSubjectIds) return;
+  if (!scope.teacherBatchSubjectPairs) return;
   try {
     await assertTeacherSubjectAccess(scope.coachingCenterId, scope.user, batchId, subjectId);
   } catch {
@@ -175,7 +182,7 @@ async function notifyHomeworkPublished(
     })
   ).map((r) => r.studentId);
 
-  for (const studentId of studentIds) {
+  await mapWithConcurrency(studentIds, 10, async (studentId) => {
     await notifyStudentGuardians({
       coachingCenterId,
       branchId: hw.branchId,
@@ -186,7 +193,7 @@ async function notifyHomeworkPublished(
       sourceType: 'Homework',
       sourceId: hw.id,
     });
-  }
+  });
 }
 
 async function notifySubmissionReviewed(

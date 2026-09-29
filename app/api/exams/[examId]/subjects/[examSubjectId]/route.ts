@@ -30,6 +30,7 @@ export async function PUT(
 
     const updated = await updateExamSubject(
       coachingCenterId,
+      user,
       examId,
       examSubjectId,
       validated.data,
@@ -51,7 +52,7 @@ export async function DELETE(
     await requireRole(['OWNER', 'ADMIN', 'STAFF']);
     const { examId, examSubjectId } = await params;
 
-    await deleteExamSubject(coachingCenterId, examId, examSubjectId, user.userId);
+    await deleteExamSubject(coachingCenterId, user, examId, examSubjectId, user.userId);
     return NextResponse.json({ success: true });
   } catch (error) {
     return apiErrorResponse(error, '/api/exams/.../subjects/[examSubjectId] DELETE');

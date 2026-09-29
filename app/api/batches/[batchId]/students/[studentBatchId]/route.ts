@@ -30,7 +30,7 @@ export async function PUT(
       );
     }
 
-    const assignment = await updateStudentBatchAssignment(coachingCenterId, studentBatchId, validated.data, user.userId);
+    const assignment = await updateStudentBatchAssignment(coachingCenterId, user, batchId, studentBatchId, validated.data, user.userId);
     return NextResponse.json({ success: true, assignment });
   } catch (error) {
     return apiErrorResponse(error, '/api/batches/[batchId]/students/[studentBatchId] PUT');
