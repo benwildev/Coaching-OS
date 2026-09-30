@@ -167,11 +167,11 @@ export default function FeesOverviewPage() {
             <span>{dict.fees.newInvoice}</span>
           </Link>
           <Link
-            href="/fees/structures/new"
+            href="/courses"
             className="tb bg-white hover:bg-slate-50 border-[#dce5f0] hover:border-[#063b78] transition-all flex items-center gap-2 shadow-2xs"
           >
-            <Icon name="plus" size={15} />
-            <span>{dict.fees.newStructure}</span>
+            <Icon name="layers" size={15} />
+            <span>{dict.coursePricing.manageFees}</span>
           </Link>
         </div>
       </div>
@@ -337,7 +337,7 @@ export default function FeesOverviewPage() {
                 <p className="text-[12.5px] text-[#64748b]">
                   {lang === 'bn'
                     ? 'ফি ব্যবস্থাপনা, চালান ইস্যু ও আদায় সংক্রান্ত দ্রুত শর্টকাট'
-                    : 'Frequent workflows for invoicing, structures, and collections'}
+                    : 'Frequent workflows for invoicing, course fees, and collections'}
                 </p>
               </div>
             </div>
@@ -364,9 +364,9 @@ export default function FeesOverviewPage() {
                 </p>
               </Link>
 
-              {/* Action 2: New Fee Structure */}
+              {/* Action 2: Course Fees (course pricing lives on each course) */}
               <Link
-                href="/fees/structures/new"
+                href="/courses"
                 className="group p-4 rounded-xl border border-[#dce5f0] bg-[#fafcff] hover:bg-[#f3f7fc] hover:border-[#063b78] transition-all flex flex-col justify-between gap-3 shadow-2xs hover:-translate-y-0.5"
               >
                 <div className="flex items-center gap-3">
@@ -375,13 +375,13 @@ export default function FeesOverviewPage() {
                   </span>
                   <div className="min-w-0">
                     <h4 className="text-[13.5px] font-bold text-[#063b78] flex items-center gap-1">
-                      {dict.fees.newStructure}
+                      {dict.coursePricing.manageFees}
                       <Icon name="chevright" size={13} className="opacity-0 group-hover:opacity-100 transition-opacity" />
                     </h4>
                   </div>
                 </div>
                 <p className="text-[12px] text-[#64748b] leading-relaxed">
-                  {dict.fees.newStructureDesc}
+                  {dict.coursePricing.manageFeesDesc}
                 </p>
               </Link>
 
@@ -688,69 +688,25 @@ export default function FeesOverviewPage() {
                 </div>
               </div>
 
-              {/* Section: Active Fee Structures */}
+              {/* Section: Course Fees — pricing is configured on each course, not as a separate fee catalog */}
               <div className="card rounded-2xl bg-white border border-[#dce5f0] p-6 shadow-2xs flex flex-col">
                 <div className="flex items-center justify-between pb-3 border-b border-[#edf1f7]">
                   <h3 className="text-base font-bold text-[#063b78] flex items-center gap-2">
                     <Icon name="layers" size={17} className="text-[#063b78]" />
-                    {dict.fees.activeStructuresTitle}
+                    {dict.coursePricing.manageFees}
                   </h3>
-                  <Link
-                    href="/fees/structures"
-                    className="text-[12px] font-bold text-[#063b78] hover:underline"
-                  >
-                    {dict.fees.viewAllStructures} →
+                  <Link href="/courses" className="text-[12px] font-bold text-[#063b78] hover:underline">
+                    {dict.courses.title} →
                   </Link>
                 </div>
-
-                <div className="divide-y divide-[#edf1f7] mt-1">
-                  {!data?.activeStructures || data.activeStructures.length === 0 ? (
-                    <div className="py-8 text-center flex flex-col items-center justify-center">
-                      <p className="text-[13px] text-[#64748b]">
-                        {dict.fees.noActiveStructures}
-                      </p>
-                      <Link href="/fees/structures/new" className="tb mt-3 text-[12px]">
-                        <Icon name="plus" size={14} />
-                        <span>{dict.fees.newStructure}</span>
-                      </Link>
-                    </div>
-                  ) : (
-                    data.activeStructures.map((s) => (
-                      <div key={s.id} className="py-3 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <h4 className="text-[13px] font-bold text-[#063b78] truncate">
-                            {lang === 'bn' && s.banglaName ? s.banglaName : s.name}
-                          </h4>
-                          <div className="flex items-center gap-2 text-[11px] text-[#64748b] mt-0.5">
-                            <span className="uppercase font-semibold tracking-wider text-[#00509d]">
-                              {(dict.feeFrequency as any)[s.frequency] || s.frequency}
-                            </span>
-                            <span>•</span>
-                            <span>
-                              {lang === 'bn'
-                                ? `${toBanglaNumeral(s.assignmentsCount)} জন শিক্ষার্থীকে বরাদ্দ`
-                                : `${s.assignmentsCount} student(s) assigned`}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <span className="text-[13.5px] font-extrabold text-[#00296b] num">
-                            {formatBDT(s.amount, lang)}
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-[#edf1f7]">
+                <p className="text-[13px] text-[#64748b] mt-3 leading-relaxed">{dict.coursePricing.manageFeesDesc}</p>
+                <div className="mt-auto pt-4">
                   <Link
-                    href="/fees/structures/new"
+                    href="/courses"
                     className="tb w-full justify-center text-[12.5px] font-bold bg-[#fafcff] hover:bg-[#eef4fc]"
                   >
-                    <Icon name="plus" size={15} />
-                    <span>{dict.fees.newStructure}</span>
+                    <Icon name="layers" size={15} />
+                    <span>{dict.coursePricing.manageFees}</span>
                   </Link>
                 </div>
               </div>

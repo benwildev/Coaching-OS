@@ -73,6 +73,7 @@ export async function verifyPortalSessionToken(token: string): Promise<PortalSes
     });
     if (!account) return null;
     if (account.status !== 'ACTIVE') return null;
+    if (account.coachingCenter.status === 'SUSPENDED') return null;
     if (account.sessionVersion !== payload.sessionVersion) return null;
 
     return toPortalSessionUser(account);

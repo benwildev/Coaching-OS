@@ -4,6 +4,9 @@ import { assertBatchHasCapacity } from './batch.service';
 import { detectStudentBatchConflicts } from './schedule.service';
 import { generateInvoiceNumber } from './invoice.service';
 import { generateReceiptNumber } from './payment.service';
+import { loadCoursePricing } from './course-pricing.service';
+import { checkStudentLimit } from './subscription.service';
+import { allocateAdjustments, buildPricingLines, fromPaisa, toPaisa, type PricingLine } from '@/lib/course-pricing';
 import {
   type AdmissionInput,
   type StudentUpdateInput,
@@ -103,6 +106,76 @@ export async function generateStudentId(
  * discount/waiver handling, invoice generation, initial payment, and audit logging
  * within an atomic database transaction.
  */
+/**
+ * Resolves an existing admission result by (coachingCenterId, idempotencyKey).
+ * Used for deterministic idempotency replay so retries or concurrent submissions
+ * return the exact original student, enrollment, invoice, and payment without duplicates.
+ */
+export async function getAdmissionByIdempotencyKey(coachingCenterId: string, idempotencyKey: string) {
+  const enrollment = await prisma.studentEnrollment.findFirst({
+    where: { coachingCenterId, idempotencyKey },
+    include: {
+      student: {
+        include: {
+          branch: { select: { id: true, name: true, code: true } },
+          educationBoard: { select: { id: true, name: true, banglaName: true } },
+          studentGuardians: {
+            where: { isPrimary: true },
+            include: { guardian: true },
+            take: 1,
+          },
+          studentBatches: {
+            where: { status: 'ACTIVE' },
+            include: { batch: { select: { id: true, name: true, code: true } } },
+            take: 1,
+          },
+        },
+      },
+      academicSession: { select: { id: true, name: true } },
+      academicProgram: { select: { id: true, name: true, banglaName: true } },
+      academicClass: { select: { id: true, name: true, banglaName: true } },
+      academicGroup: { select: { id: true, name: true, banglaName: true } },
+      course: { select: { id: true, name: true, banglaName: true } },
+      branch: { select: { id: true, name: true } },
+    },
+  });
+  if (!enrollment) return null;
+
+  const student = enrollment.student;
+  const primaryGuardian = student.studentGuardians[0]?.guardian || null;
+  const assignedBatch = student.studentBatches[0]?.batch || null;
+
+  const feeAssignments = await prisma.studentFeeAssignment.findMany({
+    where: { coachingCenterId, studentId: student.id },
+    orderBy: { createdAt: 'asc' },
+  });
+  const invoice = await prisma.feeInvoice.findFirst({
+    where: { coachingCenterId, studentId: student.id },
+    orderBy: { createdAt: 'desc' },
+    include: { items: true },
+  });
+  const payment = invoice
+    ? await prisma.payment.findFirst({
+        where: { coachingCenterId, invoiceId: invoice.id },
+        orderBy: { createdAt: 'desc' },
+      })
+    : null;
+
+  return {
+    ...student,
+    enrollment,
+    primaryGuardian,
+    batch: assignedBatch,
+    feeAssignment: feeAssignments[0] || null,
+    feeAssignments,
+    invoice: invoice || null,
+    payment: payment || null,
+    receiptNumber: payment?.receiptNumber || null,
+    isDiscountPending: invoice?.notes?.includes('[PENDING_APPROVAL]') ?? false,
+    idempotentReplay: true,
+  };
+}
+
 export async function createStudentAdmission(
   coachingCenterId: string,
   rawInput: AdmissionInput,
@@ -111,8 +184,18 @@ export async function createStudentAdmission(
 ) {
   // Validate input
   const input = admissionSchema.parse(rawInput);
+  const admissionIdempotencyKey = input.idempotencyKey?.trim() || null;
 
-  return prisma.$transaction(async (tx) => {
+  // Admission Idempotency pre-check: if request was already committed, return the deterministic result
+  if (admissionIdempotencyKey) {
+    const existing = await getAdmissionByIdempotencyKey(coachingCenterId, admissionIdempotencyKey);
+    if (existing) {
+      return existing;
+    }
+  }
+
+  try {
+    return await prisma.$transaction(async (tx) => {
     // 1. Fetch tenant center info
     const center = await tx.coachingCenter.findUnique({
       where: { id: coachingCenterId },
@@ -122,6 +205,10 @@ export async function createStudentAdmission(
     if (!center) {
       throw new Error('TENANT_NOT_FOUND');
     }
+
+    // Phase 11.4: plan student limit, enforced under a per-tenant advisory lock
+    // inside this transaction so concurrent admissions cannot overshoot it.
+    await checkStudentLimit(tx, coachingCenterId);
 
     // 2. Verify branch exists and belongs to this tenant
     const branch = await tx.branch.findFirst({
@@ -356,6 +443,7 @@ export async function createStudentAdmission(
         admissionDate: input.admissionDate ? new Date(input.admissionDate) : new Date(),
         status: 'ENROLLED',
         remarks: input.remarks?.trim() || null,
+        idempotencyKey: admissionIdempotencyKey,
       },
     });
 
@@ -406,136 +494,183 @@ export async function createStudentAdmission(
     }
 
     // 11. Fee Assignment & Invoice (if requested)
-    let feeAssignment = null;
+    // Phase 11.2: fee lines come either from the selected course's Fee & Payment
+    // Plan (useCoursePricing — amounts are read server-side inside this
+    // transaction, never trusted from the client) or from the legacy single fee
+    // (feeStructureId / feeAmount). Either way each line becomes a snapshotted
+    // StudentFeeAssignment and one invoice item, so a later change to the course
+    // price cannot alter what this student owes.
+    type AssignmentRow = Prisma.StudentFeeAssignmentGetPayload<object>;
+    let feeAssignment: AssignmentRow | null = null;
+    const feeAssignments: AssignmentRow[] = [];
     let invoice = null;
     let isDiscountPending = false;
 
-    const hasFeeAssignment = Boolean(input.feeStructureId || (input.feeAmount !== undefined && input.feeAmount > 0));
+    const usingCoursePricing = input.useCoursePricing === true;
+    const hasFeeAssignment =
+      usingCoursePricing || Boolean(input.feeStructureId || (input.feeAmount !== undefined && input.feeAmount > 0));
 
     if (hasFeeAssignment) {
-      let originalAmount = 0;
-      let feeName = 'Admission Fee';
+      const admissionDate = input.admissionDate ? new Date(input.admissionDate) : new Date();
+      const invoiceDueDate = input.feeDueDate ? new Date(input.feeDueDate) : null;
       let feeStructureId: string | null = null;
+      let pricingCourseId: string | null = null;
+      let assignmentDescription: string | null = input.remarks || null;
+      let pricedLines: PricingLine[];
 
-      if (input.feeStructureId) {
-        const fs = await tx.feeStructure.findFirst({
-          where: { id: input.feeStructureId, coachingCenterId, isActive: true },
-        });
-        if (!fs) {
-          throw new Error('FEE_STRUCTURE_NOT_FOUND: Fee structure does not exist or is inactive');
+      if (usingCoursePricing) {
+        if (!input.courseId) {
+          throw new Error('COURSE_PRICING_REQUIRES_COURSE: Select a course to apply its Fee & Payment Plan');
         }
-        if (fs.branchId && fs.branchId !== input.branchId) {
-          throw new Error('CROSS_BRANCH_FEE_STRUCTURE: Fee structure belongs to another branch');
+        const pricing = await loadCoursePricing(tx, coachingCenterId, input.courseId);
+        if (!pricing) {
+          throw new Error('COURSE_NOT_FOUND: Course does not exist in this coaching center');
         }
-        if (fs.academicClassId && fs.academicClassId !== input.academicClassId) {
-          throw new Error('INCOMPATIBLE_FEE_STRUCTURE: Fee structure does not match student class');
+        const selectedOptional = [...new Set(input.optionalFeeIds ?? [])];
+        const validOptionalIds = new Set(
+          pricing.additionalFees.filter((f) => f.isActive && !f.isRequired).map((f) => f.id)
+        );
+        if (selectedOptional.some((id) => !validOptionalIds.has(id))) {
+          throw new Error('INVALID_OPTIONAL_FEE: Selected optional fee does not belong to this course or is not available');
         }
-        if (fs.courseId && input.courseId && fs.courseId !== input.courseId) {
-          throw new Error('INCOMPATIBLE_FEE_STRUCTURE: Fee structure does not match selected course');
+        pricedLines = buildPricingLines(pricing, selectedOptional);
+        if (pricedLines.length === 0) {
+          throw new Error('COURSE_PRICING_NOT_CONFIGURED: This course has no fee set. Set it in the course Fee & Payment Plan');
         }
-        originalAmount = input.feeAmount !== undefined ? input.feeAmount : Number(fs.amount);
-        feeName = input.feeName?.trim() || fs.name;
-        feeStructureId = fs.id;
+        pricingCourseId = pricing.course.id;
+        assignmentDescription = `Course: ${pricing.course.name}`;
       } else {
-        originalAmount = input.feeAmount!;
-        feeName = input.feeName?.trim() || 'Admission Fee';
+        let legacyAmount = 0;
+        let feeName = 'Admission Fee';
+
+        if (input.feeStructureId) {
+          const fs = await tx.feeStructure.findFirst({
+            where: { id: input.feeStructureId, coachingCenterId, isActive: true },
+          });
+          if (!fs) {
+            throw new Error('FEE_STRUCTURE_NOT_FOUND: Fee structure does not exist or is inactive');
+          }
+          if (fs.branchId && fs.branchId !== input.branchId) {
+            throw new Error('CROSS_BRANCH_FEE_STRUCTURE: Fee structure belongs to another branch');
+          }
+          if (fs.academicClassId && fs.academicClassId !== input.academicClassId) {
+            throw new Error('INCOMPATIBLE_FEE_STRUCTURE: Fee structure does not match student class');
+          }
+          if (fs.courseId && input.courseId && fs.courseId !== input.courseId) {
+            throw new Error('INCOMPATIBLE_FEE_STRUCTURE: Fee structure does not match selected course');
+          }
+          legacyAmount = input.feeAmount !== undefined ? input.feeAmount : Number(fs.amount);
+          feeName = input.feeName?.trim() || fs.name;
+          feeStructureId = fs.id;
+        } else {
+          legacyAmount = input.feeAmount!;
+          feeName = input.feeName?.trim() || 'Admission Fee';
+        }
+        pricedLines = [{ kind: 'COURSE_FEE', name: feeName, amount: legacyAmount, dueAfterDays: 0 }];
       }
 
+      const originalAmount = fromPaisa(pricedLines.reduce((s, l) => s + toPaisa(l.amount), 0));
       const reqDiscount = Math.max(0, input.discountAmount || 0);
       const reqWaiver = Math.max(0, input.waiverAmount || 0);
 
-      if (reqDiscount + reqWaiver > originalAmount) {
+      if (toPaisa(reqDiscount) + toPaisa(reqWaiver) > toPaisa(originalAmount)) {
         throw new Error('INVALID_DISCOUNT: Discount and waiver combined cannot exceed original fee amount');
       }
 
       // Discount & Waiver Authorization (OWNER vs Non-OWNER)
       const isOwner = actorRole === 'OWNER';
-      let appliedDiscount = 0;
-      let appliedWaiver = 0;
-      let finalAmount = originalAmount;
-
-      if (isOwner) {
-        appliedDiscount = reqDiscount;
-        appliedWaiver = reqWaiver;
-        finalAmount = Math.max(0, originalAmount - appliedDiscount - appliedWaiver);
-      } else if (reqDiscount > 0 || reqWaiver > 0) {
+      if (!isOwner && (reqDiscount > 0 || reqWaiver > 0)) {
         // Staff/Admin cannot silently apply discounts — obligation remains at originalAmount
         isDiscountPending = true;
-        finalAmount = originalAmount;
       }
+      const allocated = allocateAdjustments(pricedLines, isOwner ? reqDiscount : 0, isOwner ? reqWaiver : 0);
+      const appliedDiscount = fromPaisa(allocated.reduce((s, l) => s + toPaisa(l.discountAmount), 0));
+      const appliedWaiver = fromPaisa(allocated.reduce((s, l) => s + toPaisa(l.waiverAmount), 0));
+      const finalAmount = fromPaisa(allocated.reduce((s, l) => s + toPaisa(l.finalAmount), 0));
 
-      feeAssignment = await tx.studentFeeAssignment.create({
-        data: {
-          coachingCenterId,
-          branchId: input.branchId,
-          studentId: student.id,
-          feeStructureId,
-          batchId: input.batchId || null,
-          academicSessionId: input.academicSessionId,
-          name: feeName,
-          description: input.remarks || null,
-          originalAmount,
-          discountAmount: appliedDiscount,
-          waiverAmount: appliedWaiver,
-          finalAmount,
-          dueDate: input.feeDueDate ? new Date(input.feeDueDate) : null,
-          status: 'PENDING',
-          createdById: actorId,
-        },
-      });
+      for (const [idx, line] of allocated.entries()) {
+        const lineDue =
+          line.dueAfterDays > 0
+            ? new Date(admissionDate.getTime() + line.dueAfterDays * 24 * 60 * 60 * 1000)
+            : invoiceDueDate;
 
-      // Record discount/waiver history
-      if (isOwner) {
-        if (appliedDiscount > 0) {
-          await tx.feeDiscount.create({
-            data: {
-              coachingCenterId,
-              studentFeeAssignmentId: feeAssignment.id,
-              type: 'DISCOUNT',
-              amount: appliedDiscount,
-              reason: input.discountReason?.trim() || 'Approved by Owner at admission',
-              createdById: actorId,
-            },
-          });
-        }
-        if (appliedWaiver > 0) {
-          await tx.feeDiscount.create({
-            data: {
-              coachingCenterId,
-              studentFeeAssignmentId: feeAssignment.id,
-              type: 'WAIVER',
-              amount: appliedWaiver,
-              reason: input.discountReason?.trim() || 'Approved by Owner at admission',
-              createdById: actorId,
-            },
-          });
-        }
-      } else if (isDiscountPending) {
-        if (reqDiscount > 0) {
-          await tx.feeDiscount.create({
-            data: {
-              coachingCenterId,
-              studentFeeAssignmentId: feeAssignment.id,
-              type: 'DISCOUNT',
-              amount: reqDiscount,
-              reason: `[PENDING_APPROVAL: Requested by Staff] ${input.discountReason?.trim() || 'Admission discount request'}`,
-              createdById: actorId,
-            },
-          });
-        }
-        if (reqWaiver > 0) {
-          await tx.feeDiscount.create({
-            data: {
-              coachingCenterId,
-              studentFeeAssignmentId: feeAssignment.id,
-              type: 'WAIVER',
-              amount: reqWaiver,
-              reason: `[PENDING_APPROVAL: Requested by Staff] ${input.discountReason?.trim() || 'Admission waiver request'}`,
-              createdById: actorId,
-            },
-          });
+        const created = await tx.studentFeeAssignment.create({
+          data: {
+            coachingCenterId,
+            branchId: input.branchId,
+            studentId: student.id,
+            feeStructureId,
+            batchId: input.batchId || null,
+            courseId: pricingCourseId,
+            academicSessionId: input.academicSessionId,
+            name: line.name,
+            description: assignmentDescription,
+            originalAmount: line.amount,
+            discountAmount: line.discountAmount,
+            waiverAmount: line.waiverAmount,
+            finalAmount: line.finalAmount,
+            dueDate: lineDue,
+            status: 'PENDING',
+            createdById: actorId,
+          },
+        });
+        feeAssignments.push(created);
+
+        // Record discount/waiver history
+        if (isOwner) {
+          if (line.discountAmount > 0) {
+            await tx.feeDiscount.create({
+              data: {
+                coachingCenterId,
+                studentFeeAssignmentId: created.id,
+                type: 'DISCOUNT',
+                amount: line.discountAmount,
+                reason: input.discountReason?.trim() || 'Approved by Owner at admission',
+                createdById: actorId,
+              },
+            });
+          }
+          if (line.waiverAmount > 0) {
+            await tx.feeDiscount.create({
+              data: {
+                coachingCenterId,
+                studentFeeAssignmentId: created.id,
+                type: 'WAIVER',
+                amount: line.waiverAmount,
+                reason: input.discountReason?.trim() || 'Approved by Owner at admission',
+                createdById: actorId,
+              },
+            });
+          }
+        } else if (isDiscountPending && idx === 0) {
+          // The pending request is recorded once, against the first line, at the full requested amount.
+          if (reqDiscount > 0) {
+            await tx.feeDiscount.create({
+              data: {
+                coachingCenterId,
+                studentFeeAssignmentId: created.id,
+                type: 'DISCOUNT',
+                amount: reqDiscount,
+                reason: `[PENDING_APPROVAL: Requested by Staff] ${input.discountReason?.trim() || 'Admission discount request'}`,
+                createdById: actorId,
+              },
+            });
+          }
+          if (reqWaiver > 0) {
+            await tx.feeDiscount.create({
+              data: {
+                coachingCenterId,
+                studentFeeAssignmentId: created.id,
+                type: 'WAIVER',
+                amount: reqWaiver,
+                reason: `[PENDING_APPROVAL: Requested by Staff] ${input.discountReason?.trim() || 'Admission waiver request'}`,
+                createdById: actorId,
+              },
+            });
+          }
         }
       }
+      feeAssignment = feeAssignments[0];
 
       // Generate Invoice
       const invoiceNumber = await generateInvoiceNumber(tx, coachingCenterId);
@@ -549,8 +684,8 @@ export async function createStudentAdmission(
           branchId: input.branchId,
           studentId: student.id,
           invoiceNumber,
-          invoiceDate: input.admissionDate ? new Date(input.admissionDate) : new Date(),
-          dueDate: input.feeDueDate ? new Date(input.feeDueDate) : null,
+          invoiceDate: admissionDate,
+          dueDate: invoiceDueDate,
           subtotalAmount: originalAmount,
           discountAmount: appliedDiscount,
           waiverAmount: appliedWaiver,
@@ -561,17 +696,15 @@ export async function createStudentAdmission(
           notes: invoiceNotes,
           createdById: actorId,
           items: {
-            create: [
-              {
-                studentFeeAssignmentId: feeAssignment.id,
-                description: feeName,
-                quantity: 1,
-                unitAmount: originalAmount,
-                discountAmount: appliedDiscount,
-                amount: finalAmount,
-                displayOrder: 0,
-              },
-            ],
+            create: allocated.map((line, idx) => ({
+              studentFeeAssignmentId: feeAssignments[idx].id,
+              description: line.name,
+              quantity: 1,
+              unitAmount: line.amount,
+              discountAmount: line.discountAmount,
+              amount: line.finalAmount,
+              displayOrder: idx,
+            })),
           },
         },
         include: { items: true },
@@ -650,11 +783,20 @@ export async function createStudentAdmission(
         },
       });
 
-      if (feeAssignment) {
-        await tx.studentFeeAssignment.update({
-          where: { id: feeAssignment.id },
-          data: { status: newStatus },
-        });
+      // The payment is applied to the invoice as a whole; mirror it onto the
+      // fee lines in order so each line's status is accurate (a single-line
+      // admission behaves exactly as before).
+      let unallocated = toPaisa(payAmount);
+      for (const fa of feeAssignments) {
+        const lineFinal = toPaisa(Number(fa.finalAmount));
+        const covered = Math.min(unallocated, lineFinal);
+        unallocated -= covered;
+        if (covered > 0) {
+          await tx.studentFeeAssignment.update({
+            where: { id: fa.id },
+            data: { status: covered >= lineFinal ? 'PAID' : 'PARTIAL' },
+          });
+        }
       }
     }
 
@@ -675,17 +817,18 @@ export async function createStudentAdmission(
       },
     });
 
-    if (feeAssignment) {
+    for (const fa of feeAssignments) {
       await recordAuditLog({
         coachingCenterId,
         userId: actorId,
         action: 'STUDENT_FEE_ASSIGNED',
         entity: 'StudentFeeAssignment',
-        entityId: feeAssignment.id,
+        entityId: fa.id,
         details: {
           studentId: student.id,
-          name: feeAssignment.name,
-          finalAmount: Number(feeAssignment.finalAmount),
+          name: fa.name,
+          finalAmount: Number(fa.finalAmount),
+          courseId: fa.courseId,
         },
       });
     }
@@ -727,6 +870,7 @@ export async function createStudentAdmission(
       primaryGuardian,
       batch: assignedBatch,
       feeAssignment,
+      feeAssignments,
       invoice,
       payment,
       receiptNumber,
@@ -736,6 +880,20 @@ export async function createStudentAdmission(
     maxWait: 10000,
     timeout: 30000,
   });
+  } catch (err: any) {
+    if (admissionIdempotencyKey) {
+      const isUniqueErr =
+        err?.code === 'P2002' &&
+        ((Array.isArray(err?.meta?.target) && err.meta.target.includes('idempotencyKey')) ||
+          String(err?.meta?.target || '').includes('idempotencyKey'));
+      if (isUniqueErr) {
+        await new Promise((r) => setTimeout(r, 150));
+        const replay = await getAdmissionByIdempotencyKey(coachingCenterId, admissionIdempotencyKey);
+        if (replay) return replay;
+      }
+    }
+    throw err;
+  }
 }
 
 /**
@@ -1000,6 +1158,9 @@ export async function updateStudent(
   }
 
   return prisma.$transaction(async (tx) => {
+    // Phase 11.4: re-activating a student takes a plan slot again.
+    if (rawInput.status === 'ACTIVE' && existing.status !== 'ACTIVE') await checkStudentLimit(tx, coachingCenterId);
+
     // 1. Update Student personal info
     const student = await tx.student.update({
       where: { id: studentId },
@@ -1155,6 +1316,18 @@ export async function getAcademicHierarchyOptions(coachingCenterId: string) {
         academicClassId: true,
         academicGroupId: true,
         fee: true,
+        billingType: true,
+        // Phase 11.2: pricing for the wizard's fee step (display only — the
+        // server re-reads it at admission time and never trusts these numbers).
+        feeItems: {
+          where: { isActive: true },
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          select: { id: true, name: true, banglaName: true, amount: true, isRequired: true, isActive: true },
+        },
+        installments: {
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          select: { name: true, banglaName: true, amount: true, dueAfterDays: true },
+        },
       },
     }),
     prisma.batch.findMany({
@@ -1212,7 +1385,12 @@ export async function getAcademicHierarchyOptions(coachingCenterId: string) {
     sessions,
     branches,
     programs,
-    courses,
+    courses: courses.map((c) => ({
+      ...c,
+      fee: Number(c.fee),
+      feeItems: c.feeItems.map((f) => ({ ...f, amount: Number(f.amount) })),
+      installments: c.installments.map((i) => ({ ...i, amount: Number(i.amount) })),
+    })),
     batches: batches.map((b) => ({
       ...b,
       enrolledCount: b._count.studentBatches,
@@ -1256,7 +1434,11 @@ export async function updateStudentStatus(
     return { studentId, success: true, skipped: true, reason: 'UNCHANGED' };
   }
 
-  await prisma.student.update({ where: { id: studentId }, data: { status: newStatus } });
+  await prisma.$transaction(async (tx) => {
+    // Phase 11.4: re-activating a student takes a plan slot again (deactivating never does).
+    if (newStatus === 'ACTIVE') await checkStudentLimit(tx, coachingCenterId);
+    await tx.student.update({ where: { id: studentId }, data: { status: newStatus } });
+  });
 
   await recordAuditLog({
     coachingCenterId,

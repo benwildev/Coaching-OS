@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireStudentPortal } from '@/lib/auth/portal-session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getStudentPortalHomeworks } from '@/lib/services/homework.service';
+import { requireFeature } from '@/lib/services/feature-access.service';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const session = await requireStudentPortal();
+    await requireFeature(session.coachingCenterId, 'HOMEWORK');
     const sp = new URL(request.url).searchParams;
     const result = await getStudentPortalHomeworks(session.coachingCenterId, session.studentId!, {
       status: sp.get('status') || undefined,

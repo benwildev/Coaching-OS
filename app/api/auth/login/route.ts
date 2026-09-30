@@ -45,6 +45,12 @@ export async function POST(req: Request) {
 
     const outcome = await authenticateByEmail(parsed.data.email, parsed.data.password);
     if (!outcome.ok) {
+      if (outcome.reason === 'TENANT_SUSPENDED') {
+        return NextResponse.json(
+          { success: false, error: 'TENANT_SUSPENDED', message: 'Account suspended. Please contact support.' },
+          { status: 403 }
+        );
+      }
       if (outcome.reason === 'ACCOUNT_INACTIVE') {
         return NextResponse.json(
           { success: false, error: 'This account is currently inactive. Contact your center administrator.' },

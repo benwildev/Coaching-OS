@@ -99,6 +99,7 @@ export async function POST(request: Request) {
       {
         success: true,
         message: 'Student admitted successfully',
+        idempotentReplay: (result as any).idempotentReplay ?? false,
         student: {
           id: result.id,
           studentId: result.studentIdCode,
@@ -107,6 +108,7 @@ export async function POST(request: Request) {
         },
         enrollment: result.enrollment,
         feeAssignment: result.feeAssignment,
+        feeAssignments: result.feeAssignments,
         invoice: result.invoice,
         payment: result.payment,
         receiptNumber: result.receiptNumber,

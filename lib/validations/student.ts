@@ -201,6 +201,12 @@ export const admissionSchema = z.object({
   feeAmount: z.number().min(0).optional(),
   feeName: z.string().max(150).optional(),
   feeDueDate: z.string().optional().or(z.literal('')),
+  // Phase 11.2: when true the server derives every fee line from the selected
+  // course's Fee & Payment Plan (feeStructureId/feeAmount are ignored — amounts
+  // are never taken from the client). optionalFeeIds opts this student into
+  // specific optional additional fees.
+  useCoursePricing: z.boolean().optional(),
+  optionalFeeIds: z.array(z.string().min(1)).max(30).optional(),
 
   // Step 7: Discount & Waiver
   discountAmount: z.number().min(0).default(0),

@@ -858,37 +858,140 @@ export async function deleteExamSubject(
 }
 
 /**
- * Enroll additional students into an exam
+ * Enroll additional students into an exam with strict authorization,
+ * tenant/branch isolation, academic session compatibility, and concurrency protection.
  */
 export async function enrollStudentsToExam(
   coachingCenterId: string,
-  examId: string,
-  studentIds: string[],
-  actorId: string
+  userOrExamId: SessionUser | string,
+  examIdOrStudentIds: string | string[],
+  studentIdsOrActorId: string[] | string,
+  actorIdOrUser?: string | SessionUser
 ) {
+  let user: SessionUser | undefined;
+  let examId: string;
+  let studentIds: string[];
+  let actorId: string;
+
+  if (typeof userOrExamId === 'object' && userOrExamId !== null && 'role' in userOrExamId) {
+    user = userOrExamId as SessionUser;
+    examId = examIdOrStudentIds as string;
+    studentIds = studentIdsOrActorId as string[];
+    actorId = (actorIdOrUser as string) || user.userId;
+  } else {
+    examId = userOrExamId as string;
+    studentIds = examIdOrStudentIds as string[];
+    actorId = studentIdsOrActorId as string;
+    user = typeof actorIdOrUser === 'object' ? (actorIdOrUser as SessionUser) : undefined;
+  }
+
+  // 1. Authenticated tenant: verify exam belongs to coachingCenterId
   const exam = await prisma.exam.findFirst({
     where: { id: examId, coachingCenterId },
     include: { examSubjects: true },
   });
   if (!exam) throw new Error('EXAM_NOT_FOUND');
 
-  if (exam.status === EXAM_STATUS.PUBLISHED || exam.status === EXAM_STATUS.CANCELLED) {
-    throw new Error('CANNOT_ENROLL: Students cannot be added to a published or cancelled exam.');
+  // 2. Branch authorization: if user is provided, enforce branch access on exam
+  if (user) {
+    assertBranchAccess(user, exam.branchId);
   }
 
+  // 3. Exam status: reject if exam is already published, completed, or cancelled
+  if (
+    exam.status === EXAM_STATUS.PUBLISHED ||
+    exam.status === EXAM_STATUS.CANCELLED ||
+    exam.status === EXAM_STATUS.COMPLETED
+  ) {
+    throw new Error('CANNOT_ENROLL: Students cannot be added to a published, completed, or cancelled exam.');
+  }
+
+  // 4. Input sanitization and deduplication
+  const uniqueStudentIds = Array.from(new Set(studentIds)).filter((id) => typeof id === 'string' && id.trim().length > 0);
+  if (uniqueStudentIds.length === 0) {
+    return { enrolledCount: 0 };
+  }
+
+  // 5. Tenant and eligibility verification for all students
+  const students = await prisma.student.findMany({
+    where: {
+      id: { in: uniqueStudentIds },
+      coachingCenterId, // Student must belong to authenticated tenant
+    },
+    include: {
+      enrollments: {
+        where: {
+          academicSessionId: exam.academicSessionId,
+          status: { in: ['ACTIVE', 'ENROLLED'] },
+        },
+      },
+      studentBatches: {
+        where: {
+          status: 'ACTIVE',
+        },
+      },
+    },
+  });
+
+  if (students.length !== uniqueStudentIds.length) {
+    const foundIds = new Set(students.map((s) => s.id));
+    const missing = uniqueStudentIds.filter((id) => !foundIds.has(id));
+    throw new Error(`STUDENT_NOT_FOUND: Student(s) not found in tenant: ${missing.join(', ')}`);
+  }
+
+  // 6. Eligibility & Branch & Academic Compatibility checks
+  for (const s of students) {
+    if (s.status !== 'ACTIVE') {
+      throw new Error(`STUDENT_INELIGIBLE: Student ${s.id} is not ACTIVE (status: ${s.status}).`);
+    }
+
+    // Branch compatibility:
+    // If the exam is branch-scoped, the student must belong to that same branch
+    if (exam.branchId && s.branchId !== exam.branchId) {
+      throw new Error(`BRANCH_MISMATCH: Student ${s.id} (branch: ${s.branchId ?? 'NULL'}) does not match exam branch ${exam.branchId}.`);
+    }
+
+    // If caller has branch restrictions, verify caller can access the student
+    if (user) {
+      assertBranchAccess(user, s.branchId);
+    }
+
+    // Academic session compatibility
+    const sessionEnrollment = s.enrollments.find((e) => e.academicSessionId === exam.academicSessionId);
+    if (!sessionEnrollment) {
+      throw new Error(`ACADEMIC_SESSION_MISMATCH: Student ${s.id} has no active enrollment in session ${exam.academicSessionId}.`);
+    }
+
+    // Academic class compatibility (if exam is class-scoped)
+    if (exam.academicClassId && sessionEnrollment.academicClassId !== exam.academicClassId) {
+      throw new Error(`CLASS_MISMATCH: Student ${s.id} class (${sessionEnrollment.academicClassId}) does not match exam class ${exam.academicClassId}.`);
+    }
+
+    // Academic group compatibility (if exam is group-scoped)
+    if (exam.academicGroupId && sessionEnrollment.academicGroupId && sessionEnrollment.academicGroupId !== exam.academicGroupId) {
+      throw new Error(`GROUP_MISMATCH: Student ${s.id} group (${sessionEnrollment.academicGroupId}) does not match exam group ${exam.academicGroupId}.`);
+    }
+
+    // Batch compatibility (if exam is batch-scoped)
+    if (exam.batchId && !s.studentBatches.some((sb) => sb.batchId === exam.batchId)) {
+      throw new Error(`BATCH_MISMATCH: Student ${s.id} is not actively enrolled in batch ${exam.batchId}.`);
+    }
+  }
+
+  // 7. Transactional insertion with duplicate protection under concurrency
   return prisma.$transaction(async (tx) => {
     await tx.examStudent.createMany({
-      data: studentIds.map((sid) => ({
+      data: uniqueStudentIds.map((sid) => ({
         examId,
         studentId: sid,
       })),
       skipDuplicates: true,
     });
 
-    // Initialize result records for newly enrolled students
+    // Initialize result records for newly enrolled students across all exam subjects
     const resultRows: any[] = [];
     for (const sub of exam.examSubjects) {
-      for (const sid of studentIds) {
+      for (const sid of uniqueStudentIds) {
         resultRows.push({
           examSubjectId: sub.id,
           studentId: sid,
@@ -912,9 +1015,9 @@ export async function enrollStudentsToExam(
       action: 'EXAM_STUDENTS_ASSIGNED',
       entity: 'Exam',
       entityId: examId,
-      details: { addedCount: studentIds.length },
+      details: { addedCount: uniqueStudentIds.length },
     });
 
-    return { enrolledCount: studentIds.length };
+    return { enrolledCount: uniqueStudentIds.length };
   });
 }

@@ -49,7 +49,7 @@ export async function getCoursesList(coachingCenterId: string, params: CourseFil
           include: { subject: { select: { id: true, name: true, banglaName: true, code: true } } },
           orderBy: { displayOrder: 'asc' },
         },
-        _count: { select: { batches: true } },
+        _count: { select: { batches: true, feeItems: true } },
       },
     }),
   ]);
@@ -81,6 +81,8 @@ export async function getCourseById(coachingCenterId: string, courseId: string) 
         select: { id: true, name: true, code: true, status: true, capacity: true },
         orderBy: { createdAt: 'desc' },
       },
+      feeItems: { orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }] },
+      installments: { orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }] },
     },
   });
 }
@@ -118,6 +120,17 @@ export async function createCourse(coachingCenterId: string, input: CourseInput,
     details: { name: course.name, code: course.code },
   });
 
+  if (Number(course.fee) > 0) {
+    await recordAuditLog({
+      coachingCenterId,
+      userId: actorId,
+      action: 'COURSE_PRICING_CREATED',
+      entity: 'Course',
+      entityId: course.id,
+      details: { courseId: course.id, courseName: course.name, after: { fee: Number(course.fee), billingType: course.billingType } },
+    });
+  }
+
   return course;
 }
 
@@ -138,6 +151,14 @@ export async function updateCourse(
   }
 
   const statusChanged = input.status && input.status !== existing.status;
+
+  // Phase 11.2: Course Fee is priced through the Fee & Payment Plan. A bare fee
+  // edit here is still allowed for ONE_TIME courses (backward compatible) but is
+  // audited, and is refused for INSTALLMENT courses where it would desync the plan.
+  const feeChanged = input.fee !== undefined && Math.round(input.fee * 100) !== Math.round(Number(existing.fee) * 100);
+  if (feeChanged && existing.billingType === 'INSTALLMENT') {
+    throw new Error('COURSE_FEE_LOCKED_BY_INSTALLMENTS: Change the Course Fee from the Fee & Payment Plan so installments stay in sync');
+  }
 
   const course = await prisma.course.update({
     where: { id: courseId },
@@ -163,6 +184,22 @@ export async function updateCourse(
     entityId: course.id,
     details: { name: course.name, status: course.status },
   });
+
+  if (feeChanged) {
+    await recordAuditLog({
+      coachingCenterId,
+      userId: actorId,
+      action: Number(existing.fee) > 0 ? 'COURSE_PRICING_UPDATED' : 'COURSE_PRICING_CREATED',
+      entity: 'Course',
+      entityId: course.id,
+      details: {
+        courseId: course.id,
+        courseName: course.name,
+        before: { fee: Number(existing.fee), billingType: existing.billingType },
+        after: { fee: Number(course.fee), billingType: course.billingType },
+      },
+    });
+  }
 
   return course;
 }

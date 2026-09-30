@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import Icon from '@/components/Icon';
 import { useApp } from '@/lib/store';
-import { DICTIONARY } from '@/lib/i18n';
+import { DICTIONARY, localizeApiError } from '@/lib/i18n';
 import {
   type AdmissionInput,
   GUARDIAN_RELATIONS,
@@ -16,6 +16,7 @@ import EnglishInput from '@/components/EnglishInput';
 import FileUploadButton from '@/components/FileUploadButton';
 import BanglaInput from '@/components/BanglaInput';
 import { hasBangla, hasEnglish } from '@/lib/format';
+import { buildPricingLines, fromPaisa, toPaisa, computePricingTotals, type CoursePricingConfig } from '@/lib/course-pricing';
 
 interface ScheduleInfo {
   dayOfWeek: string;
@@ -84,6 +85,9 @@ interface HierarchyData {
     academicClassId: string;
     academicGroupId?: string | null;
     fee: number;
+    billingType?: string;
+    feeItems?: Array<{ id: string; name: string; banglaName?: string | null; amount: number; isRequired: boolean; isActive: boolean }>;
+    installments?: Array<{ name: string; banglaName?: string | null; amount: number; dueAfterDays: number }>;
   }>;
   batches: BatchItem[];
   feeStructures: FeeStructureItem[];
@@ -139,6 +143,10 @@ interface AdmissionSuccessResult {
 }
 
 const formatTaka = (amount: number) => '৳' + Math.round(amount).toLocaleString('en-IN');
+
+/** A course is "priced" when it has a Course Fee or at least one required additional fee. */
+const courseIsPriced = (c: Pick<CoursePricingConfig, 'fee' | 'additionalFees'>) =>
+  c.fee > 0 || c.additionalFees.some((f) => f.isActive && f.isRequired);
 
 export default function NewStudentPage() {
   const { lang, showToast, currentUser, currentCenter } = useApp();
@@ -316,8 +324,29 @@ export default function NewStudentPage() {
     return true;
   });
 
+  // Course pricing (Phase 11.2): when the selected course has a Fee & Payment
+  // Plan, its lines ARE the student's fees — shown here for preview only; the
+  // server re-reads the plan and computes the real amounts at admission.
+  const selectedCourse = options.courses.find((c) => c.id === form.courseId);
+  const courseConfig: CoursePricingConfig | null = selectedCourse
+    ? {
+        fee: Number(selectedCourse.fee) || 0,
+        billingType: selectedCourse.billingType === 'INSTALLMENT' ? 'INSTALLMENT' : 'ONE_TIME',
+        additionalFees: selectedCourse.feeItems ?? [],
+        installments: selectedCourse.installments ?? [],
+      }
+    : null;
+  const usePricing = courseConfig ? courseIsPriced(courseConfig) : false;
+  const courseLines = courseConfig && usePricing
+    ? buildPricingLines(courseConfig, form.optionalFeeIds ?? [], dict.coursePricing.courseFee)
+    : [];
+  const optionalFees = courseConfig ? courseConfig.additionalFees.filter((f) => f.isActive && !f.isRequired) : [];
+
   // Live Financial Calculation
   const originalFee = useMemo(() => {
+    if (usePricing) {
+      return fromPaisa(courseLines.reduce((s, l) => s + toPaisa(l.amount), 0));
+    }
     if (form.feeAmount !== undefined && form.feeAmount !== null && form.feeAmount > 0) {
       return Number(form.feeAmount);
     }
@@ -325,12 +354,9 @@ export default function NewStudentPage() {
       const fs = options.feeStructures.find((f) => f.id === form.feeStructureId);
       if (fs) return fs.amount;
     }
-    if (form.courseId) {
-      const crs = options.courses.find((c) => c.id === form.courseId);
-      if (crs && crs.fee) return crs.fee;
-    }
     return 0;
-  }, [form.feeAmount, form.feeStructureId, form.courseId, options]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usePricing, form.optionalFeeIds, form.courseId, form.feeAmount, form.feeStructureId, options]);
 
   const discount = Number(form.discountAmount) || 0;
   const waiver = Number(form.waiverAmount) || 0;
@@ -553,7 +579,10 @@ export default function NewStudentPage() {
     try {
       const payload: AdmissionInput = {
         ...form,
-        feeAmount: originalFee,
+        // Priced course: send only the intent (+ chosen optional fees); the server derives every amount itself.
+        ...(usePricing
+          ? { useCoursePricing: true, optionalFeeIds: form.optionalFeeIds ?? [], feeAmount: undefined, feeStructureId: '' }
+          : { useCoursePricing: false, optionalFeeIds: [], feeAmount: originalFee }),
         discountAmount: discount,
         waiverAmount: waiver,
         initialPayment: recordInitialPayment && form.initialPayment?.amount
@@ -564,8 +593,11 @@ export default function NewStudentPage() {
               idempotencyKey: form.initialPayment.idempotencyKey || `ADM-PAY-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             }
           : undefined,
-        idempotencyKey: `ADM-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        idempotencyKey: form.idempotencyKey || `ADM-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       };
+      if (!form.idempotencyKey) {
+        setForm((prev) => ({ ...prev, idempotencyKey: payload.idempotencyKey }));
+      }
 
       const res = await fetch('/api/students', {
         method: 'POST',
@@ -575,7 +607,7 @@ export default function NewStudentPage() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to complete admission');
+        throw new Error(localizeApiError(lang, data.error, data.message) || data.message || data.error || 'Failed to complete admission');
       }
 
       showToast(dict.admission.successToast);
@@ -1430,7 +1462,10 @@ export default function NewStudentPage() {
                                   ...form,
                                   courseId: crs.id,
                                   batchId: '',
-                                  feeAmount: crs.fee > 0 ? crs.fee : form.feeAmount,
+                                  optionalFeeIds: [],
+                                  // A priced course supplies its own fees server-side; an unpriced one keeps the manual fee entry.
+                                  feeStructureId: courseIsPriced({ fee: crs.fee, additionalFees: crs.feeItems ?? [] }) ? '' : form.feeStructureId,
+                                  feeAmount: courseIsPriced({ fee: crs.fee, additionalFees: crs.feeItems ?? [] }) ? undefined : form.feeAmount,
                                 })
                               }
                               className="mt-1 h-4 w-4 accent-[#063b78] cursor-pointer"
@@ -1440,9 +1475,9 @@ export default function NewStudentPage() {
                                 <span className="font-bold text-[#092f63]">
                                   {lang === 'bn' && crs.banglaName ? crs.banglaName : crs.name}
                                 </span>
-                                {crs.fee > 0 && (
+                                {courseIsPriced({ fee: crs.fee, additionalFees: crs.feeItems ?? [] }) && (
                                   <span className="font-bold text-emerald-700 text-xs bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
-                                    {formatTaka(crs.fee)}
+                                    {formatTaka(computePricingTotals({ fee: crs.fee, additionalFees: crs.feeItems ?? [] }).requiredTotal)}
                                   </span>
                                 )}
                               </div>
@@ -1597,8 +1632,88 @@ export default function NewStudentPage() {
                       </h2>
                     </div>
 
+                    {/* Course Fee & Payment Plan (Phase 11.2) — fees come from the selected course */}
+                    {selectedCourse && (
+                      <div className="rounded-xl border border-[#dce5f0] bg-[#f5f8fc] p-4 flex flex-col gap-3">
+                        <div>
+                          <div className="text-[11.5px] font-semibold uppercase tracking-wider text-[#64748b]">
+                            {dict.coursePricing.selectedCourse}
+                          </div>
+                          <div className="font-bold text-[#092f63]">
+                            {lang === 'bn' && selectedCourse.banglaName ? selectedCourse.banglaName : selectedCourse.name}
+                          </div>
+                        </div>
+
+                        {usePricing ? (
+                          <>
+                            <div className="flex flex-col gap-1.5 text-[13.5px] text-[#092f63]">
+                              {courseLines.map((l, i) => (
+                                <div key={`${l.kind}-${i}`} className="flex justify-between gap-3">
+                                  <span>
+                                    {lang === 'bn' && l.banglaName ? l.banglaName : l.name}
+                                    {l.kind === 'INSTALLMENT' && l.dueAfterDays > 0 && (
+                                      <span className="text-[#64748b]">
+                                        {' '}
+                                        ({lang === 'bn' ? `${l.dueAfterDays} দিন পর` : `after ${l.dueAfterDays} days`})
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="font-mono font-semibold">{formatTaka(l.amount)}</span>
+                                </div>
+                              ))}
+                              <div className="flex justify-between border-t border-[#dce5f0] pt-1.5 font-bold text-[#063b78]">
+                                <span>{dict.coursePricing.total}</span>
+                                <span className="font-mono">{formatTaka(originalFee)}</span>
+                              </div>
+                            </div>
+
+                            {courseConfig?.billingType === 'INSTALLMENT' && (
+                              <p className="text-[12px] text-[#64748b]">{dict.coursePricing.firstLineNote}</p>
+                            )}
+
+                            {optionalFees.length > 0 && (
+                              <div className="border-t border-[#dce5f0] pt-3">
+                                <div className="text-[12.5px] font-bold text-[#092f63] mb-1.5">
+                                  {dict.coursePricing.chooseOptional}
+                                </div>
+                                {optionalFees.map((f) => {
+                                  const checked = (form.optionalFeeIds ?? []).includes(f.id as string);
+                                  return (
+                                    <label key={f.id} className="flex items-center justify-between gap-3 py-1 text-[13.5px] cursor-pointer">
+                                      <span className="flex items-center gap-2">
+                                        <input
+                                          type="checkbox"
+                                          className="accent-[#063b78]"
+                                          checked={checked}
+                                          onChange={(e) => {
+                                            const cur = form.optionalFeeIds ?? [];
+                                            setForm({
+                                              ...form,
+                                              optionalFeeIds: e.target.checked
+                                                ? [...cur, f.id as string]
+                                                : cur.filter((id) => id !== f.id),
+                                            });
+                                          }}
+                                        />
+                                        {lang === 'bn' && f.banglaName ? f.banglaName : f.name}
+                                      </span>
+                                      <span className="font-mono font-semibold">{formatTaka(f.amount)}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <p className="text-[13px] text-amber-800">{dict.coursePricing.courseNotPriced}</p>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Fee Structure Dropdown */}
+                      {/* Fee Structure Dropdown — only for manual (unpriced-course / general) admissions */}
+                      {!usePricing && (
+                      <>
                       <div className="md:col-span-2">
                         <label className="block text-[13px] font-bold text-[#092f63] mb-1.5">
                           {dict.admission.feeStructure}
@@ -1639,6 +1754,8 @@ export default function NewStudentPage() {
                           className="w-full rounded-xl border border-[#dce5f0] px-3.5 py-2.5 text-[13.5px] font-mono text-[#092f63] outline-none focus:border-[#063b78]"
                         />
                       </div>
+                      </>
+                      )}
 
                       {/* Due Date */}
                       <div>

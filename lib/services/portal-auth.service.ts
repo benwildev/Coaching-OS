@@ -3,6 +3,7 @@ import prisma from '@/lib/db';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
 import type { PortalSessionUser } from '@/lib/auth/portal-session';
 import { recordAuditLog } from './audit.service';
+import { checkPortalAccountLimit } from './subscription.service';
 import type { Prisma } from '@prisma/client';
 
 const SETUP_TOKEN_HOURS = 48;
@@ -15,6 +16,8 @@ const RESET_TOKEN_HOURS = 1;
 export const portalIdentityInclude = {
   student: { select: { id: true, name: true, banglaName: true } },
   guardian: { select: { id: true, name: true, banglaName: true } },
+  // Phase 11.4: a suspended tenant's portal sessions are invalid immediately.
+  coachingCenter: { select: { status: true } },
 } satisfies Prisma.PortalAccountInclude;
 
 type PortalAccountWithIdentity = Prisma.PortalAccountGetPayload<{ include: typeof portalIdentityInclude }>;
@@ -74,15 +77,19 @@ export async function provisionPortalAccount(params: {
       : await prisma.guardian.findFirst({ where: { id: params.guardianId!, coachingCenterId: params.coachingCenterId }, select: { phone: true, email: true } });
     if (!contact) throw new Error(params.studentId ? 'STUDENT_NOT_FOUND' : 'GUARDIAN_NOT_FOUND');
 
-    account = await prisma.portalAccount.create({
-      data: {
-        coachingCenterId: params.coachingCenterId,
-        portalType: params.studentId ? 'STUDENT' : 'GUARDIAN',
-        studentId: params.studentId ?? null,
-        guardianId: params.guardianId ?? null,
-        phone: contact.phone,
-        email: contact.email,
-      },
+    // Phase 11.4: portal accounts are limited separately from student records.
+    account = await prisma.$transaction(async (tx) => {
+      await checkPortalAccountLimit(tx, params.coachingCenterId);
+      return tx.portalAccount.create({
+        data: {
+          coachingCenterId: params.coachingCenterId,
+          portalType: params.studentId ? 'STUDENT' : 'GUARDIAN',
+          studentId: params.studentId ?? null,
+          guardianId: params.guardianId ?? null,
+          phone: contact.phone,
+          email: contact.email,
+        },
+      });
     });
   }
 
@@ -335,12 +342,16 @@ export async function setPortalAccountStatus(
   // this account — disabling must take effect immediately, and
   // re-enabling should not silently resurrect a token from before it was
   // disabled.
-  await prisma.portalAccount.update({
-    where: { id: account.id },
-    data:
-      status === 'ACTIVE'
-        ? { status, failedLoginAttempts: 0, lockedUntil: null, sessionVersion: { increment: 1 } }
-        : { status, sessionVersion: { increment: 1 } },
+  await prisma.$transaction(async (tx) => {
+    // Phase 11.4: re-enabling a disabled portal account takes a slot again.
+    if (status === 'ACTIVE' && account.status !== 'ACTIVE') await checkPortalAccountLimit(tx, coachingCenterId);
+    await tx.portalAccount.update({
+      where: { id: account.id },
+      data:
+        status === 'ACTIVE'
+          ? { status, failedLoginAttempts: 0, lockedUntil: null, sessionVersion: { increment: 1 } }
+          : { status, sessionVersion: { increment: 1 } },
+    });
   });
 
   await recordAuditLog({

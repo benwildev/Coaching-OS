@@ -3,12 +3,14 @@ import { requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { parseReportFilters } from '@/lib/reports/filters';
 import { isReportCategory, runReport } from '@/lib/reports/run-report';
+import { requireFeature } from '@/lib/services/feature-access.service';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request, { params }: { params: Promise<{ category: string }> }) {
   try {
     const { user } = await requireTenant();
+    await requireFeature(user.coachingCenterId, 'ADVANCED_REPORTS');
     const { category } = await params;
     if (!isReportCategory(category)) throw new Error('REPORT_NOT_FOUND');
 

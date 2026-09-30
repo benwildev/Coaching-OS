@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
+import { checkTeacherLimit } from './subscription.service';
 import { createUser } from './user.service';
 import { getTodaysClasses } from './attendance.service';
 import { getCurrentDhakaDateOnly, getCurrentDhakaDayOfWeek, isScheduleActiveOnDate } from '@/lib/schedule';
@@ -130,6 +131,8 @@ export async function createTeacher(coachingCenterId: string, input: TeacherInpu
   const validJoiningDate = input.joiningDate && !isNaN(Date.parse(input.joiningDate)) ? new Date(input.joiningDate) : null;
 
   const teacher = await prisma.$transaction(async (tx) => {
+    // Phase 11.4: plan teacher limit (only ACTIVE teachers count), under an advisory lock.
+    if ((input.status ?? 'ACTIVE') === 'ACTIVE') await checkTeacherLimit(tx, coachingCenterId);
     const created = await tx.teacher.create({
       data: {
         coachingCenterId,
@@ -218,6 +221,8 @@ export async function updateTeacher(
     : undefined;
 
   const teacher = await prisma.$transaction(async (tx) => {
+    // Phase 11.4: re-activating an inactive teacher takes a slot again.
+    if (input.status === 'ACTIVE' && existing.status !== 'ACTIVE') await checkTeacherLimit(tx, coachingCenterId);
     const updated = await tx.teacher.update({
       where: { id: teacherId },
       data: {

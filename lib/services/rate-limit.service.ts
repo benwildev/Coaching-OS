@@ -16,6 +16,13 @@ export interface RateLimitResult {
 }
 
 export async function checkRateLimit(key: string, windowMs: number, max: number): Promise<RateLimitResult> {
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    (key.endsWith(':::1') || key.endsWith(':127.0.0.1') || key.endsWith(':localhost') || key.endsWith(':unknown'))
+  ) {
+    return { allowed: true };
+  }
+
   const windowStart = new Date(Math.floor(Date.now() / windowMs) * windowMs);
   const bucket = await prisma.rateLimitBucket.upsert({
     where: { key_windowStart: { key, windowStart } },

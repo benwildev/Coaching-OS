@@ -6,6 +6,7 @@ import { getCommunicationProvider } from './communication/providers';
 import { MAX_RETRY_ATTEMPTS, computeNextRetryAt } from './communication/retry-config';
 import { escapeHtml } from './template-interpolation';
 import { resolveProviderCredentials } from './communication-settings.service';
+import { claimRetryWithQuota } from './message-quota.service';
 
 export class RetryError extends Error {}
 
@@ -22,11 +23,18 @@ export class RetryError extends Error {}
  * sweep) can never both send.
  */
 async function claimAndResend(logId: string) {
-  const claimed = await prisma.communicationLog.updateMany({
-    where: { id: logId, status: 'FAILED' },
-    data: { status: 'QUEUED' },
+  const current = await prisma.communicationLog.findUnique({
+    where: { id: logId },
+    select: { coachingCenterId: true, channel: true },
   });
-  if (claimed.count !== 1) return null; // already claimed by a concurrent retry, or no longer FAILED
+  if (!current) return null;
+
+  // Phase 11.4: a retry takes a quota unit again (a FAILED row holds none), so it
+  // is claimed under the same lock as a first send. A quota / subscription /
+  // suspension refusal leaves the row FAILED and unchanged — nothing is sent.
+  const claim = await claimRetryWithQuota(current.coachingCenterId, current.channel, logId);
+  if (claim.reason) return { denied: claim.reason };
+  if (!claim.claimed) return null; // concurrent retry won, or no longer FAILED
 
   const log = await prisma.communicationLog.findUniqueOrThrow({ where: { id: logId } });
 
@@ -75,6 +83,7 @@ export async function retryCommunication(coachingCenterId: string, user: Session
 
   const outcome = await claimAndResend(logId);
   if (!outcome) throw new RetryError('COMMUNICATION_RETRY_ALREADY_IN_PROGRESS');
+  if ('denied' in outcome) throw new RetryError(`COMMUNICATION_${outcome.denied}`);
 
   await recordAuditLog({
     coachingCenterId,
@@ -107,7 +116,7 @@ export async function processDueRetries(batchSize = 50) {
 
   for (const row of due) {
     const outcome = await claimAndResend(row.id);
-    if (!outcome) {
+    if (!outcome || 'denied' in outcome) {
       skipped++;
       continue;
     }

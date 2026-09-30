@@ -30,6 +30,9 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success || typeof data.redirectTo !== 'string') {
+        if (data.error === 'TENANT_SUSPENDED') {
+          throw new Error(lang === 'bn' ? 'অ্যাকাউন্ট স্থগিত করা হয়েছে। অনুগ্রহ করে সহায়তার সাথে যোগাযোগ করুন।' : 'Account suspended. Please contact support.');
+        }
         throw new Error(
           data.error ||
             (lang === 'bn' ? 'লগইন ব্যর্থ হয়েছে। তথ্য যাচাই করুন।' : 'Sign in failed. Please check your credentials.')

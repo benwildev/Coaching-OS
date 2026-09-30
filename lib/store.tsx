@@ -17,6 +17,8 @@ interface CenterInfo {
   district?: string | null;
   logo?: string | null;
   branches: Array<{ id: string; name: string; isMain: boolean }>;
+  features?: Record<string, boolean>;
+  subscriptionStatus?: string;
   branding?: {
     primaryColor: string;
     secondaryColor: string;
@@ -60,7 +62,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const tt = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
   const pathname = usePathname();
-  const isPortalRoute = !!pathname?.startsWith('/portal');
+  // Portal and platform (Super Admin) pages have their own sessions and providers.
+  const isPortalRoute = !!pathname?.startsWith('/portal') || !!pathname?.startsWith('/super-admin');
 
   const fetchAuthInfo = useCallback(async () => {
     try {

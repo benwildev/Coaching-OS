@@ -10,6 +10,7 @@ import type { CommunicationTemplateInput } from '@/lib/validations/communication
 import { normalizeBangladeshPhone } from '@/lib/utils/phone';
 import { isCommunicationChannelEnabled, resolveProviderCredentials } from './communication-settings.service';
 import { computeNextRetryAt } from './communication/retry-config';
+import { createQuotaCheckedLog } from './message-quota.service';
 
 export interface CommunicationScope {
   coachingCenterId: string;
@@ -360,27 +361,34 @@ export async function dispatchToGuardian(input: DispatchToGuardianInput): Promis
     const bodyBn = template ? template.bodyBn : defaultCopy?.bn.body ?? '';
     const message = interpolate(`${bodyEn}\n${bodyBn}`, input.vars).trim();
 
+    // Phase 11.4: the QUEUED row is also the quota reservation — created under a
+    // per-tenant/channel lock together with the plan-limit check. A refusal
+    // (quota reached / subscription inactive / tenant suspended) is recorded as
+    // a SKIPPED row, which never consumes quota, exactly like CHANNEL_DISABLED.
     let log;
     try {
-      log = await prisma.communicationLog.create({
-        data: {
-          coachingCenterId: input.coachingCenterId,
-          branchId: input.branchId ?? null,
-          templateId: template?.id ?? null,
-          guardianId: input.guardianId,
-          studentId: input.studentId ?? null,
-          noticeId: input.noticeId ?? null,
-          triggeredById: input.triggeredById ?? null,
-          recipientPhone: channel === 'EMAIL' ? null : recipientPhoneNormalized,
-          recipientEmail: channel === 'EMAIL' ? recipient : null,
-          channel,
-          event: input.event,
-          sourceType: input.sourceType ?? null,
-          sourceId: input.sourceId ?? null,
-          status: 'QUEUED',
-          message,
-        },
+      const reserved = await createQuotaCheckedLog(input.coachingCenterId, channel, {
+        coachingCenterId: input.coachingCenterId,
+        branchId: input.branchId ?? null,
+        templateId: template?.id ?? null,
+        guardianId: input.guardianId,
+        studentId: input.studentId ?? null,
+        noticeId: input.noticeId ?? null,
+        triggeredById: input.triggeredById ?? null,
+        recipientPhone: channel === 'EMAIL' ? null : recipientPhoneNormalized,
+        recipientEmail: channel === 'EMAIL' ? recipient : null,
+        channel,
+        event: input.event,
+        sourceType: input.sourceType ?? null,
+        sourceId: input.sourceId ?? null,
+        status: 'QUEUED',
+        message,
       });
+      if (!reserved.ok) {
+        await logSkippedOrFailed('SKIPPED', reserved.reason, { message });
+        return;
+      }
+      log = reserved.log;
     } catch (error) {
       if (isDuplicateLogError(error)) return; // already dispatched for this event/source
       throw error;

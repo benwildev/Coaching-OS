@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getCoachingCenter } from '@/lib/services/tenant.service';
+import { getTenantSubscription } from '@/lib/services/subscription.service';
 
 export async function GET() {
   const session = await getSession();
@@ -8,7 +9,7 @@ export async function GET() {
     return NextResponse.json({ authenticated: false, user: null, center: null });
   }
 
-  const center = await getCoachingCenter(session.coachingCenterId);
+  const [center, sub] = await Promise.all([getCoachingCenter(session.coachingCenterId), getTenantSubscription(session.coachingCenterId)]);
 
   return NextResponse.json({
     authenticated: true,
@@ -25,6 +26,9 @@ export async function GET() {
           logo: center.logo,
           branches: center.branches,
           branding: center.brandingSetting,
+          // Presentation hints only (menus, banners). Every feature is enforced again server-side.
+          features: sub.features,
+          subscriptionStatus: sub.status,
         }
       : null,
   });

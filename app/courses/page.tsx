@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Icon from '@/components/Icon';
 import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/lib/store';
-import { DICTIONARY } from '@/lib/i18n';
+import { DICTIONARY, formatBDTExact } from '@/lib/i18n';
 import { COURSE_STATUSES } from '@/lib/validations/course';
 import EnglishInput from '@/components/EnglishInput';
 import BanglaInput from '@/components/BanglaInput';
@@ -36,7 +36,7 @@ interface CourseItem {
   academicClass: { id: string; name: string; banglaName?: string | null };
   academicGroup?: { id: string; name: string; banglaName?: string | null } | null;
   courseSubjects: Array<{ id: string; subject: { id: string; name: string; banglaName?: string | null } }>;
-  _count?: { batches: number };
+  _count?: { batches: number; feeItems?: number };
 }
 
 const emptyNewCourse = {
@@ -304,6 +304,11 @@ export default function CoursesPage() {
                 </div>
               )}
               <div className="flex items-center justify-between text-[11.5px] text-[#64748b] pt-1.5 border-t border-[#f1f5f9]">
+                {Number(c.fee) > 0 || (c._count?.feeItems ?? 0) > 0 ? (
+                  <span className="font-bold text-emerald-700">{formatBDTExact(Number(c.fee), lang)}</span>
+                ) : (
+                  <span className="font-semibold text-amber-700">{dict.coursePricing.notSet}</span>
+                )}
                 <span>{c.durationMonths} {lang === 'bn' ? 'মাস' : 'months'}</span>
                 <span>{c._count?.batches ?? 0} {lang === 'bn' ? 'ব্যাচ' : 'batches'}</span>
               </div>

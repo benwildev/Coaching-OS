@@ -3,6 +3,7 @@ import { requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { resolveHomeworkScope, reviewSubmission } from '@/lib/services/homework.service';
 import { reviewSubmissionSchema } from '@/lib/validations/homework';
+import { requireFeature } from '@/lib/services/feature-access.service';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,7 @@ type Ctx = { params: Promise<{ homeworkId: string; submissionId: string }> };
 export async function PATCH(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requireFeature(coachingCenterId, 'HOMEWORK');
     const { homeworkId, submissionId } = await params;
     const body = await request.json().catch(() => null);
     const parsed = reviewSubmissionSchema.safeParse(body);

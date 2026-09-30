@@ -26,6 +26,9 @@ export const NOTIFICATION_EVENTS = [
   'FEE_INVOICE_CREATED',
   'FEE_PAYMENT_DUE',
   'FEE_PAYMENT_OVERDUE',
+  'FEE_DISCOUNT_REQUESTED',
+  'FEE_DISCOUNT_APPROVED',
+  'FEE_DISCOUNT_REJECTED',
 
   // Academic / Exams
   'EXAM_SCHEDULE',
@@ -187,6 +190,18 @@ export const DEFAULT_EVENT_COPY: Record<NotificationEvent, EventCopy> = {
     en: { title: 'Payment refunded', body: 'A refund of ৳{{amount}} has been processed for {{studentName}}.' },
     bn: { title: 'ফি রিফান্ড সম্পন্ন', body: '{{studentName}}-এর জন্য ৳{{amount}} রিফান্ড প্রদান করা হয়েছে।' },
   },
+  FEE_DISCOUNT_REQUESTED: {
+    en: { title: 'New Discount/Waiver Request', body: 'A discount/waiver request of ৳{{amount}} for {{studentName}} requires your approval.' },
+    bn: { title: 'নতুন ছাড়/মওকুফ আবেদন', body: '{{studentName}}-এর জন্য ৳{{amount}} ছাড় বা মওকুফের আবেদন অনুমোদনের অপেক্ষায় রয়েছে।' },
+  },
+  FEE_DISCOUNT_APPROVED: {
+    en: { title: 'Discount/Waiver Approved', body: 'Your discount/waiver request of ৳{{amount}} for {{studentName}} has been approved.' },
+    bn: { title: 'ছাড়/মওকুফ আবেদন অনুমোদিত', body: '{{studentName}}-এর জন্য ৳{{amount}} ছাড় বা মওকুফের আবেদন অনুমোদিত হয়েছে।' },
+  },
+  FEE_DISCOUNT_REJECTED: {
+    en: { title: 'Discount/Waiver Rejected', body: 'Your discount/waiver request of ৳{{amount}} for {{studentName}} was rejected.' },
+    bn: { title: 'ছাড়/মওকুফ আবেদন প্রত্যাখ্যাত', body: '{{studentName}}-এর জন্য ৳{{amount}} ছাড় বা মওকুফের আবেদন প্রত্যাখ্যাত হয়েছে।' },
+  },
   EXAM_SCHEDULE: {
     en: { title: 'Exam scheduled', body: '{{examName}} has been scheduled on {{examDate}}.' },
     bn: { title: 'পরীক্ষা নির্ধারিত হয়েছে', body: '{{examName}} {{examDate}} তারিখে অনুষ্ঠিত হবে।' },
@@ -324,6 +339,9 @@ export const EVENT_CATEGORY: Record<NotificationEvent, NotificationCategory> = {
   FEE_PAYMENT_OVERDUE: 'FEE',
   FEE_PAYMENT_FAILED: 'FEE',
   FEE_REFUND: 'FEE',
+  FEE_DISCOUNT_REQUESTED: 'FEE',
+  FEE_DISCOUNT_APPROVED: 'FEE',
+  FEE_DISCOUNT_REJECTED: 'FEE',
 
   EXAM_SCHEDULE: 'EXAM',
   EXAM_SCHEDULED: 'EXAM',

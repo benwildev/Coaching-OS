@@ -62,11 +62,13 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
         sourceId: input.sourceId ?? null,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     // A duplicate (userId, sourceType, sourceId, type) is expected and
     // harmless — it means this exact event already notified this user.
     // Anything else is logged but still never thrown.
-    console.error('[NotificationService] Failed to create notification:', error);
+    if (error?.code !== 'P2002') {
+      console.error('[NotificationService] Failed to create notification:', error);
+    }
   }
 }
 

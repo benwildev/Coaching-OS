@@ -38,7 +38,9 @@ export type AuthOutcome =
   | { ok: true; kind: 'PORTAL'; portal: PortalSessionUser; portalAccountId: string }
   | { ok: false; reason: 'INVALID_CREDENTIALS' }
   // Only returned when the password was correct for exactly one account.
-  | { ok: false; reason: 'ACCOUNT_INACTIVE' };
+  | { ok: false; reason: 'ACCOUNT_INACTIVE' }
+  // Phase 11.4: correct password, but the coaching center is suspended by the platform.
+  | { ok: false; reason: 'TENANT_SUSPENDED' };
 
 interface LockState {
   failedLoginAttempts: number;
@@ -125,6 +127,7 @@ export async function authenticateByEmail(rawEmail: string, plainPassword: strin
   if (userMatches.length === 1) {
     const user = userMatches[0];
     if (user.status !== 'ACTIVE') return { ok: false, reason: 'ACCOUNT_INACTIVE' };
+    if (user.coachingCenter.status === 'SUSPENDED') return { ok: false, reason: 'TENANT_SUSPENDED' };
     const identity = toStaffIdentity(user);
     if (!identity) return { ok: false, reason: 'INVALID_CREDENTIALS' };
     await prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() } });
@@ -133,6 +136,7 @@ export async function authenticateByEmail(rawEmail: string, plainPassword: strin
 
   const account = portalMatches[0];
   if (account.status !== 'ACTIVE') return { ok: false, reason: 'ACCOUNT_INACTIVE' };
+  if (account.coachingCenter.status === 'SUSPENDED') return { ok: false, reason: 'TENANT_SUSPENDED' };
   const linked = account.portalType === 'STUDENT' ? account.student : account.guardian;
   if (!linked) return { ok: false, reason: 'INVALID_CREDENTIALS' };
   await prisma.portalAccount.update({ where: { id: account.id }, data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() } });

@@ -37,13 +37,14 @@ function resolveBaseSecret(): string {
   return secret;
 }
 
-function deriveKey(audience: 'staff' | 'portal'): Uint8Array {
+function deriveKey(audience: 'staff' | 'portal' | 'platform'): Uint8Array {
   const base = resolveBaseSecret();
   return new Uint8Array(createHash('sha256').update(`coaching-os:jwt:${audience}:${base}`).digest());
 }
 
 let staffKey: Uint8Array | null = null;
 let portalKey: Uint8Array | null = null;
+let platformKey: Uint8Array | null = null;
 
 /**
  * Lazily resolved and memoized so importing this module (e.g. during
@@ -58,4 +59,15 @@ export function getStaffSecretKey(): Uint8Array {
 export function getPortalSecretKey(): Uint8Array {
   if (!portalKey) portalKey = deriveKey('portal');
   return portalKey;
+}
+
+/**
+ * Phase 11.4: the platform (Super Admin) session has its own independently-derived
+ * key. A staff or portal token can never verify as a platform token, and a
+ * platform token can never verify as either of those — separation is enforced by
+ * the signature itself, not only by a claim.
+ */
+export function getPlatformSecretKey(): Uint8Array {
+  if (!platformKey) platformKey = deriveKey('platform');
+  return platformKey;
 }

@@ -1,6 +1,7 @@
 import prisma from '@/lib/db';
 import { hashPassword } from '@/lib/auth/password';
 import { recordAuditLog } from './audit.service';
+import { checkStaffLimit } from './subscription.service';
 import type { Prisma, RoleCode, UserStatus } from '@prisma/client';
 
 export async function getUsersByTenant(coachingCenterId: string) {
@@ -88,7 +89,12 @@ export async function createUser(
 
   const passwordHash = hashPassword(data.password);
 
-  const user = await prisma.user.create({
+  // Phase 11.4: ADMIN/STAFF accounts count toward the plan staff limit (OWNER and
+  // TEACHER accounts do not — see lib/subscription.ts). Checked under an advisory
+  // lock in the same transaction as the insert.
+  const user = await prisma.$transaction(async (tx) => {
+    if (data.role === "ADMIN" || data.role === "STAFF") await checkStaffLimit(tx, coachingCenterId);
+    return tx.user.create({
     data: {
       coachingCenterId,
       branchId: data.branchId,
@@ -113,6 +119,7 @@ export async function createUser(
       banglaName: true,
       status: true,
     },
+  });
   });
 
   await recordAuditLog({
@@ -177,17 +184,23 @@ export async function updateUserStatus(
   // Any status change revokes every outstanding session for this account
   // (Phase 10.4 §8/§9) — a disabled or reinstated user must not be able to
   // keep using a token issued before the change.
-  const updated = await prisma.user.update({
-    where: { id: userId, coachingCenterId },
-    data: { status, sessionVersion: { increment: 1 } },
-    select: {
-      id: true,
-      email: true,
-      phone: true,
-      name: true,
-      banglaName: true,
-      status: true,
-    },
+  const updated = await prisma.$transaction(async (tx) => {
+    // Phase 11.4: re-activating an ADMIN/STAFF account takes a staff slot again.
+    if (status === 'ACTIVE' && target.status !== 'ACTIVE' && (targetRole === 'ADMIN' || targetRole === 'STAFF')) {
+      await checkStaffLimit(tx, coachingCenterId);
+    }
+    return tx.user.update({
+      where: { id: userId, coachingCenterId },
+      data: { status, sessionVersion: { increment: 1 } },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        name: true,
+        banglaName: true,
+        status: true,
+      },
+    });
   });
 
   await recordAuditLog({
@@ -213,6 +226,8 @@ export async function bumpUserSessionVersion(userId: string): Promise<void> {
 /** Include needed to turn a User row into a staff session identity. Role order is deterministic. */
 export const staffIdentityInclude = {
   roleAssignments: { include: { role: true }, orderBy: { createdAt: 'asc' } },
+  // Phase 11.4: a suspended tenant's staff sessions are invalid immediately.
+  coachingCenter: { select: { status: true } },
 } satisfies Prisma.UserInclude;
 
 type UserWithRoles = Prisma.UserGetPayload<{ include: typeof staffIdentityInclude }>;
@@ -239,6 +254,7 @@ export interface StaffIdentity {
  */
 export function toStaffIdentity(user: UserWithRoles): StaffIdentity | null {
   if (user.status !== 'ACTIVE') return null;
+  if (user.coachingCenter.status === 'SUSPENDED') return null;
   const role = user.roleAssignments[0]?.role.code;
   if (!role) return null;
   return {

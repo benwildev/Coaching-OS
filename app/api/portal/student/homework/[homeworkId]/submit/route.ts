@@ -3,6 +3,7 @@ import { requireStudentPortal } from '@/lib/auth/portal-session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { submitHomework } from '@/lib/services/homework.service';
 import { submitHomeworkSchema } from '@/lib/validations/homework';
+import { requireFeature } from '@/lib/services/feature-access.service';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, { params }: { params: Promise<{ homeworkId: string }> }) {
   try {
     const session = await requireStudentPortal();
+    await requireFeature(session.coachingCenterId, 'HOMEWORK');
     const { homeworkId } = await params;
     const body = await request.json().catch(() => null);
     const parsed = submitHomeworkSchema.safeParse(body);

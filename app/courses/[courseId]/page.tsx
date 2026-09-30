@@ -11,6 +11,9 @@ import { COURSE_STATUSES } from '@/lib/validations/course';
 import EnglishInput from '@/components/EnglishInput';
 import BanglaInput from '@/components/BanglaInput';
 import { hasBangla, hasEnglish } from '@/lib/format';
+import CoursePricingPanel from '@/components/CoursePricingPanel';
+import CourseStudentsTab from '@/components/CourseStudentsTab';
+import CourseScheduleTab from '@/components/CourseScheduleTab';
 
 interface SubjectOption {
   id: string;
@@ -53,8 +56,10 @@ export default function CourseDetailPage() {
   const [availableSubjects, setAvailableSubjects] = useState<SubjectOption[]>([]);
 
   const [editForm, setEditForm] = useState({
-    name: '', banglaName: '', code: '', description: '', durationMonths: 12, fee: 0, status: 'ACTIVE',
+    name: '', banglaName: '', code: '', description: '', durationMonths: 12, status: 'ACTIVE',
   });
+  // Course Fee lives in the Fee & Payment Plan tab, not in this basic-info form.
+  const [tab, setTab] = useState<'overview' | 'students' | 'batches' | 'schedule' | 'fees'>('overview');
 
   const [subjectDraft, setSubjectDraft] = useState<
     Array<{ subjectId: string; isMandatory: boolean; totalMarks: string }>
@@ -79,7 +84,6 @@ export default function CourseDetailPage() {
             code: c.code,
             description: c.description || '',
             durationMonths: c.durationMonths,
-            fee: Number(c.fee),
             status: c.status,
           });
           setSubjectDraft(
@@ -128,7 +132,6 @@ export default function CourseDetailPage() {
         body: JSON.stringify({
           ...editForm,
           durationMonths: Number(editForm.durationMonths),
-          fee: Number(editForm.fee),
         }),
       });
       const data = await res.json();
@@ -213,6 +216,34 @@ export default function CourseDetailPage() {
         <StatusBadge status={course.status} dictKey="courseStatus" />
       </div>
 
+      <div role="tablist" className="flex gap-1 border-b border-[#dce5f0]">
+        {([
+          ['overview', lang === 'bn' ? 'সারসংক্ষেপ' : 'Overview'],
+          ['students', lang === 'bn' ? 'শিক্ষার্থীবৃন্দ' : 'Students'],
+          ['batches', dict.batches.title],
+          ['schedule', lang === 'bn' ? 'ক্লাস রুটিন' : 'Schedule'],
+          ['fees', dict.coursePricing.tab],
+        ] as const).map(([id, text]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`px-4 py-2.5 text-[13.5px] font-semibold border-b-2 -mb-px transition-colors ${
+              tab === id ? 'border-[#063b78] text-[#063b78]' : 'border-transparent text-[#64748b] hover:text-[#063b78]'
+            }`}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'fees' && <CoursePricingPanel courseId={courseId} />}
+      {tab === 'students' && <CourseStudentsTab courseId={courseId} />}
+      {tab === 'schedule' && <CourseScheduleTab courseId={courseId} />}
+
+      {tab === 'overview' && (
       <div className="card p-5 md:p-6 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[#063b78]">{dict.courses.title.replace(/s$/, '')} {lang === 'bn' ? 'তথ্য' : 'Details'}</h2>
@@ -251,10 +282,6 @@ export default function CourseDetailPage() {
               onChange={(e) => setEditForm({ ...editForm, durationMonths: Number(e.target.value) })}
             />
           </div>
-          <div className="fld">
-            <label>{dict.courses.fee}</label>
-            <input type="number" value={editForm.fee} onChange={(e) => setEditForm({ ...editForm, fee: Number(e.target.value) })} />
-          </div>
           <div className="fld md:col-span-2">
             <label>{dict.courses.description}</label>
             <textarea rows={2} value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
@@ -279,7 +306,9 @@ export default function CourseDetailPage() {
           </div>
         </div>
       </div>
+      )}
 
+      {tab === 'overview' && (
       <div className="card p-5 md:p-6 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs">
         <h2 className="text-lg font-bold text-[#063b78] mb-1">{dict.courses.subjects}</h2>
         <p className="text-[12.5px] text-[#64748b] mb-4">{dict.courses.noSubjects}</p>
@@ -361,8 +390,13 @@ export default function CourseDetailPage() {
           </button>
         </div>
       </div>
+      )}
 
-      {course.batches.length > 0 && (
+      {tab === 'batches' && course.batches.length === 0 && (
+        <p className="text-[13px] text-[#94a3b8] italic">{dict.batches.emptyTitle}</p>
+      )}
+
+      {tab === 'batches' && course.batches.length > 0 && (
         <div className="card p-5 md:p-6 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs">
           <h2 className="text-lg font-bold text-[#063b78] mb-3">{dict.courses.batchesUsing}</h2>
           <div className="flex flex-wrap gap-2">

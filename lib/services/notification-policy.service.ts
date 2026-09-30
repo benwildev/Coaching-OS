@@ -297,7 +297,7 @@ export const POLICY_DEFINITIONS_CATALOG: CatalogPolicyDefinition[] = [
     defaultEnabled: true,
     recipients: [
       { recipientType: 'STUDENT', isMandatory: false, defaultEnabled: true, defaultChannels: DEFAULT_CHANNELS_INAPP_ONLY },
-      { recipientType: 'GUARDIAN', isMandatory: false, defaultEnabled: false, defaultChannels: DEFAULT_CHANNELS_ALL_ON },
+      { recipientType: 'GUARDIAN', isMandatory: false, defaultEnabled: true, defaultChannels: DEFAULT_CHANNELS_ALL_ON },
       { recipientType: 'TEACHER', isMandatory: false, defaultEnabled: false, defaultChannels: DEFAULT_CHANNELS_INAPP_ONLY },
       { recipientType: 'ADMIN', isMandatory: false, defaultEnabled: false, defaultChannels: DEFAULT_CHANNELS_STAFF },
     ],

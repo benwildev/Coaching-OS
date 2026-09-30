@@ -100,6 +100,26 @@ enum PaymentMethod {
   OTHER
 }
 
+enum PaymentGatewayProviderType {
+  BKASH
+  SSLCOMMERZ
+}
+
+enum GatewayTransactionStatus {
+  INITIATED
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum ManualPaymentStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
 enum CommunicationChannel {
   SMS
   WHATSAPP
@@ -110,6 +130,7 @@ enum SubscriptionStatus {
   TRIAL
   ACTIVE
   PAST_DUE
+  EXPIRED
   CANCELLED
 }
 
@@ -203,13 +224,17 @@ model CoachingCenter {
   communicationTemplates  CommunicationTemplate[]
   communicationLogs       CommunicationLog[]
   notificationPreferences NotificationPreference[]
-  subscriptions           Subscription[]
+  subscription            Subscription?
   studentIdSequences      StudentIdSequence[]
   portalAccounts          PortalAccount[]
   cashSessions            CashSession[]
   communicationProviderConfigs CommunicationProviderConfig[]
   certificates            Certificate[]
   notificationPolicies    NotificationPolicy[]
+  paymentGatewayConfigs   PaymentGatewayConfig[]
+  manualPaymentInstructions ManualPaymentInstruction[]
+  paymentGatewayTransactions PaymentGatewayTransaction[]
+  manualPaymentSubmissions ManualPaymentSubmission[]
 
   @@map("coaching_centers")
 }
@@ -253,6 +278,8 @@ model Branch {
   communicationLogs       CommunicationLog[]
   cashSessions            CashSession[]
   certificates            Certificate[]
+  gatewayTransactions     PaymentGatewayTransaction[]
+  manualPaymentSubmissions ManualPaymentSubmission[]
 
   @@unique([coachingCenterId, code])
   @@map("branches")
@@ -316,6 +343,9 @@ model User {
   closedCashSessions            CashSession[]            @relation("CashSessionClosedBy")
   updatedProviderConfigs        CommunicationProviderConfig[] @relation("CommunicationProviderConfigUpdatedBy")
   issuedCertificates            Certificate[]            @relation("CertificateIssuedBy")
+  updatedGatewayConfigs         PaymentGatewayConfig[]   @relation("GatewayConfigUpdatedBy")
+  updatedManualInstructions     ManualPaymentInstruction[] @relation("ManualInstructionUpdatedBy")
+  reviewedManualPayments        ManualPaymentSubmission[] @relation("ManualPaymentReviewedBy")
 
   @@unique([coachingCenterId, email])
   @@index([coachingCenterId, phone])
@@ -561,7 +591,8 @@ model Course {
   banglaName        String?
   code              String
   description       String?  @db.Text
-  fee               Decimal  @default(0) @db.Decimal(10, 2)
+  fee               Decimal  @default(0) @db.Decimal(10, 2) // Course Fee (primary price)
+  billingType       String   @default("ONE_TIME") // ONE_TIME, INSTALLMENT (Phase 11.2)
   durationMonths    Int      @default(12)
   status            String   @default("ACTIVE") // ACTIVE, INACTIVE, ARCHIVED
   createdAt         DateTime @default(now())
@@ -575,6 +606,9 @@ model Course {
   enrollments     StudentEnrollment[]
   batches         Batch[]
   feeStructures   FeeStructure[]
+  feeItems        CourseFeeItem[]
+  installments    CourseInstallment[]
+  feeAssignments  StudentFeeAssignment[]
 
   @@unique([coachingCenterId, code])
   @@index([coachingCenterId, status])
@@ -651,6 +685,8 @@ model Student {
   homeworkSubmissions        HomeworkSubmission[]
   guardianNotificationsAbout Notification[]         @relation("NotificationGuardianStudent")
   certificates               Certificate[]
+  gatewayTransactions        PaymentGatewayTransaction[]
+  manualPaymentSubmissions   ManualPaymentSubmission[]
 
   @@unique([coachingCenterId, studentIdCode])
   @@index([coachingCenterId, phone])
@@ -764,6 +800,7 @@ model StudentEnrollment {
   admissionDate     DateTime @default(now())
   status            String   @default("ENROLLED") // ENROLLED, COMPLETED, DROPPED, TRANSFERRED
   remarks           String?
+  idempotencyKey    String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -777,6 +814,7 @@ model StudentEnrollment {
   course          Course?         @relation(fields: [courseId], references: [id], onDelete: SetNull)
   educationBoard  EducationBoard? @relation(fields: [educationBoardId], references: [id], onDelete: SetNull)
 
+  @@unique([coachingCenterId, idempotencyKey])
   @@index([coachingCenterId, academicSessionId, academicClassId])
   @@index([coachingCenterId, branchId])
   @@index([coachingCenterId, status])
@@ -1217,6 +1255,7 @@ model StudentFeeAssignment {
   studentId         String
   feeStructureId    String?
   batchId           String?
+  courseId          String? // Phase 11.2: course whose pricing generated this assignment (traceability only; amounts are snapshotted below)
   academicSessionId String?
   name              String
   description       String?
@@ -1235,6 +1274,7 @@ model StudentFeeAssignment {
   student         Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
   feeStructure    FeeStructure?    @relation(fields: [feeStructureId], references: [id], onDelete: SetNull)
   batch           Batch?           @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  course          Course?          @relation(fields: [courseId], references: [id], onDelete: SetNull)
   academicSession AcademicSession? @relation(fields: [academicSessionId], references: [id], onDelete: SetNull)
   createdBy       User?            @relation("FeeAssignmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   invoiceItems    FeeInvoiceItem[]
@@ -1245,7 +1285,49 @@ model StudentFeeAssignment {
   @@index([coachingCenterId, branchId])
   @@index([batchId])
   @@index([feeStructureId])
+  @@index([courseId])
   @@map("student_fee_assignments")
+}
+
+// Phase 11.2: an additional one-time fee line on a course's "Fee & Payment
+// Plan" (e.g. Admission Fee, Exam Fee, Study Material). Configuration only —
+// when a student is admitted the amounts are copied into StudentFeeAssignment
+// rows, so editing/removing a line here never touches existing obligations.
+model CourseFeeItem {
+  id           String   @id @default(uuid())
+  courseId     String
+  name         String
+  banglaName   String?
+  amount       Decimal  @db.Decimal(10, 2)
+  isRequired   Boolean  @default(true)
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, displayOrder])
+  @@map("course_fee_items")
+}
+
+// Phase 11.2: one installment of a course's Course Fee (only used when
+// Course.billingType = INSTALLMENT). Installment amounts must sum to Course.fee.
+model CourseInstallment {
+  id           String   @id @default(uuid())
+  courseId     String
+  name         String
+  banglaName   String?
+  amount       Decimal  @db.Decimal(10, 2)
+  dueAfterDays Int      @default(0) // days after admission date the installment falls due
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, displayOrder])
+  @@map("course_installments")
 }
 
 // A billable invoice issued to a student. Totals (subtotal/discount/waiver/
@@ -1277,7 +1359,9 @@ model FeeInvoice {
   createdBy      User?            @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   items          FeeInvoiceItem[]
   discounts      FeeDiscount[]
-  payments       Payment[]
+  payments                   Payment[]
+  gatewayTransactions        PaymentGatewayTransaction[]
+  manualPaymentSubmissions   ManualPaymentSubmission[]
 
   @@unique([coachingCenterId, invoiceNumber])
   @@index([coachingCenterId, studentId])
@@ -1370,6 +1454,8 @@ model Payment {
   student        Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
   collectedBy    User?           @relation("PaymentCollectedBy", fields: [collectedById], references: [id], onDelete: SetNull)
   refunds        PaymentRefund[]
+  gatewayTransaction      PaymentGatewayTransaction?
+  manualPaymentSubmission ManualPaymentSubmission?
 
   @@unique([coachingCenterId, receiptNumber])
   @@unique([coachingCenterId, idempotencyKey])
@@ -2176,35 +2262,109 @@ model Media {
 // SAAS SUBSCRIPTIONS
 // ==========================================
 
+// Phase 11.4: platform-managed subscription plans. A plan is the *current*
+// offer; every tenant Subscription snapshots the plan's limits/features when it
+// is assigned or renewed, so editing a plan never silently changes what an
+// existing tenant was sold (Super Admin re-syncs a tenant explicitly). Plans are
+// archived, never deleted while any subscription references them. All limit
+// columns are nullable: NULL = unlimited.
 model SubscriptionPlan {
-  id           String  @id @default(uuid())
-  name         String // Starter, Growth, Enterprise
-  code         String  @unique
-  maxStudents  Int     @default(200)
-  maxBranches  Int     @default(1)
-  priceMonthly Decimal @db.Decimal(10, 2)
-  priceYearly  Decimal @db.Decimal(10, 2)
-  features     Json?
+  id               String   @id @default(uuid())
+  name             String // Starter, Growth, Enterprise
+  banglaName       String?
+  code             String   @unique
+  description      String?
+  status           String   @default("ACTIVE") // ACTIVE, ARCHIVED
+  version          Int      @default(1) // bumped whenever limits/features change
+  maxStudents      Int?
+  maxTeachers      Int?
+  maxStaffUsers    Int? // ADMIN + STAFF accounts (OWNER and TEACHER accounts are not counted)
+  maxPortalAccounts Int?
+  maxBranches      Int?
+  maxSms           Int? // per Dhaka calendar month
+  maxWhatsapp      Int? // per Dhaka calendar month
+  maxEmail         Int? // per Dhaka calendar month
+  maxStorageMb     Int?
+  priceMonthly     Decimal  @default(0) @db.Decimal(10, 2)
+  priceYearly      Decimal  @default(0) @db.Decimal(10, 2)
+  trialDays        Int?
+  features         Json? // { FEATURE_KEY: boolean }
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   subscriptions Subscription[]
 
+  @@index([status])
   @@map("subscription_plans")
 }
 
+// One CURRENT subscription per tenant. `planSnapshot` freezes the plan's limits
+// and features (and its version) at assignment time; `overrides` holds optional
+// tenant-specific limit/feature exceptions. Effective limit precedence:
+// overrides → planSnapshot → unlimited. A tenant with NO row is a legacy tenant
+// (created before Phase 11.4) and is unrestricted until a plan is assigned.
+// History of changes lives in PlatformAuditLog (before/after), not in extra rows.
 model Subscription {
   id               String             @id @default(uuid())
-  coachingCenterId String
+  coachingCenterId String             @unique
   planId           String
   status           SubscriptionStatus @default(TRIAL)
   startDate        DateTime           @default(now())
   endDate          DateTime
+  planVersion      Int                @default(1)
+  planSnapshot     Json?
+  overrides        Json?
+  cancelledAt      DateTime?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
   coachingCenter CoachingCenter   @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
-  plan           SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan           SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
 
+  @@index([status, endDate])
   @@map("subscriptions")
+}
+
+// Phase 11.4: platform-level identity. Deliberately NOT a User/RoleCode: it has
+// no tenant, no branch and no role assignment, its own cookie and its own
+// signing key, so it can never be mistaken for (or become) a tenant user.
+model PlatformAdmin {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  passwordHash        String
+  name                String
+  status              String    @default("ACTIVE") // ACTIVE, DISABLED
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  sessionVersion      Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  auditLogs PlatformAuditLog[]
+
+  @@map("platform_admins")
+}
+
+// Platform-owned audit trail, separate from the tenant AuditLog. coachingCenterId
+// is a plain string (no FK) so a record about a tenant survives even if that
+// tenant is ever removed. Never stores passwords or secrets.
+model PlatformAuditLog {
+  id               String   @id @default(uuid())
+  platformAdminId  String?
+  coachingCenterId String?
+  action           String
+  entity           String
+  entityId         String?
+  details          Json?
+  ipAddress        String?
+  createdAt        DateTime @default(now())
+
+  platformAdmin PlatformAdmin? @relation(fields: [platformAdminId], references: [id], onDelete: SetNull)
+
+  @@index([coachingCenterId, createdAt])
+  @@index([action, createdAt])
+  @@map("platform_audit_logs")
 }
 
 // ==========================================
@@ -2227,4 +2387,135 @@ model RateLimitBucket {
   @@unique([key, windowStart])
   @@index([windowStart])
   @@map("rate_limit_buckets")
+}
+
+// ==========================================
+// PHASE 11.3: ONLINE PAYMENT GATEWAYS & MANUAL PAYMENT SETTINGS
+// ==========================================
+
+// Tenant-scoped gateway configuration (bKash, SSLCommerz).
+// Credentials are encrypted at rest using CREDENTIALS_ENCRYPTION_KEY via crypto.service.ts.
+// Never exposed to frontend, never logged, never returned in API payloads.
+model PaymentGatewayConfig {
+  id                    String                     @id @default(uuid())
+  coachingCenterId      String
+  provider              PaymentGatewayProviderType
+  isEnabled             Boolean                    @default(false)
+  isSandbox             Boolean                    @default(true)
+  credentialsEncrypted  String                     @db.Text
+  lastTestedAt          DateTime?
+  lastTestStatus        String?                    // "SUCCESS", "FAILED"
+  lastTestError         String?
+  updatedById           String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+
+  coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  updatedBy      User?          @relation("GatewayConfigUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([coachingCenterId, provider])
+  @@map("payment_gateway_configs")
+}
+
+// Informational manual payment instructions configured by coaching center for student/guardian portal.
+// E.g. bKash Merchant/Personal number, Nagad number, Bank account details.
+model ManualPaymentInstruction {
+  id               String        @id @default(uuid())
+  coachingCenterId String
+  paymentMethod    PaymentMethod // BKASH, NAGAD, BANK, etc.
+  accountType      String?       // "Personal", "Merchant", "Agent", "Current Account"
+  accountNumber    String?       // Wallet number or Bank Account No.
+  bankName         String?
+  branchName       String?
+  routingNumber    String?
+  accountTitle     String?       // Account Name
+  instructions     String?       @db.Text
+  instructionsBn   String?       @db.Text
+  isEnabled        Boolean       @default(true)
+  displayOrder     Int           @default(0)
+  updatedById      String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  updatedBy      User?          @relation("ManualInstructionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([coachingCenterId, paymentMethod])
+  @@map("manual_payment_instructions")
+}
+
+// Lifecycle of an online gateway payment attempt.
+// Created before redirecting student to bKash/SSLCommerz checkout.
+// Verified server-side upon return/callback/IPN.
+// Idempotently creates an existing Payment record upon successful verification.
+model PaymentGatewayTransaction {
+  id                    String                     @id @default(uuid())
+  coachingCenterId      String
+  branchId              String?
+  invoiceId             String
+  studentId             String
+  provider              PaymentGatewayProviderType
+  merchantTransactionId String                     // Unique internal reference
+  providerTransactionId String?                    // Gateway paymentID / trxID / val_id
+  amount                Decimal                    @db.Decimal(10, 2)
+  currency              String                     @default("BDT")
+  status                GatewayTransactionStatus   @default(INITIATED)
+  initiatedAt           DateTime                   @default(now())
+  completedAt           DateTime?
+  failureReason         String?
+  metadata              Json?                      // Safe sanitized provider response data (no secrets)
+  paymentId             String?                    @unique // 1-to-1 link to created Payment
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+
+  coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch         Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  invoice        FeeInvoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  student        Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  payment        Payment?       @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@unique([coachingCenterId, merchantTransactionId])
+  @@index([coachingCenterId, provider, providerTransactionId])
+  @@index([coachingCenterId, invoiceId])
+  @@index([coachingCenterId, studentId])
+  @@index([coachingCenterId, status])
+  @@map("payment_gateway_transactions")
+}
+
+// Student/Guardian manual payment submission awaiting Admin/Staff review.
+// Does NOT touch financial ledgers until approved by authorized Admin/Staff.
+// When approved, invokes existing createPayment() creating normal Payment and Receipt.
+model ManualPaymentSubmission {
+  id               String              @id @default(uuid())
+  coachingCenterId String
+  branchId         String?
+  invoiceId        String
+  studentId        String
+  paymentMethod    PaymentMethod       // BKASH, NAGAD, BANK, OTHER
+  amount           Decimal             @db.Decimal(10, 2)
+  transactionId    String?             // e.g. bKash/Nagad TrxID
+  referenceNumber  String?
+  senderMobile     String?
+  bankName         String?
+  paymentDate      DateTime            @default(now())
+  studentNote      String?
+  status           ManualPaymentStatus @default(PENDING_REVIEW)
+  reviewedById     String?
+  reviewedAt       DateTime?
+  rejectionReason  String?
+  paymentId        String?             @unique // 1-to-1 link to created Payment once approved
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch         Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  invoice        FeeInvoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  student        Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  reviewedBy     User?          @relation("ManualPaymentReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  payment        Payment?       @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([coachingCenterId, invoiceId])
+  @@index([coachingCenterId, studentId])
+  @@index([coachingCenterId, status])
+  @@map("manual_payment_submissions")
 }

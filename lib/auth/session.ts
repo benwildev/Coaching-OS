@@ -155,26 +155,37 @@ export async function requireRole(allowedRoles: RoleCode[]): Promise<SessionUser
 }
 
 /**
- * Guard: A user scoped to a single branch (non OWNER/ADMIN with a branchId)
- * may only operate on that branch. OWNER/ADMIN have center-wide access.
+ * Guard: Asserts that a user has authorization to operate on a branch-scoped resource.
+ *
+ * Safe Null-Branch Policy (Phase 11.1):
+ * 1. Center-wide roles:
+ *    - OWNER always has full center-wide access across all branches and tenant-wide (null-branch) resources.
+ *    - Unassigned users (!user.branchId, e.g. center-wide ADMIN, STAFF, or TEACHER without a fixed branch assignment)
+ *      have center-wide access across all branches and tenant-wide resources.
+ * 2. Branch-locked roles (user.branchId is set, e.g. branch-locked ADMIN, STAFF, or TEACHER):
+ *    - When resource branchId != null: user.branchId must strictly match resource branchId.
+ *    - When resource branchId == null (or undefined): Access is FORBIDDEN. Tenant-wide or unassigned
+ *      resources belong to the center as a whole and may only be operated on by center-wide roles,
+ *      never by users restricted to a specific branch.
  */
 export function assertBranchAccess(user: SessionUser, branchId: string | null | undefined): void {
-  if (user.role === 'OWNER' || user.role === 'ADMIN') return;
-  if (user.branchId && branchId && user.branchId !== branchId) {
+  if (user.role === 'OWNER') return;
+  if (!user.branchId) return;
+
+  if (!branchId || user.branchId !== branchId) {
     throw new Error('FORBIDDEN_BRANCH');
   }
 }
 
 /**
  * Resolves the branch a listing/read endpoint should actually be scoped to:
- * a branch-scoped STAFF/TEACHER always gets their own branch, regardless of
- * what the client requested — the client-supplied branchId is only honored
- * for center-wide OWNER/ADMIN callers (or a TEACHER/STAFF with no fixed
- * branch). This prevents a branch-scoped user from reading another
- * branch's attendance just by editing the query string.
+ * a branch-scoped caller (anyone with a fixed user.branchId, other than OWNER)
+ * always gets their own branch, regardless of what the client requested.
+ * The client-supplied branchId is only honored for center-wide callers
+ * (OWNER, or users with no fixed branch).
  */
 export function resolveEffectiveBranchId(user: SessionUser, requestedBranchId?: string): string | undefined {
-  if (user.role !== 'OWNER' && user.role !== 'ADMIN' && user.branchId) {
+  if (user.role !== 'OWNER' && user.branchId) {
     return user.branchId;
   }
   return requestedBranchId;

@@ -23,13 +23,15 @@ const SECTIONS: {
   { id: 'users', label: 'Users & Permissions', bnLabel: 'ব্যবহারকারী ও অনুমতি' },
   { id: 'notifications', label: 'Notification Policies', bnLabel: 'নোটিফিকেশন পলিসি', href: '/settings/notifications', badge: 'Alerts 🔔' },
   { id: 'communication', label: 'SMS & Gateway', bnLabel: 'এসএমএস ও গেটওয়ে', href: '/settings/communication' },
+  { id: 'payment-gateways', label: 'Payment Gateways', bnLabel: 'পেমেন্ট গেটওয়ে', href: '/settings/payment-gateways', badge: 'Online Pay' },
   { id: 'region', label: 'Language & Region', bnLabel: 'ভাষা ও অঞ্চল' },
   { id: 'security', label: 'Security & Roles', bnLabel: 'নিরাপত্তা ও ভূমিকা' },
+  { id: 'subscription', label: 'Subscription', bnLabel: 'সাবস্ক্রিপশন', href: '/settings/subscription' },
   { id: 'system', label: 'System Audit', bnLabel: 'সিস্টেম অডিট' },
 ];
 
 export default function SettingsPage() {
-  const { showToast, lang, refreshAuth } = useApp();
+  const { showToast, lang, refreshAuth, currentUser } = useApp();
   const [sec, setSec] = useState('profile');
   const [loading, setLoading] = useState(false);
 
@@ -426,7 +428,7 @@ export default function SettingsPage() {
     <div className="max-w-[1400px] mx-auto flex flex-col md:flex-row gap-5">
       {/* Settings Navigation Sidebar */}
       <div className="card p-3 md:w-64 shrink-0 flex flex-row md:flex-col gap-1 overflow-x-auto hs self-start">
-        {SECTIONS.map((s) => {
+        {SECTIONS.filter((s) => s.id !== 'subscription' || currentUser?.role === 'OWNER').map((s) => {
           const isCurrent = sec === s.id;
           const innerContent = (
             <div className="flex items-center justify-between gap-1.5 w-full">

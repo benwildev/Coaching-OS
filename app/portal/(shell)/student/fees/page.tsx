@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePortal } from '@/components/portal/PortalProvider';
 import { DICTIONARY, formatDhakaDate } from '@/lib/i18n';
+import { PayInvoiceModal } from '@/components/portal/PayInvoiceModal';
 
 interface Invoice {
   id: string;
@@ -33,8 +34,9 @@ export default function StudentPortalFeesPage() {
   const [summary, setSummary] = useState<{ totalBilled: number; totalDiscount: number; totalWaiver: number; totalPaid: number; totalDue: number } | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
-  useEffect(() => {
+  const loadFees = () => {
     fetch('/api/portal/student/fees')
       .then((r) => r.json())
       .then((res) => {
@@ -44,6 +46,10 @@ export default function StudentPortalFeesPage() {
         }
       })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadFees();
   }, []);
 
   if (loading) return <div className="py-16 text-center text-[13px] text-[#64748b]">{t.common.loading}</div>;
@@ -85,12 +91,25 @@ export default function StudentPortalFeesPage() {
                     {formatDhakaDate(inv.invoiceDate)}
                     {inv.dueDate && ` · ${f.dueDate}: ${formatDhakaDate(inv.dueDate)}`}
                   </div>
+                  {inv.dueAmount > 0 && inv.status !== 'PAID' && (
+                    <div className="text-[11.5px] text-rose-600 font-medium mt-0.5">
+                      {lang === 'bn' ? 'বকেয়া' : 'Due'}: ৳{Number(inv.dueAmount).toLocaleString('en-BD')}
+                    </div>
+                  )}
                 </div>
-                <div className="text-right shrink-0">
+                <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
                   <div className="font-bold text-[#092f63] text-[13px]">৳{Number(inv.totalAmount).toLocaleString('en-BD')}</div>
-                  <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10.5px] font-bold ${STATUS_STYLE[inv.status] || 'bg-slate-100 text-slate-600'}`}>
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10.5px] font-bold ${STATUS_STYLE[inv.status] || 'bg-slate-100 text-slate-600'}`}>
                     {(t.invoiceStatus as Record<string, string>)?.[inv.status] || inv.status}
                   </span>
+                  {inv.dueAmount > 0 && inv.status !== 'PAID' && inv.status !== 'CANCELLED' && (
+                    <button
+                      onClick={() => setSelectedInvoice(inv)}
+                      className="mt-1 px-3 py-1 bg-[#092f63] hover:bg-[#063b78] text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+                    >
+                      {lang === 'bn' ? 'পেমেন্ট করুন' : 'Pay Now'}
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
@@ -98,7 +117,18 @@ export default function StudentPortalFeesPage() {
         )}
       </div>
 
-      <p className="text-[11.5px] text-[#94a3b8] text-center">{f.readOnlyNote}</p>
+      {selectedInvoice && (
+        <PayInvoiceModal
+          invoiceId={selectedInvoice.id}
+          invoiceNumber={selectedInvoice.invoiceNumber}
+          dueAmount={selectedInvoice.dueAmount}
+          isOpen={Boolean(selectedInvoice)}
+          onClose={() => setSelectedInvoice(null)}
+          onSuccess={() => {
+            loadFees();
+          }}
+        />
+      )}
     </div>
   );
 }
