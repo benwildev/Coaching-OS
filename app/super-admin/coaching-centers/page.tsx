@@ -28,15 +28,21 @@ interface Row {
 }
 interface PlanOption { id: string; name: string; banglaName?: string | null; status: string }
 
-const CATEGORY_STYLE: Record<string, string> = {
-  ACTIVE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  TRIAL: 'bg-sky-50 text-sky-700 border-sky-200',
-  EXPIRED: 'bg-amber-50 text-amber-800 border-amber-200',
-  PAST_DUE: 'bg-orange-50 text-orange-700 border-orange-200',
-  CANCELLED: 'bg-slate-100 text-slate-600 border-slate-200',
-  SUSPENDED: 'bg-rose-50 text-rose-700 border-rose-200',
-  LEGACY: 'bg-slate-50 text-slate-500 border-slate-200',
+const CATEGORY_BADGE: Record<string, { bg: string; text: string; dot: string }> = {
+  ACTIVE:    { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+  TRIAL:     { bg: 'bg-sky-50', text: 'text-sky-700', dot: 'bg-sky-500' },
+  EXPIRED:   { bg: 'bg-amber-50', text: 'text-amber-800', dot: 'bg-amber-500' },
+  PAST_DUE:  { bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500' },
+  CANCELLED: { bg: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400' },
+  SUSPENDED: { bg: 'bg-rose-50', text: 'text-rose-700', dot: 'bg-rose-500' },
+  LEGACY:    { bg: 'bg-slate-50', text: 'text-slate-500', dot: 'bg-slate-400' },
 };
+
+/* inline icons */
+const SearchIcon = <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.6"/><path d="M12.5 12.5L16 16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>;
+const PlusIcon = <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 4v10M4 9h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+const ChevronLeft = <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M11 4L6 9l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const ChevronRight = <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M7 4l5 5-5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
 function ListInner() {
   const { lang, showToast } = useApp();
@@ -84,93 +90,171 @@ function ListInner() {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5 fade-in">
+      {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="text-2xl font-extrabold text-[#063b78]">{t.centers}</h1>
-        <Link href="/super-admin/coaching-centers/new" className="primary">{t.newCenter}</Link>
+        <div>
+          <h1 className="text-[22px] font-extrabold text-[#052e5f] tracking-tight">{t.centers}</h1>
+          <p className="text-[13px] text-[#64748b] mt-0.5">Manage all registered coaching centers</p>
+        </div>
+        <Link href="/super-admin/coaching-centers/new" className="primary">
+          {PlusIcon}
+          <span>{t.newCenter}</span>
+        </Link>
       </div>
 
+      {/* ── Legacy banner ──────────────────────────────────────────── */}
       {noSub > 0 && category !== 'LEGACY' && (
-        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-[13px] text-amber-900 flex items-center justify-between gap-3 flex-wrap">
-          <span>{so.noSubscriptionsBanner.replace('{n}', num(noSub))}</span>
-          <button type="button" className="tb" onClick={() => { setPage(1); setCategory('LEGACY'); }}>{so.viewThem}</button>
+        <div className="flex items-center justify-between gap-3 flex-wrap p-3.5 rounded-2xl bg-amber-50 border border-amber-200/60">
+          <span className="text-[13px] text-amber-900 font-medium">{so.noSubscriptionsBanner.replace('{n}', num(noSub))}</span>
+          <button type="button" className="text-[12.5px] font-bold text-amber-700 hover:text-amber-800" onClick={() => { setPage(1); setCategory('LEGACY'); }}>{so.viewThem} →</button>
         </div>
       )}
 
+      {/* ── Filters ────────────────────────────────────────────────── */}
       <div className="flex gap-3 flex-wrap">
-        <input value={search} onChange={(e) => { setPage(1); setSearch(e.target.value); }} placeholder={t.search} className="grow min-w-[220px] rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[13.5px]" />
-        <select value={category} onChange={(e) => { setPage(1); setCategory(e.target.value); }} className="rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[13.5px]" aria-label={t.status}>
+        <div className="relative grow min-w-[220px]">
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#94a3b8]">{SearchIcon}</span>
+          <input
+            value={search}
+            onChange={(e) => { setPage(1); setSearch(e.target.value); }}
+            placeholder={t.search}
+            className="w-full rounded-xl border border-[#dce5f0] bg-white pl-10 pr-3 py-2.5 text-[13.5px] transition-colors focus:border-[#063b78] focus:outline-none"
+          />
+        </div>
+        <select value={category} onChange={(e) => { setPage(1); setCategory(e.target.value); }} className="rounded-xl border border-[#dce5f0] bg-white px-3 py-2.5 text-[13.5px] focus:border-[#063b78] focus:outline-none" aria-label={t.status}>
           <option value="all">{t.allStatuses}</option>
           {['ACTIVE', 'TRIAL', 'PAST_DUE', 'EXPIRED', 'CANCELLED', 'SUSPENDED', 'LEGACY'].map((c) => <option key={c} value={c}>{st[c]}</option>)}
         </select>
-        <select value={planId} onChange={(e) => { setPage(1); setPlanId(e.target.value); }} className="rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[13.5px]" aria-label={t.plan}>
+        <select value={planId} onChange={(e) => { setPage(1); setPlanId(e.target.value); }} className="rounded-xl border border-[#dce5f0] bg-white px-3 py-2.5 text-[13.5px] focus:border-[#063b78] focus:outline-none" aria-label={t.plan}>
           <option value="">{so.allPlans}</option>
           {plans.map((p) => <option key={p.id} value={p.id}>{lang === 'bn' && p.banglaName ? p.banglaName : p.name}</option>)}
         </select>
-        <select value={kind} onChange={(e) => { setPage(1); setKind(e.target.value); }} className="rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[13.5px]" aria-label={so.type}>
+        <select value={kind} onChange={(e) => { setPage(1); setKind(e.target.value); }} className="rounded-xl border border-[#dce5f0] bg-white px-3 py-2.5 text-[13.5px] focus:border-[#063b78] focus:outline-none" aria-label={so.type}>
           <option value="">{so.allTypes}</option>
           <option value="trial">{so.trialOnly}</option>
           <option value="paid">{so.paidOnly}</option>
         </select>
       </div>
 
-      <div className="card rounded-2xl bg-white border border-[#dce5f0] shadow-2xs overflow-x-auto">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="text-left text-[#64748b] border-b border-[#edf1f7]">
-              {[t.name, t.owner, t.plan, t.status, so.colType, so.colStart, t.expiry, so.colLimits, t.actions].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={9} className="px-3 py-10 text-center text-[#94a3b8]">…</td></tr>
-            ) : rows.length === 0 ? (
-              <tr><td colSpan={9} className="px-3 py-10 text-center text-[#94a3b8]">{t.noData}</td></tr>
-            ) : (
-              rows.map((r) => (
-                <tr key={r.id} className="border-b border-[#f1f5f9] hover:bg-[#f8fafc] align-top">
-                  <td className="px-3 py-2.5">
-                    <Link href={`/super-admin/coaching-centers/${r.id}`} className="font-bold text-[#063b78] hover:underline">{lang === 'bn' && r.banglaName ? r.banglaName : r.name}</Link>
-                    <div className="text-[11px] font-mono text-[#94a3b8]">{r.code}</div>
-                  </td>
-                  <td className="px-3 py-2.5">{r.owner ? <><div>{r.owner.name}</div><div className="text-[11px] text-[#94a3b8]">{r.owner.email}{r.owner.phone ? ` · ${r.owner.phone}` : ''}</div></> : '—'}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">{r.plan ? (lang === 'bn' && r.plan.banglaName ? r.plan.banglaName : r.plan.name) : '—'}</td>
-                  <td className="px-3 py-2.5"><span className={`px-2 py-0.5 rounded-md border text-[11.5px] font-semibold ${CATEGORY_STYLE[r.category] || ''}`}>{st[r.category] || r.category}</span></td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">{r.plan ? (r.isTrial ? so.trialType : so.paidType) : '—'}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">{r.startDate ? formatDhakaDate(r.startDate) : '—'}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">{r.subscriptionEnd ? formatDhakaDate(r.subscriptionEnd) : '—'}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-[12px]">
-                    {r.limits ? (
-                      <>
-                        <div>{DICTIONARY[lang].subscription.resources.students}: <b className="num">{num(r.students)}/{lim(r.limits.maxStudents)}</b></div>
-                        <div>{DICTIONARY[lang].subscription.resources.teachers}: <b className="num">{num(r.teachers)}/{lim(r.limits.maxTeachers)}</b></div>
-                        <div>{DICTIONARY[lang].subscription.resources.staffUsers}: <b className="num">{num(r.staff)}/{lim(r.limits.maxStaffUsers)}</b></div>
-                      </>
-                    ) : '—'}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    <div className="flex items-center gap-2 text-[12px] font-semibold">
-                      <Link href={`/super-admin/coaching-centers/${r.id}`} className="text-[#063b78] hover:underline">{t.view}</Link>
-                      <Link href={`/super-admin/coaching-centers/${r.id}?tab=subscription`} className="text-[#063b78] hover:underline">{r.plan ? t.manage : so.assignPlan}</Link>
-                      {r.tenantStatus === 'SUSPENDED'
-                        ? <button type="button" onClick={() => setStatus(r, 'ACTIVE')} className="text-emerald-700 hover:underline">{t.activate}</button>
-                        : <button type="button" onClick={() => setStatus(r, 'SUSPENDED')} className="text-rose-600 hover:underline">{t.suspend}</button>}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      {/* ── Table ──────────────────────────────────────────────────── */}
+      <div className="card rounded-2xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="text-left border-b border-[#edf1f7]">
+                {[t.name, t.owner, t.plan, t.status, so.colType, so.colStart, t.expiry, so.colLimits, t.actions].map((h) => (
+                  <th key={h} className="px-4 py-3 font-semibold text-[11.5px] uppercase tracking-wide text-[#64748b] whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={9} className="px-4 py-14 text-center">
+                  <div className="inline-block h-6 w-6 animate-spin rounded-full border-[2.5px] border-[#063b78] border-t-transparent" />
+                </td></tr>
+              ) : rows.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-14 text-center text-[#94a3b8] text-[14px]">{t.noData}</td></tr>
+              ) : (
+                rows.map((r) => {
+                  const badge = CATEGORY_BADGE[r.category] || CATEGORY_BADGE.LEGACY;
+                  return (
+                    <tr key={r.id} className="border-b border-[#f1f5f9] hover:bg-[#f8fafc] align-top transition-colors">
+                      <td className="px-4 py-3">
+                        <Link href={`/super-admin/coaching-centers/${r.id}`} className="font-bold text-[#052e5f] hover:text-[#063b78] transition-colors">
+                          {lang === 'bn' && r.banglaName ? r.banglaName : r.name}
+                        </Link>
+                        <div className="text-[11px] font-mono text-[#94a3b8] mt-0.5">{r.code}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {r.owner ? (
+                          <div>
+                            <div className="font-medium text-[#1e293b]">{r.owner.name}</div>
+                            <div className="text-[11px] text-[#94a3b8]">{r.owner.email}{r.owner.phone ? ` · ${r.owner.phone}` : ''}</div>
+                          </div>
+                        ) : <span className="text-[#cbd5e1]">—</span>}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap font-medium">{r.plan ? (lang === 'bn' && r.plan.banglaName ? r.plan.banglaName : r.plan.name) : <span className="text-[#cbd5e1]">—</span>}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11.5px] font-semibold ${badge.bg} ${badge.text}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                          {st[r.category] || r.category}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-[#64748b]">{r.plan ? (r.isTrial ? so.trialType : so.paidType) : <span className="text-[#cbd5e1]">—</span>}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-[#64748b]">{r.startDate ? formatDhakaDate(r.startDate) : <span className="text-[#cbd5e1]">—</span>}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-[#64748b]">{r.subscriptionEnd ? formatDhakaDate(r.subscriptionEnd) : <span className="text-[#cbd5e1]">—</span>}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-[12px]">
+                        {r.limits ? (
+                          <div className="space-y-0.5">
+                            <div><span className="text-[#94a3b8]">{DICTIONARY[lang].subscription.resources.students}:</span> <b className="num text-[#1e293b]">{num(r.students)}/{lim(r.limits.maxStudents)}</b></div>
+                            <div><span className="text-[#94a3b8]">{DICTIONARY[lang].subscription.resources.teachers}:</span> <b className="num text-[#1e293b]">{num(r.teachers)}/{lim(r.limits.maxTeachers)}</b></div>
+                            <div><span className="text-[#94a3b8]">{DICTIONARY[lang].subscription.resources.staffUsers}:</span> <b className="num text-[#1e293b]">{num(r.staff)}/{lim(r.limits.maxStaffUsers)}</b></div>
+                          </div>
+                        ) : <span className="text-[#cbd5e1]">—</span>}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Link href={`/super-admin/coaching-centers/${r.id}`} className="sa-action-btn sa-action-view">{t.view}</Link>
+                          <Link href={`/super-admin/coaching-centers/${r.id}?tab=subscription`} className="sa-action-btn sa-action-manage">{r.plan ? t.manage : so.assignPlan}</Link>
+                          {r.tenantStatus === 'SUSPENDED'
+                            ? <button type="button" onClick={() => setStatus(r, 'ACTIVE')} className="sa-action-btn sa-action-activate">{t.activate}</button>
+                            : <button type="button" onClick={() => setStatus(r, 'SUSPENDED')} className="sa-action-btn sa-action-suspend">{t.suspend}</button>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
+      {/* ── Pagination ─────────────────────────────────────────────── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-3 text-[13px]">
-          <button type="button" className="tb" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button>
-          <span>{num(page)} / {num(totalPages)}</span>
-          <button type="button" className="tb" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>›</button>
+        <div className="flex items-center justify-center gap-2">
+          <button type="button" className="sa-page-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>{ChevronLeft}</button>
+          <span className="px-3 py-1.5 text-[13px] font-semibold text-[#052e5f] bg-white border border-[#dce5f0] rounded-lg num">{num(page)} / {num(totalPages)}</span>
+          <button type="button" className="sa-page-btn" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>{ChevronRight}</button>
         </div>
       )}
+
+      <style>{`
+        .sa-action-btn {
+          padding: 5px 10px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          transition: all 0.15s;
+          white-space: nowrap;
+          border: none;
+          background: none;
+          cursor: pointer;
+        }
+        .sa-action-view { color: #063b78; }
+        .sa-action-view:hover { background: #eef3fa; }
+        .sa-action-manage { color: #063b78; }
+        .sa-action-manage:hover { background: #eef3fa; }
+        .sa-action-activate { color: #059669; }
+        .sa-action-activate:hover { background: #ecfdf5; }
+        .sa-action-suspend { color: #dc2626; }
+        .sa-action-suspend:hover { background: #fef2f2; }
+        .sa-page-btn {
+          width: 36px; height: 36px;
+          border-radius: 10px;
+          border: 1px solid #dce5f0;
+          background: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #063b78;
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+        .sa-page-btn:hover:not(:disabled) { border-color: #063b78; background: #f8fafc; }
+        .sa-page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+      `}</style>
     </div>
   );
 }
