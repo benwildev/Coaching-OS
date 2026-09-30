@@ -316,14 +316,15 @@ export async function POST(request: Request) {
           const typeLabelEn = type === 'DISCOUNT' ? 'Discount' : 'Waiver';
           const typeLabelBn = type === 'DISCOUNT' ? 'ডিসকাউন্ট' : 'মওকুফ';
           const studentName = invoice.student?.name || 'Student';
-          const studentIdCode = invoice.student?.studentIdCode || '—';
+          const studentBanglaName = invoice.student?.banglaName || studentName;
+          const studentIdCode = invoice.student?.studentIdCode || invoice.student?.id || '—';
 
           await notifyUsers({
             coachingCenterId,
             userIds: owners.map((o) => o.id),
             type: 'FEE_DISCOUNT_REQUESTED',
             title: `New ${typeLabelEn} Request / নতুন ${typeLabelBn} আবেদন`,
-            body: `${user.name} requested a ${typeLabelEn.toLowerCase()} of ৳${amount} for ${studentName} (ID: ${studentIdCode}, Invoice: ${invoice.invoiceNumber}).\n${user.name} শিক্ষার্থী ${studentName} (আইডি: ${studentIdCode}, ইনভয়েস: ${invoice.invoiceNumber})-এর জন্য ৳${amount} ${typeLabelBn}-এর আবেদন করেছেন।`,
+            body: `${user.name} requested a ${typeLabelEn.toLowerCase()} of ৳${amount} for ${studentName} (ID: ${studentIdCode}, Invoice: ${invoice.invoiceNumber}).\n${user.name} শিক্ষার্থী ${studentBanglaName} (আইডি: ${studentIdCode}, ইনভয়েস: ${invoice.invoiceNumber})-এর জন্য ৳${amount} ${typeLabelBn}-এর আবেদন করেছেন।`,
             actionUrl: '/fees/discounts',
             sourceType: 'FeeDiscount',
             sourceId: discountRecord.id,

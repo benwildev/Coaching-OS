@@ -3,6 +3,7 @@ import { loginSchema } from '@/lib/validations/auth';
 import { authenticateByEmail, LOCKOUT_MINUTES, MAX_FAILED_ATTEMPTS, redirectPathFor } from '@/lib/services/unified-auth.service';
 import { clearSessionCookie, createSessionToken, setSessionCookie } from '@/lib/auth/session';
 import { clearPortalSessionCookie, createPortalSessionToken, setPortalSessionCookie } from '@/lib/auth/portal-session';
+import { clearPlatformSessionCookie, createPlatformSessionToken, setPlatformSessionCookie } from '@/lib/auth/platform-session';
 import { recordAuditLog } from '@/lib/services/audit.service';
 import { checkRateLimit, getClientIp } from '@/lib/services/rate-limit.service';
 
@@ -16,10 +17,10 @@ const LOGIN_RATE_LIMIT_MAX = 30;
 export const dynamic = 'force-dynamic';
 
 /**
- * The only sign-in endpoint (used by /login). Email + password; the server
- * determines whether the credentials belong to a staff user (→
- * coaching_os_session) or a student/guardian portal account (→
- * coaching_os_portal_session) and returns where to go next.
+ * The single sign-in endpoint (used by /login) for ALL users:
+ * - Platform Super Admin (→ coaching_os_platform_session → /super-admin/dashboard)
+ * - Coaching Center Staff: Owner, Admin, Staff, Teacher (→ coaching_os_session → /dashboard)
+ * - Student & Guardian Portal (→ coaching_os_portal_session → /portal/student or /portal/guardian)
  *
  * Every credential failure — unknown email, wrong password, locked account,
  * ambiguous identity — returns the same generic 401, so the response never
@@ -32,7 +33,8 @@ const INVALID = {
 
 export async function POST(req: Request) {
   try {
-    const rateLimit = await checkRateLimit(`login:${getClientIp(req)}`, LOGIN_RATE_LIMIT_WINDOW_MS, LOGIN_RATE_LIMIT_MAX);
+    const ip = getClientIp(req);
+    const rateLimit = await checkRateLimit(`login:${ip}`, LOGIN_RATE_LIMIT_WINDOW_MS, LOGIN_RATE_LIMIT_MAX);
     if (!rateLimit.allowed) {
       return NextResponse.json(INVALID, { status: 429, headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) } });
     }
@@ -43,7 +45,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: parsed.error.issues[0]?.message || 'Invalid input' }, { status: 400 });
     }
 
-    const outcome = await authenticateByEmail(parsed.data.email, parsed.data.password);
+    const outcome = await authenticateByEmail(parsed.data.email, parsed.data.password, ip);
     if (!outcome.ok) {
       if (outcome.reason === 'TENANT_SUSPENDED') {
         return NextResponse.json(
@@ -62,11 +64,20 @@ export async function POST(req: Request) {
 
     const redirectTo = redirectPathFor(outcome);
 
+    if (outcome.kind === 'PLATFORM_ADMIN') {
+      const admin = outcome.admin;
+      await setPlatformSessionCookie(await createPlatformSessionToken(admin));
+      await clearSessionCookie();
+      await clearPortalSessionCookie();
+      return NextResponse.json({ success: true, accountType: 'SUPER_ADMIN', redirectTo });
+    }
+
     if (outcome.kind === 'STAFF') {
       const user = outcome.staff;
       await setSessionCookie(await createSessionToken(user));
-      // One identity per browser: drop any portal session left behind.
+      // One identity per browser: drop any portal or platform session left behind.
       await clearPortalSessionCookie();
+      await clearPlatformSessionCookie();
       await recordAuditLog({
         coachingCenterId: user.coachingCenterId,
         userId: user.userId,
@@ -81,6 +92,7 @@ export async function POST(req: Request) {
     const portal = outcome.portal;
     await setPortalSessionCookie(await createPortalSessionToken(portal));
     await clearSessionCookie();
+    await clearPlatformSessionCookie();
     await recordAuditLog({
       coachingCenterId: portal.coachingCenterId,
       studentId: portal.studentId,

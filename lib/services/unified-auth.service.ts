@@ -2,22 +2,23 @@ import { randomBytes } from 'node:crypto';
 import prisma from '@/lib/db';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
 import type { PortalSessionUser } from '@/lib/auth/portal-session';
+import type { PlatformSessionUser } from '@/lib/auth/platform-session';
 import { staffIdentityInclude, toStaffIdentity, type StaffIdentity } from './user.service';
 import { portalIdentityInclude, toPortalSessionUser } from './portal-auth.service';
 import { recordAuditLog } from './audit.service';
+import { recordPlatformAudit } from './platform-audit.service';
 
 /**
  * The single sign-in path for the whole application (/login → /api/auth/login).
  *
  * Email + password only. The server decides which identity the credentials
- * belong to — staff (User: OWNER/ADMIN/STAFF/TEACHER) or portal
- * (PortalAccount: STUDENT/GUARDIAN) — the user never picks an account type.
+ * belong to — platform super admin (PlatformAdmin), staff (User: OWNER/ADMIN/STAFF/TEACHER),
+ * or portal (PortalAccount: STUDENT/GUARDIAN) — the user never picks an account type.
  *
  * Security properties:
- *  - every staff user AND portal account with the email is considered, in
- *    every tenant; exactly ONE password match authenticates. Zero matches or
- *    several (same email + same password in two tenants, or on a staff and a
- *    portal account) → generic failure, never an arbitrary pick;
+ *  - every platform admin, staff user AND portal account with the email is considered;
+ *    exactly ONE password match authenticates. Zero matches or several (same email + same
+ *    password across multiple identities) → generic failure, never an arbitrary pick;
  *  - account state (inactive/disabled) is revealed only after the correct
  *    password, so it cannot be probed without the password;
  *  - lockout: MAX_FAILED_ATTEMPTS consecutive failures lock an account for
@@ -34,6 +35,7 @@ const CANDIDATE_LIMIT = 10;
 const DUMMY_HASH = hashPassword(randomBytes(16).toString('hex'));
 
 export type AuthOutcome =
+  | { ok: true; kind: 'PLATFORM_ADMIN'; admin: PlatformSessionUser }
   | { ok: true; kind: 'STAFF'; staff: StaffIdentity }
   | { ok: true; kind: 'PORTAL'; portal: PortalSessionUser; portalAccountId: string }
   | { ok: false; reason: 'INVALID_CREDENTIALS' }
@@ -60,17 +62,21 @@ function nextFailure(a: LockState, now: number): { failedLoginAttempts: number; 
 }
 
 export function redirectPathFor(outcome: Extract<AuthOutcome, { ok: true }>): string {
+  if (outcome.kind === 'PLATFORM_ADMIN') return '/super-admin/dashboard';
   if (outcome.kind === 'PORTAL') return outcome.portal.portalType === 'GUARDIAN' ? '/portal/guardian' : '/portal/student';
   // OWNER / ADMIN / STAFF / TEACHER share the staff dashboard; TEACHER's
   // navigation and data access are narrowed by the existing role guards.
   return '/dashboard';
 }
 
-export async function authenticateByEmail(rawEmail: string, plainPassword: string): Promise<AuthOutcome> {
+export async function authenticateByEmail(rawEmail: string, plainPassword: string, ipAddress?: string | null): Promise<AuthOutcome> {
   const email = rawEmail.trim().toLowerCase();
   if (!email || !plainPassword) return { ok: false, reason: 'INVALID_CREDENTIALS' };
 
-  const [users, portals] = await Promise.all([
+  const [platformAdmin, users, portals] = await Promise.all([
+    prisma.platformAdmin.findUnique({
+      where: { email },
+    }),
     prisma.user.findMany({
       where: { email: { equals: email, mode: 'insensitive' } },
       include: staffIdentityInclude,
@@ -84,21 +90,43 @@ export async function authenticateByEmail(rawEmail: string, plainPassword: strin
   ]);
 
   const now = Date.now();
-  if (users.length === 0 && portals.length === 0) {
+  if (!platformAdmin && users.length === 0 && portals.length === 0) {
     verifyPassword(plainPassword, DUMMY_HASH);
     return { ok: false, reason: 'INVALID_CREDENTIALS' };
   }
 
+  const platformAdminToCheck = platformAdmin && !isLocked(platformAdmin, now) ? platformAdmin : null;
   const usersToCheck = users.filter((u) => !isLocked(u, now));
   const portalsToCheck = portals.filter((p) => !isLocked(p, now) && p.passwordHash);
-  if (usersToCheck.length === 0 && portalsToCheck.length === 0) verifyPassword(plainPassword, DUMMY_HASH);
+  if (!platformAdminToCheck && usersToCheck.length === 0 && portalsToCheck.length === 0) {
+    verifyPassword(plainPassword, DUMMY_HASH);
+  }
 
+  const platformMatches = (platformAdminToCheck && verifyPassword(plainPassword, platformAdminToCheck.passwordHash))
+    ? [platformAdminToCheck]
+    : [];
   const userMatches = usersToCheck.filter((u) => verifyPassword(plainPassword, u.passwordHash));
   const portalMatches = portalsToCheck.filter((p) => verifyPassword(plainPassword, p.passwordHash as string));
-  const matchCount = userMatches.length + portalMatches.length;
+  const matchCount = platformMatches.length + userMatches.length + portalMatches.length;
 
   if (matchCount === 0) {
     await Promise.all([
+      ...(platformAdminToCheck ? [
+        (async () => {
+          const next = nextFailure(platformAdminToCheck, now);
+          await prisma.platformAdmin.update({ where: { id: platformAdminToCheck.id }, data: next });
+          if (next.lockedUntil) {
+            await recordPlatformAudit({
+              adminId: platformAdminToCheck.id,
+              action: 'PLATFORM_LOGIN_LOCKED',
+              entity: 'PlatformAdmin',
+              entityId: platformAdminToCheck.id,
+              details: { attempts: next.failedLoginAttempts },
+              ipAddress,
+            });
+          }
+        })(),
+      ] : []),
       ...usersToCheck.map(async (u) => {
         const next = nextFailure(u, now);
         await prisma.user.update({ where: { id: u.id }, data: next });
@@ -122,6 +150,32 @@ export async function authenticateByEmail(rawEmail: string, plainPassword: strin
     // not identify a single account, so none is chosen.
     console.warn('[auth] Ambiguous sign-in: email + password match more than one account');
     return { ok: false, reason: 'INVALID_CREDENTIALS' };
+  }
+
+  if (platformMatches.length === 1) {
+    const admin = platformMatches[0];
+    if (admin.status !== 'ACTIVE') return { ok: false, reason: 'ACCOUNT_INACTIVE' };
+    const updated = await prisma.platformAdmin.update({
+      where: { id: admin.id },
+      data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+    });
+    await recordPlatformAudit({
+      adminId: admin.id,
+      action: 'PLATFORM_LOGIN',
+      entity: 'PlatformAdmin',
+      entityId: admin.id,
+      ipAddress,
+    });
+    return {
+      ok: true,
+      kind: 'PLATFORM_ADMIN',
+      admin: {
+        adminId: updated.id,
+        email: updated.email,
+        name: updated.name,
+        sessionVersion: updated.sessionVersion,
+      },
+    };
   }
 
   if (userMatches.length === 1) {

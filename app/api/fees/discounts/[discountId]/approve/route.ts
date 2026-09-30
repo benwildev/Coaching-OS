@@ -190,6 +190,7 @@ export async function POST(request: Request, props: RouteProps) {
       try {
         const student = invoice.student || discount.studentFeeAssignment?.student;
         const studentName = student?.name || 'Student';
+        const studentBanglaName = student?.banglaName || studentName;
         const typeLabelEn = discount.type === 'DISCOUNT' ? 'Discount' : 'Waiver';
         const typeLabelBn = discount.type === 'DISCOUNT' ? 'ডিসকাউন্ট' : 'মওকুফ';
         const noteSuffixEn = ownerNote ? ` Note: ${ownerNote}` : '';
@@ -200,7 +201,7 @@ export async function POST(request: Request, props: RouteProps) {
           userId: discount.createdById,
           type: 'FEE_DISCOUNT_APPROVED',
           title: `${typeLabelEn} Request Approved / ${typeLabelBn} আবেদন অনুমোদিত`,
-          body: `Your ${typeLabelEn.toLowerCase()} request of ৳${discountAmount} for ${studentName} has been approved.${noteSuffixEn}\n${studentName}-এর জন্য আপনার ৳${discountAmount} ${typeLabelBn}-এর আবেদন অনুমোদিত হয়েছে।${noteSuffixBn}`,
+          body: `Your ${typeLabelEn.toLowerCase()} request of ৳${discountAmount} for ${studentName} has been approved.${noteSuffixEn}\n${studentBanglaName}-এর জন্য আপনার ৳${discountAmount} ${typeLabelBn}-এর আবেদন অনুমোদিত হয়েছে।${noteSuffixBn}`,
           actionUrl: '/fees/discounts',
           sourceType: 'FeeDiscount',
           sourceId: discount.id,

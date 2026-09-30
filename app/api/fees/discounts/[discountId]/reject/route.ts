@@ -107,8 +107,19 @@ export async function POST(request: Request, props: RouteProps) {
     // 6. Notify original requester if present
     if (discount.createdById) {
       try {
-        const student = discount.feeInvoice?.student || discount.studentFeeAssignment?.student;
+        let invoice = discount.feeInvoice;
+        if (!invoice && discount.studentFeeAssignmentId) {
+          const invoiceItem = await prisma.feeInvoiceItem.findFirst({
+            where: { studentFeeAssignmentId: discount.studentFeeAssignmentId },
+            include: { invoice: { include: { student: true } } },
+          });
+          if (invoiceItem?.invoice && invoiceItem.invoice.coachingCenterId === coachingCenterId) {
+            invoice = invoiceItem.invoice;
+          }
+        }
+        const student = invoice?.student || discount.feeInvoice?.student || discount.studentFeeAssignment?.student;
         const studentName = student?.name || 'Student';
+        const studentBanglaName = student?.banglaName || studentName;
         const typeLabelEn = discount.type === 'DISCOUNT' ? 'Discount' : 'Waiver';
         const typeLabelBn = discount.type === 'DISCOUNT' ? 'ডিসকাউন্ট' : 'মওকুফ';
         const discountAmount = Number(discount.amount);
@@ -118,7 +129,7 @@ export async function POST(request: Request, props: RouteProps) {
           userId: discount.createdById,
           type: 'FEE_DISCOUNT_REJECTED',
           title: `${typeLabelEn} Request Rejected / ${typeLabelBn} আবেদন প্রত্যাখ্যাত`,
-          body: `Your ${typeLabelEn.toLowerCase()} request of ৳${discountAmount} for ${studentName} was rejected. Reason: ${rejectionNote}\n${studentName}-এর জন্য আপনার ৳${discountAmount} ${typeLabelBn}-এর আবেদন প্রত্যাখ্যাত হয়েছে। কারণ: ${rejectionNote}`,
+          body: `Your ${typeLabelEn.toLowerCase()} request of ৳${discountAmount} for ${studentName} was rejected. Reason: ${rejectionNote}\n${studentBanglaName}-এর জন্য আপনার ৳${discountAmount} ${typeLabelBn}-এর আবেদন প্রত্যাখ্যাত হয়েছে। কারণ: ${rejectionNote}`,
           actionUrl: '/fees/discounts',
           sourceType: 'FeeDiscount',
           sourceId: discount.id,

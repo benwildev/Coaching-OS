@@ -2,8 +2,14 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { DATA, RANGES } from './data';
 import type { SessionUser } from '@/lib/auth/session';
+
+export const RANGES = [
+  { id: 'month', label: 'This month', sub: '1–21 Sep 2026', n: 1 },
+  { id: 'q', label: 'Last 3 months', sub: 'Jul–Sep 2026', n: 3 },
+  { id: 'h', label: 'Last 6 months', sub: 'Apr–Sep 2026', n: 6 },
+  { id: 'y', label: 'Last 12 months', sub: 'Oct 2025–Sep 2026', n: 12 },
+] as const;
 
 type Toast = { id: number; msg: string } | null;
 
@@ -93,7 +99,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const saved = JSON.parse(window.localStorage.getItem(LS_KEY) || '{}');
-      if (saved.cls && DATA.classes.some((c: any) => c.id === saved.cls)) setClsRaw(saved.cls);
+      if (typeof saved.cls === 'string') setClsRaw(saved.cls);
       if (saved.rangeId) setRangeIdRaw(saved.rangeId);
       if (typeof saved.collapsed === 'boolean') setCollapsedRaw(saved.collapsed);
       if (saved.lang === 'en' || saved.lang === 'bn') setLang(saved.lang);

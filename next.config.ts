@@ -35,6 +35,25 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  async redirects() {
+    return [
+      {
+        source: "/platform/:path*",
+        destination: "/login",
+        permanent: false,
+      },
+      {
+        source: "/super-admin/login",
+        destination: "/login",
+        permanent: false,
+      },
+      {
+        source: "/portal/login",
+        destination: "/login",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {

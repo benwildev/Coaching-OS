@@ -3,7 +3,7 @@ import prisma from '../lib/db';
 import { completeInitialSetup } from '../lib/services/tenant.service';
 import { hashPassword } from '../lib/auth/password';
 import { SESSION_COOKIE_NAME } from '../lib/auth/session';
-import { notifyUser } from '../lib/services/notification.service';
+import { notifyUser, notifyUsers } from '../lib/services/notification.service';
 
 /**
  * Phase 11.2.1 — Finance UX Completion & Admission Integrity verification.
@@ -236,7 +236,9 @@ async function run() {
   assert(admRes1.status === 201, `Admission 1 failed: ${JSON.stringify(admRes1.body)}`);
   assert(admRes1.body.success === true, 'Admission 1 not successful');
   const student1Id = admRes1.body.student.id;
+  const student1Code = admRes1.body.student.studentId || admRes1.body.student.studentIdCode;
   const invoice1Id = admRes1.body.invoice.id;
+  const invoice1Number = admRes1.body.invoice.invoiceNumber;
   ok('Deliverable 1.1: Admission with idempotencyKey created student & invoice successfully');
 
   // 1.2: Replay exact same request with same idempotencyKey returns cached response
@@ -486,7 +488,7 @@ async function run() {
   assert(actions.includes('WAIVER_REJECTED'), 'Missing WAIVER_REJECTED in audit log');
   ok('Deliverable 3.11: Audit logs correctly recorded for requested, approved, and rejected concessions');
 
-  // 3.12: In-app notification verification for OWNER on discount and waiver requests
+  // 3.12: OWNER receives new discount notification with complete details
   const ownerDiscNotifs = await prisma.notification.findMany({
     where: {
       coachingCenterId: ccA,
@@ -499,11 +501,18 @@ async function run() {
   const dNotif = ownerDiscNotifs[0];
   eq(dNotif.type, 'FEE_DISCOUNT_REQUESTED', 'Notification type must be FEE_DISCOUNT_REQUESTED');
   eq(dNotif.actionUrl, '/fees/discounts', 'Notification actionUrl must be /fees/discounts');
+  eq(dNotif.sourceType, 'FeeDiscount', 'Notification sourceType must be FeeDiscount');
+  eq(dNotif.sourceId, discount1Id, 'Notification sourceId must match discount ID');
+  assert(dNotif.userId === tA.owner.id, 'Recipient must be the owner');
   assert(dNotif.title.includes('Discount') || dNotif.title.includes('ডিসকাউন্ট'), 'Notification title should contain Discount');
   assert(dNotif.body.includes('500'), 'Notification body should include requested amount 500');
   assert(dNotif.body.includes('Staff Member'), 'Notification body should include requester name');
-  assert(dNotif.body.includes('INV-'), 'Notification body should include invoice number');
+  assert(dNotif.body.includes('Rahim Uddin'), 'Notification body should include student name');
+  assert(dNotif.body.includes(student1Code), 'Notification body should include student ID');
+  assert(dNotif.body.includes(invoice1Number), 'Notification body should include invoice number');
+  ok('Deliverable 3.12: OWNER receives new discount notification with recipient, type, requester, student, ID, amount, and invoice');
 
+  // 3.13: OWNER receives new waiver notification with complete details
   const ownerWaiverNotifs = await prisma.notification.findMany({
     where: {
       coachingCenterId: ccA,
@@ -515,11 +524,19 @@ async function run() {
   assert(ownerWaiverNotifs.length === 1, `Owner should have exactly 1 notification for waiver1Id, found ${ownerWaiverNotifs.length}`);
   const wNotif = ownerWaiverNotifs[0];
   eq(wNotif.type, 'FEE_DISCOUNT_REQUESTED', 'Notification type must be FEE_DISCOUNT_REQUESTED');
+  eq(wNotif.actionUrl, '/fees/discounts', 'Notification actionUrl must be /fees/discounts');
+  eq(wNotif.sourceType, 'FeeDiscount', 'Notification sourceType must be FeeDiscount');
+  eq(wNotif.sourceId, waiver1Id, 'Notification sourceId must match waiver ID');
+  assert(wNotif.userId === tA.owner.id, 'Recipient must be the owner');
   assert(wNotif.title.includes('Waiver') || wNotif.title.includes('মওকুফ'), 'Notification title should contain Waiver');
   assert(wNotif.body.includes('1000'), 'Notification body should include requested amount 1000');
-  ok('Deliverable 3.12: OWNER receives in-app notifications for new discount & waiver requests with student, amount, and invoice details');
+  assert(wNotif.body.includes('Staff Member'), 'Notification body should include requester name');
+  assert(wNotif.body.includes('Rahim Uddin'), 'Notification body should include student name');
+  assert(wNotif.body.includes(student1Code), 'Notification body should include student ID');
+  assert(wNotif.body.includes(invoice1Number), 'Notification body should include invoice number');
+  ok('Deliverable 3.13: OWNER receives new waiver notification with recipient, type, requester, student, ID, amount, and invoice');
 
-  // 3.13: In-app notification verification for requester on approval and rejection
+  // 3.14: Correct requester recipient after approval with student, amount, and owner approval note
   const requesterApproveNotifs = await prisma.notification.findMany({
     where: {
       coachingCenterId: ccA,
@@ -532,10 +549,16 @@ async function run() {
   const aNotif = requesterApproveNotifs[0];
   eq(aNotif.type, 'FEE_DISCOUNT_APPROVED', 'Approval notification type must be FEE_DISCOUNT_APPROVED');
   eq(aNotif.actionUrl, '/fees/discounts', 'ActionUrl must be /fees/discounts');
+  eq(aNotif.sourceType, 'FeeDiscount', 'SourceType must be FeeDiscount');
+  eq(aNotif.sourceId, discount1Id, 'SourceId must match discount ID');
+  assert(aNotif.userId === staffUserA.id, 'Recipient must be the requester staffUserA');
   assert(aNotif.title.includes('Approved') || aNotif.title.includes('অনুমোদিত'), 'Title must state approved');
-  assert(aNotif.body.includes('Approved based on academic performance'), 'Body must include owner note');
+  assert(aNotif.body.includes('Approved based on academic performance'), 'Body must include owner approval note');
   assert(aNotif.body.includes('500'), 'Body must include approved amount');
+  assert(aNotif.body.includes('Rahim Uddin'), 'Body must include student name');
+  ok('Deliverable 3.14: Requester receives approval notification with student, amount, and owner approval note');
 
+  // 3.15: Correct requester recipient after rejection with student, amount, and rejection reason
   const requesterRejectNotifs = await prisma.notification.findMany({
     where: {
       coachingCenterId: ccA,
@@ -548,12 +571,16 @@ async function run() {
   const rNotif = requesterRejectNotifs[0];
   eq(rNotif.type, 'FEE_DISCOUNT_REJECTED', 'Rejection notification type must be FEE_DISCOUNT_REJECTED');
   eq(rNotif.actionUrl, '/fees/discounts', 'ActionUrl must be /fees/discounts');
+  eq(rNotif.sourceType, 'FeeDiscount', 'SourceType must be FeeDiscount');
+  eq(rNotif.sourceId, waiver1Id, 'SourceId must match waiver ID');
+  assert(rNotif.userId === staffUserA.id, 'Recipient must be the requester staffUserA');
   assert(rNotif.title.includes('Rejected') || rNotif.title.includes('প্রত্যাখ্যাত'), 'Title must state rejected');
   assert(rNotif.body.includes('Exceeds branch concession quota for this session'), 'Body must include rejection reason');
   assert(rNotif.body.includes('1000'), 'Body must include rejected amount');
-  ok('Deliverable 3.13: Requester receives in-app notifications upon OWNER approval and rejection with notes/reasons');
+  assert(rNotif.body.includes('Rahim Uddin'), 'Body must include student name');
+  ok('Deliverable 3.15: Requester receives rejection notification with student, amount, and rejection reason');
 
-  // 3.14: Tenant isolation & deduplication verification
+  // 3.16: Cross-tenant notification isolation
   const crossTenantNotifs = await prisma.notification.findMany({
     where: {
       coachingCenterId: ccB,
@@ -569,19 +596,42 @@ async function run() {
     },
   });
   eq(foreignOwnerNotifs.length, 0, 'Foreign owner received Tenant A discount notifications');
+  ok('Deliverable 3.16: Strict cross-tenant notification isolation verified (zero leakage to foreign tenant or owner)');
 
-  // Deduplication check: re-notifying for existing (userId, sourceType, sourceId, type) does not create duplicate
-  await notifyUser({
+  // 3.17: Deduplication check when the same event is retried
+  // Retry notifyUsers for owner request notification
+  await notifyUsers({
     coachingCenterId: ccA,
-    userId: staffUserA.id,
-    type: 'FEE_DISCOUNT_APPROVED',
-    title: 'Duplicate test',
+    userIds: [tA.owner.id],
+    type: 'FEE_DISCOUNT_REQUESTED',
+    title: 'Duplicate owner retry test',
     body: 'Duplicate test body',
     actionUrl: '/fees/discounts',
     sourceType: 'FeeDiscount',
     sourceId: discount1Id,
   });
-  const afterDupCount = await prisma.notification.count({
+  const afterDupOwnerCount = await prisma.notification.count({
+    where: {
+      userId: tA.owner.id,
+      sourceType: 'FeeDiscount',
+      sourceId: discount1Id,
+      type: 'FEE_DISCOUNT_REQUESTED',
+    },
+  });
+  eq(afterDupOwnerCount, 1, 'Duplicate owner notification was created on retried request event');
+
+  // Retry notifyUser for requester approval notification
+  await notifyUser({
+    coachingCenterId: ccA,
+    userId: staffUserA.id,
+    type: 'FEE_DISCOUNT_APPROVED',
+    title: 'Duplicate approval test',
+    body: 'Duplicate test body',
+    actionUrl: '/fees/discounts',
+    sourceType: 'FeeDiscount',
+    sourceId: discount1Id,
+  });
+  const afterDupApproveCount = await prisma.notification.count({
     where: {
       userId: staffUserA.id,
       sourceType: 'FeeDiscount',
@@ -589,8 +639,29 @@ async function run() {
       type: 'FEE_DISCOUNT_APPROVED',
     },
   });
-  eq(afterDupCount, 1, 'Duplicate notification was created on retried event');
-  ok('Deliverable 3.14: Strict tenant isolation and deduplication on retry verified for discount notifications');
+  eq(afterDupApproveCount, 1, 'Duplicate approval notification was created on retried approval event');
+
+  // Retry notifyUser for requester rejection notification
+  await notifyUser({
+    coachingCenterId: ccA,
+    userId: staffUserA.id,
+    type: 'FEE_DISCOUNT_REJECTED',
+    title: 'Duplicate rejection test',
+    body: 'Duplicate test body',
+    actionUrl: '/fees/discounts',
+    sourceType: 'FeeDiscount',
+    sourceId: waiver1Id,
+  });
+  const afterDupRejectCount = await prisma.notification.count({
+    where: {
+      userId: staffUserA.id,
+      sourceType: 'FeeDiscount',
+      sourceId: waiver1Id,
+      type: 'FEE_DISCOUNT_REJECTED',
+    },
+  });
+  eq(afterDupRejectCount, 1, 'Duplicate rejection notification was created on retried rejection event');
+  ok('Deliverable 3.17: Duplicate notification is not created when the same event is retried (both notifyUsers & notifyUser)');
 
   console.log(`\n--- PART 4: DELIVERABLE 4 — COURSE STUDENTS & SCHEDULE TABS ---`);
 

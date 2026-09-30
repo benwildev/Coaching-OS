@@ -27,9 +27,9 @@ export default function SuperAdminShell({ children }: { children: React.ReactNod
       .then((r) => r.json())
       .then((d) => {
         if (d.authenticated) setAdmin(d.admin);
-        else router.replace('/super-admin/login');
+        else router.replace('/login');
       })
-      .catch(() => router.replace('/super-admin/login'))
+      .catch(() => router.replace('/login'))
       .finally(() => setChecked(true));
   }, [isLogin, router]);
 
@@ -44,7 +44,7 @@ export default function SuperAdminShell({ children }: { children: React.ReactNod
 
   const signOut = async () => {
     await fetch('/api/super-admin/auth/logout', { method: 'POST' });
-    window.location.assign('/super-admin/login');
+    window.location.assign('/login');
   };
 
   return (

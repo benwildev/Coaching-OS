@@ -10,9 +10,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { toast, currentCenter } = useApp();
   const pathname = usePathname();
 
-  // The login, setup, and student/guardian portal pages have their own full-screen
+  // The login, setup, super-admin, and student/guardian portal pages have their own full-screen
   // layouts and must never inherit the staff sidebar/topbar.
-  if (pathname === '/login' || pathname === '/forgot-password' || pathname?.startsWith('/setup') || pathname?.startsWith('/portal') || pathname?.startsWith('/super-admin')) {
+  if (
+    pathname === '/login' ||
+    pathname === '/forgot-password' ||
+    pathname?.startsWith('/setup') ||
+    pathname?.startsWith('/portal') ||
+    pathname?.startsWith('/super-admin') ||
+    pathname?.startsWith('/platform')
+  ) {
     return <>{children}</>;
   }
 

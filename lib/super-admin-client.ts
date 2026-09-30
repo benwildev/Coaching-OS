@@ -8,8 +8,8 @@ export async function saApi<T = Record<string, any>>(
     headers: init?.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
     body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
-  if (res.status === 401 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/super-admin/login')) {
-    window.location.assign('/super-admin/login');
+  if (res.status === 401 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+    window.location.assign('/login');
   }
   const data = (await res.json().catch(() => ({}))) as T & { success?: boolean; error?: string; message?: string };
   return { ok: res.ok, status: res.status, data };
