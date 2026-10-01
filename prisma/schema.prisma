@@ -213,6 +213,10 @@ model CoachingCenter {
   financialSequences      FinancialSequence[]
   expenseCategories       ExpenseCategory[]
   expenses                Expense[]
+  teacherCompensations    TeacherCompensation[]
+  salaryPeriods           SalaryPeriod[]
+  salaryPayables          SalaryPayable[]
+  salaryPayments          SalaryPayment[]
   exams                   Exam[]
   questions               Question[]
   studyMaterials          StudyMaterial[]
@@ -263,6 +267,10 @@ model Branch {
   classSchedules          ClassSchedule[]
   attendanceSessions      AttendanceSession[]
   expenses                Expense[]
+  teacherCompensations    TeacherCompensation[]
+  salaryPeriods           SalaryPeriod[]
+  salaryPayables          SalaryPayable[]
+  salaryPayments          SalaryPayment[]
   exams                   Exam[]
   students                Student[]
   enrollments             StudentEnrollment[]
@@ -904,6 +912,9 @@ model Teacher {
   attendances              TeacherAttendance[]
   attendanceSessionsTaught AttendanceSession[]
   homeworks                Homework[]
+  compensations            TeacherCompensation[]
+  salaryPayables           SalaryPayable[]
+  salaryPayments           SalaryPayment[]
 
   @@unique([coachingCenterId, teacherCode])
   @@map("teachers")
@@ -1009,6 +1020,7 @@ model BatchTeacherAssignment {
   batch          Batch          @relation(fields: [batchId], references: [id], onDelete: Cascade)
   subject        Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   teacher        Teacher        @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  compensations  TeacherCompensation[]
 
   @@index([coachingCenterId, teacherId])
   @@index([coachingCenterId, batchId])
@@ -1550,10 +1562,13 @@ model ExpenseCategory {
   coachingCenterId String
   name             String // e.g. "Teacher Remuneration", "Office Rent", "Utility"
   banglaName       String?
+  // Phase 13: stable system key (e.g. "TEACHER_SALARY") so code can find-or-create its category
+  code             String?
 
   coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
   expenses       Expense[]
 
+  @@unique([coachingCenterId, code])
   @@map("expense_categories")
 }
 
@@ -1575,6 +1590,7 @@ model Expense {
   branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
   category       ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   createdBy      User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  salaryPayment  SalaryPayment?
 
   @@map("expenses")
 }
@@ -2518,4 +2534,134 @@ model ManualPaymentSubmission {
   @@index([coachingCenterId, studentId])
   @@index([coachingCenterId, status])
   @@map("manual_payment_submissions")
+}
+
+// ==========================================
+// TEACHER COMPENSATION & SALARY (PHASE 13)
+// ==========================================
+
+// A teacher pay rule. type: MONTHLY_FIXED | PER_BATCH | PER_CLASS | CUSTOM.
+// amount is a monthly amount (MONTHLY_FIXED, PER_BATCH, CUSTOM) or a per-class
+// rate (PER_CLASS). PER_BATCH / PER_CLASS point at the teacher's own
+// BatchTeacherAssignment (course -> batch -> subject). A rule that has had an
+// effect is never rewritten: a change ends the old rule (effectiveTo) and adds
+// a new one, and generated salary keeps its own snapshot regardless.
+model TeacherCompensation {
+  id                       String    @id @default(uuid())
+  coachingCenterId         String
+  branchId                 String
+  teacherId                String
+  type                     String
+  amount                   Decimal   @db.Decimal(10, 2)
+  batchTeacherAssignmentId String?
+  effectiveFrom            DateTime  @db.Date
+  effectiveTo              DateTime? @db.Date
+  status                   String    @default("ACTIVE") // ACTIVE, ENDED
+  notes                    String?   @db.Text
+  createdById              String?
+  updatedById              String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  coachingCenter CoachingCenter          @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch         Branch                  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  teacher        Teacher                 @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  assignment     BatchTeacherAssignment? @relation(fields: [batchTeacherAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([coachingCenterId, teacherId, status])
+  @@index([coachingCenterId, branchId, effectiveFrom])
+  @@index([batchTeacherAssignmentId])
+  @@map("teacher_compensations")
+}
+
+// One salary month for one branch. OPEN -> FINALIZED -> PAID (PAID is set
+// automatically once every non-cancelled payable is fully paid).
+model SalaryPeriod {
+  id               String    @id @default(uuid())
+  coachingCenterId String
+  branchId         String
+  year             Int
+  month            Int // 1-12
+  status           String    @default("OPEN") // OPEN, FINALIZED, PAID
+  createdById      String?
+  finalizedById    String?
+  finalizedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  coachingCenter CoachingCenter  @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  payables       SalaryPayable[]
+
+  @@unique([coachingCenterId, branchId, year, month])
+  @@index([coachingCenterId, status])
+  @@map("salary_periods")
+}
+
+// What one teacher is owed for one period. breakdown is an immutable snapshot
+// (JSON array of lines: type, description, course/batch/subject names,
+// quantity, rate, amount) so history never changes when compensation rules do.
+model SalaryPayable {
+  id               String    @id @default(uuid())
+  coachingCenterId String
+  branchId         String
+  salaryPeriodId   String
+  teacherId        String
+  baseAmount       Decimal   @db.Decimal(10, 2)
+  additions        Decimal   @default(0) @db.Decimal(10, 2)
+  deductions       Decimal   @default(0) @db.Decimal(10, 2)
+  netAmount        Decimal   @db.Decimal(10, 2)
+  paidAmount       Decimal   @default(0) @db.Decimal(10, 2)
+  remainingAmount  Decimal   @db.Decimal(10, 2)
+  status           String    @default("UNPAID") // UNPAID, PARTIAL, PAID, CANCELLED
+  breakdown        Json
+  notes            String?   @db.Text
+  cancelReason     String?
+  cancelledById    String?
+  cancelledAt      DateTime?
+  createdById      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  coachingCenter CoachingCenter  @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  salaryPeriod   SalaryPeriod    @relation(fields: [salaryPeriodId], references: [id], onDelete: Cascade)
+  teacher        Teacher         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  payments       SalaryPayment[]
+
+  @@unique([salaryPeriodId, teacherId])
+  @@index([coachingCenterId, teacherId])
+  @@index([coachingCenterId, branchId, status])
+  @@map("salary_payables")
+}
+
+// A manual salary payment. Each one owns exactly one Expense row (expenseId),
+// created in the same transaction — that is the traceability link.
+model SalaryPayment {
+  id               String        @id @default(uuid())
+  coachingCenterId String
+  branchId         String
+  salaryPayableId  String
+  teacherId        String
+  amount           Decimal       @db.Decimal(10, 2)
+  paymentMethod    PaymentMethod @default(CASH)
+  paymentDate      DateTime      @db.Date
+  transactionId    String?
+  referenceNumber  String?
+  notes            String?
+  recordedById     String?
+  idempotencyKey   String?
+  expenseId        String?       @unique
+  createdAt        DateTime      @default(now())
+
+  coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
+  branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  salaryPayable  SalaryPayable  @relation(fields: [salaryPayableId], references: [id], onDelete: Cascade)
+  teacher        Teacher        @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  expense        Expense?       @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+
+  @@unique([coachingCenterId, idempotencyKey])
+  @@index([coachingCenterId, salaryPayableId])
+  @@index([coachingCenterId, branchId, paymentDate])
+  @@map("salary_payments")
 }

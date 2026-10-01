@@ -14,6 +14,7 @@ const NAV_ITEMS: { id: string; icon: string; href: string; staffOnly?: boolean; 
   { id: 'routine', icon: 'calendar', href: '/routine' },
   { id: 'attendance', icon: 'check', href: '/attendance' },
   { id: 'fees', icon: 'wallet', href: '/fees' },
+  { id: 'salary', icon: 'banknote', href: '/salary', staffOnly: true },
   { id: 'exams', icon: 'award', href: '/exams' },
   { id: 'questions', icon: 'target', href: '/questions' },
   { id: 'questionPapers', icon: 'file', href: '/question-papers' },

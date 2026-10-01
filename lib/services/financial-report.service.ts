@@ -1,7 +1,7 @@
 import prisma from '@/lib/db';
 import type { Prisma, PaymentMethod } from '@prisma/client';
 import { buildDhakaRange, isIsoDate, todayDhaka } from '@/lib/reports/dates';
-import { getTodaySession } from './cash-session.service';
+import { getTodaySession, getCashExpensesForDate } from './cash-session.service';
 
 function n(value: Prisma.Decimal | number | null | undefined): number {
   return value == null ? 0 : Number(value);
@@ -481,6 +481,7 @@ export async function getDailyCollectionSummary(coachingCenterId: string, params
 
   const isToday = date === todayDhaka();
   const cashSession = isToday && params.branchId ? await getTodaySession(coachingCenterId, params.branchId) : null;
+  const cashExpenses = cashSession && params.branchId ? await getCashExpensesForDate(coachingCenterId, params.branchId, cashSession.businessDate) : 0;
 
   return {
     date,
@@ -496,6 +497,7 @@ export async function getDailyCollectionSummary(coachingCenterId: string, params
           id: cashSession.id,
           status: cashSession.status,
           openingCash: n(cashSession.openingCash),
+          cashExpenses,
           countedCash: cashSession.countedCash != null ? n(cashSession.countedCash) : null,
           expectedCash: cashSession.expectedCash != null ? n(cashSession.expectedCash) : null,
           difference: cashSession.difference != null ? n(cashSession.difference) : null,

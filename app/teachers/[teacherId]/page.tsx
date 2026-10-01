@@ -10,11 +10,12 @@ import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 import { DAY_LABELS, formatTimeRange } from '@/lib/schedule';
 import { TEACHER_STATUSES } from '@/lib/validations/teacher';
 import { normalizeBdPhone, isValidBdPhone } from '@/lib/validations/student';
+import CompensationTab from '@/components/teachers/CompensationTab';
 import EnglishInput from '@/components/EnglishInput';
 import BanglaInput from '@/components/BanglaInput';
 import { hasBangla, hasEnglish } from '@/lib/format';
 
-type Tab = 'overview' | 'subjects' | 'batches' | 'routine' | 'today' | 'attendance' | 'employment';
+type Tab = 'overview' | 'subjects' | 'batches' | 'routine' | 'today' | 'attendance' | 'employment' | 'compensation';
 
 interface AssignmentCourseOption {
   id: string;
@@ -492,6 +493,8 @@ export default function TeacherDetailPage() {
     { id: 'routine', label: dict.teachers.tabRoutine },
     { id: 'today', label: dict.teachers.tabToday },
     ...(redacted ? [] : ([{ id: 'attendance', label: dict.teachers.tabAttendance }, { id: 'employment', label: dict.teachers.tabEmployment }] as const)),
+    // Owner/Admin manage it; a Teacher sees only their own profile (never redacted), read-only.
+    ...(!redacted && (canManage || currentUser?.role === 'TEACHER') ? ([{ id: 'compensation', label: dict.teachers.tabCompensation }] as const) : []),
   ];
 
   // Group teaching assignments by course -> batch
@@ -1019,6 +1022,15 @@ export default function TeacherDetailPage() {
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'compensation' && !redacted && (
+        <CompensationTab
+          teacherId={teacherId}
+          teacherBranchId={teacher.branchId || null}
+          assignments={teacher.batchTeacherAssignments || []}
+          canManage={canManage}
+        />
       )}
 
       {tab === 'employment' && !redacted && canManageAccount && (

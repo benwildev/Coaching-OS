@@ -28,12 +28,26 @@ function isDuplicateError(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
+/**
+ * Phase 13: cash that left the drawer as an Expense (salary payments and any
+ * other CASH expense) on the given Dhaka business date. Expense.date is a
+ * @db.Date holding the Dhaka calendar date, so it matches the session's
+ * businessDate exactly.
+ */
+export async function getCashExpensesForDate(coachingCenterId: string, branchId: string, businessDate: Date): Promise<number> {
+  const agg = await prisma.expense.aggregate({
+    where: { coachingCenterId, branchId, paymentMethod: 'CASH', date: businessDate },
+    _sum: { amount: true },
+  });
+  return n(agg._sum.amount);
+}
+
 async function computeExpectedCash(coachingCenterId: string, branchId: string, businessDate: Date, openingCash: Prisma.Decimal | number): Promise<number> {
   const ymd = businessDate.toISOString().slice(0, 10);
   const dayStart = dhakaDayStart(ymd);
   const dayEnd = dhakaDayStart(addDays(ymd, 1));
 
-  const [cashCollected, cashRefunded] = await Promise.all([
+  const [cashCollected, cashRefunded, cashExpenses] = await Promise.all([
     prisma.payment.aggregate({
       where: { coachingCenterId, branchId, paymentMethod: 'CASH', status: { not: 'VOIDED' }, paymentDate: { gte: dayStart, lt: dayEnd } },
       _sum: { amount: true },
@@ -46,9 +60,10 @@ async function computeExpectedCash(coachingCenterId: string, branchId: string, b
       },
       _sum: { amount: true },
     }),
+    getCashExpensesForDate(coachingCenterId, branchId, businessDate),
   ]);
 
-  return n(openingCash) + n(cashCollected._sum.amount) - n(cashRefunded._sum.amount);
+  return n(openingCash) + n(cashCollected._sum.amount) - n(cashRefunded._sum.amount) - cashExpenses;
 }
 
 export async function getTodaySession(coachingCenterId: string, branchId: string) {

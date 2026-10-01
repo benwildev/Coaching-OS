@@ -19,6 +19,7 @@ interface CashSessionInfo {
   id: string;
   status: 'OPEN' | 'CLOSED';
   openingCash: number;
+  cashExpenses?: number;
   countedCash: number | null;
   expectedCash: number | null;
   difference: number | null;
@@ -260,7 +261,7 @@ function CashSessionCard({
 
   const session = summary.cashSession;
   const cashRow = summary.methods.find((m) => m.method === 'CASH');
-  const previewExpected = session ? session.openingCash + (cashRow?.net ?? 0) : 0;
+  const previewExpected = session ? session.openingCash + (cashRow?.net ?? 0) - (session.cashExpenses ?? 0) : 0;
 
   if (!isToday) {
     return <p className="text-[13px] text-[#64748b] py-4">{f.noSessionToday}</p>;
@@ -341,6 +342,10 @@ function CashSessionCard({
         <div className="flex items-center justify-between text-[13px]">
           <span className="text-[#64748b]">{f.openingCashLabel}</span>
           <span className="font-mono font-bold">{formatBDT(session.openingCash, lang)}</span>
+        </div>
+        <div className="flex items-center justify-between text-[13px]">
+          <span className="text-[#64748b]">{f.cashExpensesLabel}</span>
+          <span className="font-mono font-bold">{formatBDT(session.cashExpenses ?? 0, lang)}</span>
         </div>
         {modal === 'close' ? (
           <div className="flex flex-col gap-2 pt-2 border-t border-[#edf1f7]">
