@@ -111,6 +111,113 @@ export async function provisionPortalAccount(params: {
   return { account: { id: account.id, portalType: account.portalType }, setupToken: rawToken, expiresAt };
 }
 
+export interface ProvisionStudentPortalResultSuccess {
+  status: 'SUCCESS';
+  portalAccount: {
+    id: string;
+    loginIdentifier: string;
+    setupToken: string;
+    setupLink: string;
+    expiresAt: string;
+  };
+}
+
+export interface ProvisionStudentPortalResultQuotaExceeded {
+  status: 'QUOTA_EXCEEDED';
+}
+
+export type ProvisionStudentPortalResult =
+  | ProvisionStudentPortalResultSuccess
+  | ProvisionStudentPortalResultQuotaExceeded;
+
+/**
+ * Phase 13.1: Transaction-safe automatic student portal account provisioning.
+ * Executes within the student admission transaction. If portal account quota
+ * is exhausted, student admission still succeeds and returns status: QUOTA_EXCEEDED.
+ */
+export async function provisionStudentPortalAccount(
+  tx: Prisma.TransactionClient,
+  params: {
+    coachingCenterId: string;
+    studentId: string;
+    phone?: string | null;
+    email?: string | null;
+    studentIdCode?: string | null;
+    actorUserId?: string;
+  }
+): Promise<ProvisionStudentPortalResult> {
+  // Check portal account limit under advisory lock
+  try {
+    await checkPortalAccountLimit(tx, params.coachingCenterId);
+  } catch (limitErr: any) {
+    const msg = String(limitErr?.message || '');
+    if (
+      msg.includes('PORTAL_LIMIT_REACHED') ||
+      msg.includes('Portal account limit reached') ||
+      msg.includes('SUBSCRIPTION_INACTIVE') ||
+      msg.includes('TENANT_SUSPENDED')
+    ) {
+      return { status: 'QUOTA_EXCEEDED' };
+    }
+    throw limitErr;
+  }
+
+  // Find existing or create new PortalAccount
+  let account = await tx.portalAccount.findFirst({
+    where: { studentId: params.studentId, coachingCenterId: params.coachingCenterId },
+  });
+
+  if (!account) {
+    account = await tx.portalAccount.create({
+      data: {
+        coachingCenterId: params.coachingCenterId,
+        portalType: 'STUDENT',
+        studentId: params.studentId,
+        phone: params.phone || null,
+        email: params.email ? params.email.trim().toLowerCase() : null,
+        status: 'ACTIVE',
+      },
+    });
+  }
+
+  const rawToken = generateRawToken();
+  const expiresAt = new Date(Date.now() + SETUP_TOKEN_HOURS * 60 * 60 * 1000);
+  await tx.portalAuthToken.create({
+    data: {
+      portalAccountId: account.id,
+      tokenHash: hashToken(rawToken),
+      purpose: 'SETUP',
+      expiresAt,
+    },
+  });
+
+  await recordAuditLog(
+    {
+      coachingCenterId: params.coachingCenterId,
+      userId: params.actorUserId,
+      studentId: params.studentId,
+      action: 'STUDENT_PORTAL_ACCOUNT_CREATED',
+      entity: 'PortalAccount',
+      entityId: account.id,
+      details: { portalType: 'STUDENT' },
+    },
+    tx
+  );
+
+  const loginIdentifier = params.phone || params.email || params.studentIdCode || '';
+
+  return {
+    status: 'SUCCESS',
+    portalAccount: {
+      id: account.id,
+      loginIdentifier,
+      setupToken: rawToken,
+      setupLink: `/portal/setup-password?token=${rawToken}`,
+      expiresAt: expiresAt.toISOString(),
+    },
+  };
+}
+
 /**
  * Self-service reset request from the unified /forgot-password page.
  * Always returns the same generic outcome — never reveals whether (or what

@@ -1045,22 +1045,40 @@ export default function TeacherDetailPage() {
           </p>
 
           {account?.linked ? (
-            <div className="flex items-center justify-between p-3.5 rounded-xl border border-[#dce5f0] bg-[#f8fafc] flex-wrap gap-2">
-              <div>
-                <div className="font-bold text-[#092f63] text-[13.5px]">{account.account?.name}</div>
-                <div className="text-[11.5px] text-[#64748b]">{account.account?.email}</div>
+            <div className="flex items-center justify-between p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 flex-wrap gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-[#092f63] text-sm">{account.account?.name}</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                    {lang === 'bn' ? 'অ্যাকাউন্ট: সক্রিয়' : 'Account: Active'}
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-slate-200 text-slate-700">
+                    {lang === 'bn' ? 'রোল: TEACHER' : 'Role: TEACHER'}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-600 font-mono flex items-center gap-1.5">
+                  <Icon name="mail" size={13} className="text-slate-400" />
+                  <span>{account.account?.email}</span>
+                </div>
               </div>
               <button
                 type="button"
                 disabled={savingAccount}
                 onClick={unlinkAccount}
-                className="px-3 py-1.5 rounded-lg border border-[#e11d48] text-[#e11d48] text-[12px] font-semibold hover:bg-rose-50"
+                className="px-3.5 py-1.5 rounded-lg border border-[#e11d48] text-[#e11d48] text-xs font-semibold hover:bg-rose-50 transition-colors"
               >
                 {savingAccount ? '…' : lang === 'bn' ? 'বিচ্ছিন্ন করুন' : 'Unlink'}
               </button>
             </div>
           ) : (
             <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2 pb-1">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+                  {lang === 'bn' ? 'অ্যাকাউন্ট: সংযুক্ত নয়' : 'Account: Not connected'}
+                </span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"

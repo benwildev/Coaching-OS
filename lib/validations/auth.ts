@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-// Unified sign-in (/login): email + password only, for every account type.
+// Unified sign-in (/login): email, phone, or student ID code + password for every account type.
 // No minimum length here — the stored policy is enforced when a password is
 // set, and a length check at login would only leak that policy per account.
 export const loginSchema = z.object({
-  email: z.string().trim().min(1, 'Email is required').max(200).email('Enter a valid email address'),
+  email: z.string().trim().min(1, 'Email, phone, or Student ID is required').max(200),
   password: z.string().min(1, 'Password is required').max(200),
 });
 

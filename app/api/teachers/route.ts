@@ -46,7 +46,12 @@ export async function POST(request: Request) {
     }
 
     const teacher = await createTeacher(coachingCenterId, validated.data, user.userId, user);
-    return NextResponse.json({ success: true, teacher }, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      message: 'Teacher created successfully',
+      teacher,
+      userAccount: (teacher as any).userAccount ?? { created: false },
+    }, { status: 201 });
   } catch (error) {
     return apiErrorResponse(error, '/api/teachers POST');
   }

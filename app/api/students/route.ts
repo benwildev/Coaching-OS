@@ -113,6 +113,8 @@ export async function POST(request: Request) {
         payment: result.payment,
         receiptNumber: result.receiptNumber,
         discountApproved: !result.isDiscountPending,
+        portalAccount: (result as any).portalAccount ?? null,
+        portalProvisioning: (result as any).portalProvisioning ?? null,
       },
       { status: 201 }
     );

@@ -140,6 +140,15 @@ interface AdmissionSuccessResult {
   receiptNumber?: string | null;
   discountApproved: boolean;
   message?: string;
+  portalAccount?: {
+    id: string;
+    loginIdentifier: string;
+    setupLink?: string | null;
+    expiresAt?: string | null;
+  } | null;
+  portalProvisioning?: {
+    status: 'SUCCESS' | 'QUOTA_EXCEEDED' | 'ALREADY_EXISTS';
+  } | null;
 }
 
 const formatTaka = (amount: number) => '৳' + Math.round(amount).toLocaleString('en-IN');
@@ -155,6 +164,7 @@ export default function NewStudentPage() {
   const [step, setStep] = useState<number>(1);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedSetupLink, setCopiedSetupLink] = useState<boolean>(false);
 
   // Hierarchy Data
   const [options, setOptions] = useState<HierarchyData>({
@@ -805,6 +815,98 @@ export default function NewStudentPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Student Portal Account Provisioning Card */}
+                {admissionResult.portalAccount ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-left shadow-xs mb-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-emerald-200/60">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-xs">
+                          <Icon name="key" size={18} />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-800">
+                            {lang === 'bn' ? 'শিক্ষার্থী পোর্টাল একাউন্ট' : 'Student Portal Account'}
+                          </h4>
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            {lang === 'bn' ? 'স্ট্যাটাস: প্রস্তুত' : 'Status: Ready'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="rounded-full bg-emerald-100/90 border border-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-800">
+                        {lang === 'bn' ? 'মেয়াদ: ৪৮ ঘণ্টা' : 'Expires: 48 hours'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
+                      <div className="bg-white/70 rounded-xl p-2.5 border border-emerald-100">
+                        <span className="block text-xs font-medium text-slate-500">
+                          {lang === 'bn' ? 'লগইন আইডি' : 'Login ID'}
+                        </span>
+                        <strong className="font-mono text-sm font-bold text-slate-900">
+                          {admissionResult.portalAccount.loginIdentifier}
+                        </strong>
+                      </div>
+                      <div className="bg-white/70 rounded-xl p-2.5 border border-emerald-100">
+                        <span className="block text-xs font-medium text-slate-500">
+                          {lang === 'bn' ? 'পাসওয়ার্ড সেটআপ' : 'Setup Password'}
+                        </span>
+                        <span className="text-xs text-slate-600 font-medium">
+                          {lang === 'bn' ? 'শিক্ষার্থী নিজের পাসওয়ার্ড নিজে সেট করবে' : 'Student sets their own password'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {admissionResult.portalAccount.setupLink && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 pt-2.5 border-t border-emerald-200/50">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const fullUrl = `${window.location.origin}${admissionResult.portalAccount!.setupLink}`;
+                            navigator.clipboard.writeText(fullUrl);
+                            setCopiedSetupLink(true);
+                            setTimeout(() => setCopiedSetupLink(false), 2500);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 transition-colors shadow-xs"
+                        >
+                          <Icon name="copy" size={14} />
+                          <span>{copiedSetupLink ? (lang === 'bn' ? 'লিঙ্ক কপি হয়েছে!' : 'Link Copied!') : (lang === 'bn' ? 'সেটআপ লিঙ্ক কপি করুন' : 'Copy Setup Link')}</span>
+                        </button>
+                        <a
+                          href={admissionResult.portalAccount.setupLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-4 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors shadow-2xs"
+                        >
+                          <Icon name="external-link" size={14} />
+                          <span>{lang === 'bn' ? 'সেটআপ পেজ খুলুন' : 'Open Setup Page'}</span>
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                ) : admissionResult.portalProvisioning?.status === 'QUOTA_EXCEEDED' ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-left shadow-xs mb-4">
+                    <div className="flex items-center gap-2.5 pb-2 border-b border-amber-200/60">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500 text-white shadow-xs">
+                        <Icon name="alert-triangle" size={18} />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-800">
+                          {lang === 'bn' ? 'শিক্ষার্থী পোর্টাল একাউন্ট' : 'Student Portal Account'}
+                        </h4>
+                        <span className="text-[11px] font-semibold text-amber-800">
+                          {lang === 'bn' ? 'স্ট্যাটাস: তৈরি হয়নি (কোটা শেষ)' : 'Status: Not Provisioned (Quota Exceeded)'}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-700 mt-2.5 leading-relaxed">
+                      {lang === 'bn'
+                        ? 'ভর্তি সফলভাবে সম্পন্ন হয়েছে, তবে আপনার সাবস্ক্রিপশন প্ল্যানের পোর্টাল একাউন্ট লিমিট শেষ হওয়ায় এই শিক্ষার্থীর জন্য স্বয়ংক্রিয় পোর্টাল তৈরি করা সম্ভব হয়নি।'
+                        : 'Student admitted successfully, but portal access could not be created because the portal account limit has been reached.'}
+                    </p>
+                  </div>
+                ) : null}
 
                 {/* Quick Actions */}
                 <div className="flex flex-wrap items-center justify-center gap-3 pt-4">

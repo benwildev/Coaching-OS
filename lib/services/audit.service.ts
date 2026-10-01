@@ -1,4 +1,5 @@
 import prisma from '@/lib/db';
+import type { Prisma } from '@prisma/client';
 
 export interface AuditLogParams {
   coachingCenterId: string;
@@ -13,9 +14,12 @@ export interface AuditLogParams {
   userAgent?: string | null;
 }
 
-export async function recordAuditLog(params: AuditLogParams): Promise<void> {
+export async function recordAuditLog(
+  params: AuditLogParams,
+  db: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<void> {
   try {
-    await prisma.auditLog.create({
+    await db.auditLog.create({
       data: {
         coachingCenterId: params.coachingCenterId,
         userId: params.userId,

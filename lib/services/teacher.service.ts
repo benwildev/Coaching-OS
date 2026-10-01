@@ -1,7 +1,8 @@
+import crypto from 'crypto';
 import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
 import { checkTeacherLimit } from './subscription.service';
-import { createUser } from './user.service';
+import { createUser, createTeacherUserInTx } from './user.service';
 import { getTodaysClasses } from './attendance.service';
 import { getCurrentDhakaDateOnly, getCurrentDhakaDayOfWeek, isScheduleActiveOnDate } from '@/lib/schedule';
 import { normalizeBdPhone } from '@/lib/validations/student';
@@ -260,13 +261,56 @@ export async function createTeacher(
 
   const createdAssignmentsCount = assignmentRowsToCreate.length;
 
-  const teacher = await prisma.$transaction(async (tx) => {
+  const shouldCreateUser = input.createLoginAccount !== undefined
+    ? Boolean(input.createLoginAccount)
+    : Boolean(input.email && input.email.trim());
+
+  if (shouldCreateUser && (!input.email || !input.email.trim())) {
+    throw new Error('EMAIL_REQUIRED_FOR_ACCOUNT: An email address is required to create a teacher login account');
+  }
+
+  const temporaryPassword = shouldCreateUser ? generateTemporaryPassword() : null;
+
+  const { teacher, userAccount } = await prisma.$transaction(async (tx) => {
     // Phase 11.4: plan teacher limit (only ACTIVE teachers count), under an advisory lock.
     if ((input.status ?? 'ACTIVE') === 'ACTIVE') await checkTeacherLimit(tx, coachingCenterId);
+
+    let linkedUserId: string | null = null;
+    let createdAccount: {
+      created: boolean;
+      userId: string;
+      email: string;
+      temporaryPassword?: string;
+    } | null = null;
+
+    if (shouldCreateUser && input.email && temporaryPassword) {
+      const user = await createTeacherUserInTx(
+        tx,
+        coachingCenterId,
+        {
+          email: input.email,
+          phone: normalizedPhone,
+          name: input.name,
+          banglaName: input.banglaName || null,
+          password: temporaryPassword,
+          branchId: input.branchId || null,
+        },
+        actorId
+      );
+      linkedUserId = user.id;
+      createdAccount = {
+        created: true,
+        userId: user.id,
+        email: user.email,
+        temporaryPassword,
+      };
+    }
+
     const created = await tx.teacher.create({
       data: {
         coachingCenterId,
         branchId: input.branchId || null,
+        userId: linkedUserId,
         teacherCode,
         name: input.name.trim(),
         banglaName: input.banglaName?.trim() || null,
@@ -303,7 +347,7 @@ export async function createTeacher(
       });
     }
 
-    return created;
+    return { teacher: created, userAccount: createdAccount };
   }, {
     maxWait: 15000,
     timeout: 30000,
@@ -319,10 +363,23 @@ export async function createTeacher(
       name: teacher.name,
       teacherCode: teacher.teacherCode,
       assignmentsCount: createdAssignmentsCount,
+      hasUserAccount: Boolean(userAccount?.created),
     },
   });
 
-  return teacher;
+  return Object.assign(teacher, {
+    userAccount: userAccount ?? { created: false },
+  });
+}
+
+export function generateTemporaryPassword(): string {
+  const charset = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz!@#$%';
+  const bytes = crypto.randomBytes(12);
+  let pass = '';
+  for (let i = 0; i < 12; i++) {
+    pass += charset[bytes[i] % charset.length];
+  }
+  return pass;
 }
 
 async function generateTeacherCode(coachingCenterId: string): Promise<string> {

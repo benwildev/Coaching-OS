@@ -69,25 +69,87 @@ export function redirectPathFor(outcome: Extract<AuthOutcome, { ok: true }>): st
   return '/dashboard';
 }
 
-export async function authenticateByEmail(rawEmail: string, plainPassword: string, ipAddress?: string | null): Promise<AuthOutcome> {
-  const email = rawEmail.trim().toLowerCase();
-  if (!email || !plainPassword) return { ok: false, reason: 'INVALID_CREDENTIALS' };
+import { normalizeBdPhone } from '@/lib/validations/student';
 
-  const [platformAdmin, users, portals] = await Promise.all([
-    prisma.platformAdmin.findUnique({
-      where: { email },
-    }),
-    prisma.user.findMany({
-      where: { email: { equals: email, mode: 'insensitive' } },
-      include: staffIdentityInclude,
+export async function authenticateByEmail(rawIdentifier: string, plainPassword: string, ipAddress?: string | null): Promise<AuthOutcome> {
+  const identifier = rawIdentifier.trim();
+  if (!identifier || !plainPassword) return { ok: false, reason: 'INVALID_CREDENTIALS' };
+
+  let platformAdmin: any = null;
+  let users: any[] = [];
+  let portals: any[] = [];
+
+  // Step 1: Check Email candidates (matching order: Email -> Phone -> Student ID)
+  if (identifier.includes('@')) {
+    const email = identifier.toLowerCase();
+    [platformAdmin, users, portals] = await Promise.all([
+      prisma.platformAdmin.findUnique({
+        where: { email },
+      }),
+      prisma.user.findMany({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        include: staffIdentityInclude,
+        take: CANDIDATE_LIMIT,
+      }),
+      prisma.portalAccount.findMany({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        include: portalIdentityInclude,
+        take: CANDIDATE_LIMIT,
+      }),
+    ]);
+  }
+
+  // Step 2: Check Phone candidates if no email matches found
+  if (!platformAdmin && users.length === 0 && portals.length === 0) {
+    const cleanedDigits = identifier.replace(/[\s-]/g, '');
+    const normalized = normalizeBdPhone(identifier);
+    const isPhoneLike = /^\+?\d{7,15}$/.test(cleanedDigits);
+
+    if (isPhoneLike) {
+      const phoneCandidates = Array.from(new Set([identifier, cleanedDigits, normalized].filter(Boolean)));
+      [users, portals] = await Promise.all([
+        prisma.user.findMany({
+          where: {
+            phone: { in: phoneCandidates },
+          },
+          include: staffIdentityInclude,
+          take: CANDIDATE_LIMIT,
+        }),
+        prisma.portalAccount.findMany({
+          where: {
+            OR: [
+              { phone: { in: phoneCandidates } },
+              { student: { phone: { in: phoneCandidates } } },
+              { guardian: { phone: { in: phoneCandidates } } },
+            ],
+          },
+          include: portalIdentityInclude,
+          take: CANDIDATE_LIMIT,
+        }),
+      ]);
+    }
+  }
+
+  // Step 3: Check Student ID Code candidates if no email or phone matches found
+  if (!platformAdmin && users.length === 0 && portals.length === 0) {
+    const studentMatches = await prisma.student.findMany({
+      where: {
+        studentIdCode: { equals: identifier, mode: 'insensitive' },
+      },
+      select: { id: true, coachingCenterId: true },
       take: CANDIDATE_LIMIT,
-    }),
-    prisma.portalAccount.findMany({
-      where: { email: { equals: email, mode: 'insensitive' } },
-      include: portalIdentityInclude,
-      take: CANDIDATE_LIMIT,
-    }),
-  ]);
+    });
+
+    if (studentMatches.length > 0) {
+      portals = await prisma.portalAccount.findMany({
+        where: {
+          studentId: { in: studentMatches.map((s) => s.id) },
+        },
+        include: portalIdentityInclude,
+        take: CANDIDATE_LIMIT,
+      });
+    }
+  }
 
   const now = Date.now();
   if (!platformAdmin && users.length === 0 && portals.length === 0) {
@@ -196,3 +258,6 @@ export async function authenticateByEmail(rawEmail: string, plainPassword: strin
   await prisma.portalAccount.update({ where: { id: account.id }, data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() } });
   return { ok: true, kind: 'PORTAL', portal: toPortalSessionUser(account), portalAccountId: account.id };
 }
+
+export const authenticateUser = authenticateByEmail;
+

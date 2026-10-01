@@ -5,7 +5,7 @@ import { isHttpOrRelativeUrl, RESOURCE_URL_MESSAGE } from './common';
 
 export const TEACHER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 
-export const teacherSchema = z.object({
+export const teacherBaseSchema = z.object({
   branchId: z.string().optional().or(z.literal('')),
   name: z
     .string()
@@ -64,12 +64,23 @@ export const teacherSchema = z.object({
       })
     )
     .default([]),
+  createLoginAccount: z.boolean().optional(),
+});
+
+export const teacherSchema = teacherBaseSchema.superRefine((data, ctx) => {
+  if (data.createLoginAccount === true && (!data.email || !data.email.trim())) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Email address is required to create a teacher login account',
+      path: ['email'],
+    });
+  }
 });
 
 export type TeachingAssignmentInput = z.infer<typeof teacherSchema>['teachingAssignments'][number];
 export type TeacherInput = z.input<typeof teacherSchema>;
 export type TeacherOutput = z.infer<typeof teacherSchema>;
-export const teacherUpdateSchema = teacherSchema.partial();
+export const teacherUpdateSchema = teacherBaseSchema.partial();
 export type TeacherUpdateInput = z.infer<typeof teacherUpdateSchema>;
 
 export const teacherAssignmentCreateSchema = z.object({

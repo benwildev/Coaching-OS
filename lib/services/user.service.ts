@@ -135,6 +135,97 @@ export async function createUser(
 }
 
 /**
+ * Phase 13.1: Transaction-safe helper to create a TEACHER User inside an existing transaction.
+ * Checks checkStaffLimit under advisory lock (per Phase 13.1 instructions).
+ * Enforces email uniqueness and branch scope.
+ */
+export async function createTeacherUserInTx(
+  tx: Prisma.TransactionClient,
+  coachingCenterId: string,
+  params: {
+    email: string;
+    phone: string;
+    name: string;
+    banglaName?: string | null;
+    password: string;
+    branchId?: string | null;
+  },
+  actorUserId?: string
+): Promise<{ id: string; email: string; phone: string; name: string }> {
+  // Phase 13.1 §12: check staff limit under advisory lock before creating User
+  await checkStaffLimit(tx, coachingCenterId);
+
+  const existing = await tx.user.findFirst({
+    where: {
+      coachingCenterId,
+      email: { equals: params.email.trim().toLowerCase(), mode: 'insensitive' },
+    },
+  });
+  if (existing) {
+    throw new Error('EMAIL_ALREADY_EXISTS: A user with this email already exists in this center.');
+  }
+
+  let role = await tx.role.findFirst({
+    where: { coachingCenterId, code: 'TEACHER' },
+  });
+
+  if (!role) {
+    role = await tx.role.create({
+      data: {
+        coachingCenterId,
+        name: 'TEACHER',
+        code: 'TEACHER',
+        isSystem: true,
+      },
+    });
+  }
+
+  const passwordHash = hashPassword(params.password);
+
+  const user = await tx.user.create({
+    data: {
+      coachingCenterId,
+      branchId: params.branchId || null,
+      email: params.email.trim().toLowerCase(),
+      phone: params.phone,
+      name: params.name.trim(),
+      banglaName: params.banglaName?.trim() || null,
+      passwordHash,
+      status: 'ACTIVE',
+      roleAssignments: {
+        create: {
+          roleId: role.id,
+          branchId: params.branchId || null,
+        },
+      },
+    },
+    select: {
+      id: true,
+      email: true,
+      phone: true,
+      name: true,
+      status: true,
+    },
+  });
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: actorUserId,
+    action: 'TEACHER_USER_ACCOUNT_CREATED',
+    entity: 'User',
+    entityId: user.id,
+    details: { email: user.email, role: 'TEACHER' },
+  });
+
+  return {
+    id: user.id,
+    email: user.email,
+    phone: user.phone || '',
+    name: user.name,
+  };
+}
+
+/**
  * A tenant must always keep at least one ACTIVE OWNER — otherwise nobody
  * could ever manage the center again. Called before any status/role change
  * that would remove the last one.

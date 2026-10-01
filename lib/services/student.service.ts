@@ -6,6 +6,7 @@ import { generateInvoiceNumber } from './invoice.service';
 import { generateReceiptNumber } from './payment.service';
 import { loadCoursePricing } from './course-pricing.service';
 import { checkStudentLimit } from './subscription.service';
+import { provisionStudentPortalAccount } from './portal-auth.service';
 import { allocateAdjustments, buildPricingLines, fromPaisa, toPaisa, type PricingLine } from '@/lib/course-pricing';
 import {
   type AdmissionInput,
@@ -161,6 +162,31 @@ export async function getAdmissionByIdempotencyKey(coachingCenterId: string, ide
       })
     : null;
 
+  const existingPortal = await prisma.portalAccount.findFirst({
+    where: { coachingCenterId, studentId: student.id },
+  });
+
+  const existingToken = existingPortal
+    ? await prisma.portalAuthToken.findFirst({
+        where: {
+          portalAccountId: existingPortal.id,
+          purpose: 'SETUP',
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+    : null;
+
+  const portalAccount = existingPortal
+    ? {
+        id: existingPortal.id,
+        loginIdentifier: student.phone || student.email || student.studentIdCode || '',
+        setupLink: '',
+        expiresAt: existingToken?.expiresAt ? existingToken.expiresAt.toISOString() : null,
+      }
+    : null;
+
   return {
     ...student,
     enrollment,
@@ -173,6 +199,10 @@ export async function getAdmissionByIdempotencyKey(coachingCenterId: string, ide
     receiptNumber: payment?.receiptNumber || null,
     isDiscountPending: invoice?.notes?.includes('[PENDING_APPROVAL]') ?? false,
     idempotentReplay: true,
+    portalAccount,
+    portalProvisioning: {
+      status: existingPortal ? 'ALREADY_EXISTS' : 'QUOTA_EXCEEDED',
+    } as { status: 'SUCCESS' | 'QUOTA_EXCEEDED' | 'ALREADY_EXISTS' },
   };
 }
 
@@ -864,6 +894,34 @@ export async function createStudentAdmission(
       });
     }
 
+    // 14. Automatic Student PortalAccount Provisioning (with graceful quota handling)
+    let portalAccount: any = null;
+    let portalProvisioning: { status: 'SUCCESS' | 'QUOTA_EXCEEDED' | 'ALREADY_EXISTS' } = {
+      status: 'QUOTA_EXCEEDED',
+    };
+
+    try {
+      const provisionRes = await provisionStudentPortalAccount(tx, {
+        coachingCenterId,
+        studentId: student.id,
+        email: student.email,
+        phone: student.phone || primaryGuardian?.phone || null,
+        actorUserId: actorId,
+      });
+
+      portalProvisioning = { status: provisionRes.status };
+
+      if (provisionRes.status === 'SUCCESS') {
+        portalAccount = provisionRes.portalAccount;
+      } else {
+        portalAccount = null;
+      }
+    } catch (provisionErr) {
+      console.error('[createStudentAdmission] Error during portal provisioning:', provisionErr);
+      portalAccount = null;
+      portalProvisioning = { status: 'QUOTA_EXCEEDED' };
+    }
+
     return {
       ...student,
       enrollment,
@@ -875,6 +933,8 @@ export async function createStudentAdmission(
       payment,
       receiptNumber,
       isDiscountPending,
+      portalAccount,
+      portalProvisioning,
     };
   }, {
     maxWait: 10000,

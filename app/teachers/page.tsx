@@ -74,6 +74,7 @@ const emptyForm = {
   joiningDate: '',
   subjectIds: [] as string[],
   teachingAssignments: [] as TeachingAssignmentRow[],
+  createLoginAccount: true,
 };
 
 export default function TeachersPage() {
@@ -95,6 +96,14 @@ export default function TeachersPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const [createdTeacherAccount, setCreatedTeacherAccount] = useState<{
+    teacherId: string;
+    teacherName: string;
+    email: string;
+    temporaryPassword?: string;
+  } | null>(null);
+  const [copiedCredentials, setCopiedCredentials] = useState(false);
 
   const loadOptions = useCallback(async () => {
     try {
@@ -221,6 +230,8 @@ export default function TeachersPage() {
 
     if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       errs.email = lang === 'bn' ? 'সঠিক ইমেইল ঠিকানা দিন' : 'Please enter a valid email address';
+    } else if (form.createLoginAccount && !trimmedEmail) {
+      errs.email = lang === 'bn' ? 'লগইন একাউন্ট তৈরির জন্য ইমেইল আবশ্যক' : 'Email address is required to create a login account';
     }
 
     // Validate assignments
@@ -252,6 +263,7 @@ export default function TeachersPage() {
     try {
       const payload = {
         ...form,
+        createLoginAccount: form.createLoginAccount,
         name: trimmedName,
         banglaName: trimmedBangla,
         phone: normalizedPhone,
@@ -275,6 +287,14 @@ export default function TeachersPage() {
         setForm(emptyForm);
         setFieldErrors({});
         fetchTeachers();
+        if (data.userAccount?.created) {
+          setCreatedTeacherAccount({
+            teacherId: data.teacher.id,
+            teacherName: data.teacher.name,
+            email: data.userAccount.email,
+            temporaryPassword: data.userAccount.temporaryPassword,
+          });
+        }
       } else {
         if (data.details) {
           const serverFieldErrors: Record<string, string> = {};
@@ -623,6 +643,45 @@ export default function TeachersPage() {
               </div>
             </div>
 
+            {/* SECTION: Teacher Login Account */}
+            <div className="pt-2 border-t border-[#edf2f7]">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-6 w-6 rounded-md bg-[#063b78]/10 text-[#063b78] flex items-center justify-center text-xs font-bold">
+                    <Icon name="key" size={13} />
+                  </div>
+                  <h4 className="font-bold text-[14px] text-[#063b78] uppercase tracking-wider">
+                    {lang === 'bn' ? 'লগইন একাউন্ট' : 'Login Account'}
+                  </h4>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.createLoginAccount}
+                    onChange={(e) => setForm({ ...form, createLoginAccount: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300 text-[#063b78] focus:ring-[#063b78]"
+                  />
+                  <span className="text-sm font-bold text-slate-800">
+                    {lang === 'bn' ? 'শিক্ষকের জন্য লগইন একাউন্ট তৈরি করুন' : 'Create Teacher Login Account'}
+                  </span>
+                </label>
+                <p className="text-xs text-slate-600 pl-6.5 leading-relaxed">
+                  {lang === 'bn'
+                    ? 'সক্রিয় থাকলে উপরে প্রদত্ত ইমেইলে TEACHER রোলে একটি সিস্টেম একাউন্ট এবং একটি নিরাপদ অস্থায়ী পাসওয়ার্ড স্বয়ংক্রিয়ভাবে তৈরি হবে।'
+                    : 'When enabled, a user account with TEACHER role will be automatically created using the email provided above, and a secure temporary password will be generated.'}
+                </p>
+                {form.createLoginAccount && !form.email.trim() && (
+                  <p className="text-xs text-amber-700 pl-6.5 font-medium flex items-center gap-1">
+                    <Icon name="alert-triangle" size={13} />
+                    <span>{lang === 'bn' ? 'লগইন একাউন্ট তৈরির জন্য উপরে ইমেইল প্রদান করুন।' : 'Please enter an email above to enable account creation.'}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
             {/* SECTION 2: General Subjects (Competencies) */}
             <div className="pt-2 border-t border-[#edf2f7]">
               <div className="flex items-center gap-2 mb-1.5">
@@ -795,6 +854,94 @@ export default function TeachersPage() {
                 className="px-5 py-2 rounded-xl bg-[#063b78] text-white text-[13px] font-semibold hover:bg-[#052e5e] shadow-sm disabled:opacity-50"
               >
                 {saving ? '…' : dict.teachers.save}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Account Created Feedback Modal */}
+      {createdTeacherAccount && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="card p-6 bg-white max-w-md w-full shadow-2xl space-y-5 rounded-2xl border border-emerald-200">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-xs">
+                <Icon name="check" size={20} />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  {lang === 'bn' ? 'শিক্ষক লগইন একাউন্ট প্রস্তুত' : 'Teacher Account Created'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {lang === 'bn' ? 'লগইন ক্রেডেনশিয়াল সংরক্ষণ করুন' : 'Save these login credentials'}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2.5 text-left">
+              <div>
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                  {lang === 'bn' ? 'শিক্ষক' : 'Teacher'}
+                </span>
+                <span className="text-sm font-bold text-slate-800">{createdTeacherAccount.teacherName}</span>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                  {lang === 'bn' ? 'ইমেইল' : 'Email'}
+                </span>
+                <span className="font-mono text-sm font-bold text-slate-900">{createdTeacherAccount.email}</span>
+              </div>
+              {createdTeacherAccount.temporaryPassword && (
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                    {lang === 'bn' ? 'অস্থায়ী পাসওয়ার্ড' : 'Temporary Password'}
+                  </span>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="font-mono text-sm font-extrabold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200">
+                      {createdTeacherAccount.temporaryPassword}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800 leading-relaxed">
+              {lang === 'bn'
+                ? 'এই পাসওয়ার্ডটি শুধুমাত্র একবার দেখানো হলো। শিক্ষক লগইন করার পর পাসওয়ার্ড পরিবর্তন করে নিতে পারবেন।'
+                : 'This temporary password will only be shown once. Please copy and share it securely with the teacher.'}
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-2">
+              {createdTeacherAccount.temporaryPassword && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const creds = `Teacher Login:\nEmail: ${createdTeacherAccount.email}\nTemporary Password: ${createdTeacherAccount.temporaryPassword}`;
+                    navigator.clipboard.writeText(creds);
+                    setCopiedCredentials(true);
+                    setTimeout(() => setCopiedCredentials(false), 2500);
+                  }}
+                  className="w-full sm:w-auto flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 transition-colors shadow-xs"
+                >
+                  <Icon name="copy" size={14} />
+                  <span>{copiedCredentials ? (lang === 'bn' ? 'কপি হয়েছে!' : 'Copied!') : (lang === 'bn' ? 'ক্রেডেনশিয়াল কপি করুন' : 'Copy Credentials')}</span>
+                </button>
+              )}
+
+              <Link
+                href={`/teachers/${createdTeacherAccount.teacherId}`}
+                className="w-full sm:w-auto flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#063b78] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#052e5e] transition-colors shadow-xs"
+              >
+                <Icon name="user" size={14} />
+                <span>{lang === 'bn' ? 'প্রোফাইলে যান' : 'Go to Teacher Profile'}</span>
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => setCreatedTeacherAccount(null)}
+                className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                {lang === 'bn' ? 'সম্পন্ন' : 'Done'}
               </button>
             </div>
           </div>
