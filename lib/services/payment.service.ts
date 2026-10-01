@@ -167,17 +167,18 @@ export async function createPayment(
     });
   } catch (err) {
     // Lost the race to a concurrent request carrying the same
-    // idempotencyKey — return what THAT request created instead of
-    // failing this one (the DB unique index is the real safety net here;
-    // the pre-check above only handles the non-concurrent common case).
-    if (idempotencyKey && err instanceof Error && /Unique constraint/i.test(err.message) && /idempotencyKey/i.test(err.message)) {
-      // The unique index is (coachingCenterId, idempotencyKey) only — but
-      // only treat this as a same-invoice replay when the winning row
-      // actually matches THIS invoiceId too. If the key collided with a
-      // payment made against a different invoice, that's a genuine
-      // client-side key-reuse bug, not a same-request race — surface the
-      // original error rather than handing back an unrelated invoice.
-      const winner = await prisma.payment.findFirst({ where: { coachingCenterId, invoiceId, idempotencyKey }, include: { invoice: true } });
+    const isP2002 = (err as any)?.code === 'P2002';
+    const hasIdem = (err instanceof Error && /idempotencyKey/i.test(err.message)) ||
+      (Array.isArray((err as any)?.meta?.target) && (err as any).meta.target.includes('idempotencyKey'));
+    if (idempotencyKey && (isP2002 || (err instanceof Error && /Unique constraint/i.test(err.message)))) {
+      let winner = await prisma.payment.findFirst({ where: { coachingCenterId, invoiceId, idempotencyKey }, include: { invoice: true } });
+      if (!winner) {
+        for (let i = 0; i < 6; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          winner = await prisma.payment.findFirst({ where: { coachingCenterId, invoiceId, idempotencyKey }, include: { invoice: true } });
+          if (winner) break;
+        }
+      }
       if (winner) return { payment: winner, invoice: winner.invoice, idempotentReplay: true as const };
     }
     throw err;

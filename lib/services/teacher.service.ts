@@ -5,7 +5,8 @@ import { createUser } from './user.service';
 import { getTodaysClasses } from './attendance.service';
 import { getCurrentDhakaDateOnly, getCurrentDhakaDayOfWeek, isScheduleActiveOnDate } from '@/lib/schedule';
 import { normalizeBdPhone } from '@/lib/validations/student';
-import type { TeacherInput, TeacherUpdateInput, TeacherAccountLinkInput } from '@/lib/validations/teacher';
+import type { TeacherInput, TeacherUpdateInput, TeacherAccountLinkInput, TeachingAssignmentInput } from '@/lib/validations/teacher';
+import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
 import type { Prisma, RoleCode } from '@prisma/client';
 
 export interface TeacherFilterParams {
@@ -49,7 +50,18 @@ export async function getTeachersList(coachingCenterId: string, params: TeacherF
         teacherSubjects: { include: { subject: { select: { id: true, name: true, banglaName: true } } } },
         batchTeacherAssignments: {
           where: { status: 'ACTIVE' },
-          include: { batch: { select: { id: true, name: true, code: true } }, subject: { select: { id: true, name: true } } },
+          include: {
+            batch: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                courseId: true,
+                course: { select: { id: true, name: true, banglaName: true, code: true } },
+              },
+            },
+            subject: { select: { id: true, name: true } },
+          },
         },
         classSchedules: {
           where: { status: 'ACTIVE' },
@@ -86,10 +98,22 @@ export async function getTeacherById(coachingCenterId: string, teacherId: string
       teacherSubjects: { include: { subject: true } },
       batchTeacherAssignments: {
         include: {
-          batch: { select: { id: true, name: true, banglaName: true, code: true, status: true } },
-          subject: { select: { id: true, name: true, banglaName: true } },
+          batch: {
+            select: {
+              id: true,
+              name: true,
+              banglaName: true,
+              code: true,
+              status: true,
+              branchId: true,
+              branch: { select: { id: true, name: true, code: true } },
+              courseId: true,
+              course: { select: { id: true, name: true, banglaName: true, code: true } },
+            },
+          },
+          subject: { select: { id: true, name: true, banglaName: true, code: true } },
         },
-        orderBy: { startDate: 'desc' },
+        orderBy: [{ status: 'asc' }, { startDate: 'desc' }],
       },
       classSchedules: {
         where: { status: 'ACTIVE' },
@@ -125,10 +149,116 @@ export async function getTeacherByUserId(coachingCenterId: string, userId: strin
   return prisma.teacher.findFirst({ where: { coachingCenterId, userId } });
 }
 
-export async function createTeacher(coachingCenterId: string, input: TeacherInput, actorId?: string) {
+export async function createTeacher(
+  coachingCenterId: string,
+  input: TeacherInput,
+  actorId?: string,
+  actorUser?: SessionUser
+) {
   const teacherCode = await generateTeacherCode(coachingCenterId);
   const normalizedPhone = normalizeBdPhone(input.phone) || input.phone.trim();
   const validJoiningDate = input.joiningDate && !isNaN(Date.parse(input.joiningDate)) ? new Date(input.joiningDate) : null;
+
+  // Pre-validate teaching assignments outside the transaction to minimize transaction time
+  const assignmentRowsToCreate: Array<{
+    branchId: string;
+    batchId: string;
+    subjectId: string;
+    startDate: Date;
+    endDate: Date | null;
+  }> = [];
+
+  if (input.teachingAssignments && input.teachingAssignments.length > 0) {
+    const courseIds = Array.from(new Set(input.teachingAssignments.map((a) => a.courseId)));
+    const batchIds = Array.from(new Set(input.teachingAssignments.map((a) => a.batchId)));
+    const allSubjectIds = Array.from(new Set(input.teachingAssignments.flatMap((a) => a.subjectIds)));
+
+    const [courses, batches, subjects] = await Promise.all([
+      prisma.course.findMany({ where: { id: { in: courseIds }, coachingCenterId } }),
+      prisma.batch.findMany({
+        where: { id: { in: batchIds }, coachingCenterId },
+        include: {
+          course: { include: { courseSubjects: true } },
+          batchSubjects: true,
+          academicClass: { include: { subjects: true } },
+        },
+      }),
+      prisma.subject.findMany({ where: { id: { in: allSubjectIds }, coachingCenterId } }),
+    ]);
+
+    const courseMap = new Map(courses.map((c) => [c.id, c]));
+    const batchMap = new Map(batches.map((b) => [b.id, b]));
+    const subjectMap = new Map(subjects.map((s) => [s.id, s]));
+
+    const seenActiveAssignments = new Set<string>();
+
+    for (const assignment of input.teachingAssignments) {
+      const course = courseMap.get(assignment.courseId);
+      if (!course) {
+        throw new Error('COURSE_NOT_FOUND: Selected course does not exist in this coaching center');
+      }
+
+      const batch = batchMap.get(assignment.batchId);
+      if (!batch) {
+        throw new Error('BATCH_NOT_FOUND: Selected batch does not exist in this coaching center');
+      }
+      if (batch.courseId !== assignment.courseId) {
+        throw new Error('BATCH_MISMATCH: Selected batch does not belong to the selected course');
+      }
+
+      if (actorUser) {
+        assertBranchAccess(actorUser, batch.branchId);
+      }
+
+      if (input.branchId && batch.branchId && input.branchId !== batch.branchId) {
+        throw new Error('BRANCH_MISMATCH: Teacher branch does not match batch branch');
+      }
+
+      const offeredSubjectIds = new Set<string>();
+      batch.batchSubjects.forEach((bs) => offeredSubjectIds.add(bs.subjectId));
+      if (batch.course?.courseSubjects) {
+        batch.course.courseSubjects.forEach((cs) => offeredSubjectIds.add(cs.subjectId));
+      }
+      if (offeredSubjectIds.size === 0 && batch.academicClass?.subjects) {
+        batch.academicClass.subjects.forEach((s) => offeredSubjectIds.add(s.id));
+      }
+
+      const dedupedSubjectIds = Array.from(new Set(assignment.subjectIds));
+      for (const subjectId of dedupedSubjectIds) {
+        if (!offeredSubjectIds.has(subjectId)) {
+          throw new Error('SUBJECT_NOT_OFFERED: Selected subject is not offered by the selected batch');
+        }
+
+        const subject = subjectMap.get(subjectId);
+        if (!subject) {
+          throw new Error('SUBJECT_NOT_FOUND: Selected subject does not exist');
+        }
+
+        const assignKey = `${batch.id}:${subjectId}`;
+        if (seenActiveAssignments.has(assignKey)) {
+          throw new Error('DUPLICATE_ASSIGNMENT: Teacher already has an active assignment for this batch and subject');
+        }
+        seenActiveAssignments.add(assignKey);
+
+        const startDate = assignment.startDate && !isNaN(Date.parse(assignment.startDate))
+          ? new Date(assignment.startDate)
+          : new Date();
+        const endDate = assignment.endDate && !isNaN(Date.parse(assignment.endDate))
+          ? new Date(assignment.endDate)
+          : null;
+
+        assignmentRowsToCreate.push({
+          branchId: batch.branchId,
+          batchId: batch.id,
+          subjectId,
+          startDate,
+          endDate,
+        });
+      }
+    }
+  }
+
+  const createdAssignmentsCount = assignmentRowsToCreate.length;
 
   const teacher = await prisma.$transaction(async (tx) => {
     // Phase 11.4: plan teacher limit (only ACTIVE teachers count), under an advisory lock.
@@ -158,7 +288,25 @@ export async function createTeacher(coachingCenterId: string, input: TeacherInpu
       });
     }
 
+    if (assignmentRowsToCreate.length > 0) {
+      await tx.batchTeacherAssignment.createMany({
+        data: assignmentRowsToCreate.map((row) => ({
+          coachingCenterId,
+          branchId: row.branchId,
+          batchId: row.batchId,
+          subjectId: row.subjectId,
+          teacherId: created.id,
+          status: 'ACTIVE',
+          startDate: row.startDate,
+          endDate: row.endDate,
+        })),
+      });
+    }
+
     return created;
+  }, {
+    maxWait: 15000,
+    timeout: 30000,
   });
 
   await recordAuditLog({
@@ -167,7 +315,11 @@ export async function createTeacher(coachingCenterId: string, input: TeacherInpu
     action: 'TEACHER_CREATED',
     entity: 'Teacher',
     entityId: teacher.id,
-    details: { name: teacher.name, teacherCode: teacher.teacherCode },
+    details: {
+      name: teacher.name,
+      teacherCode: teacher.teacherCode,
+      assignmentsCount: createdAssignmentsCount,
+    },
   });
 
   return teacher;
@@ -535,4 +687,307 @@ export async function getTeacherDashboardData(
     pendingMarksEntry,
     recentNotices,
   };
+}
+
+// ------------------------------------------------------------------
+// Phase 12: Teacher Teaching Assignments & Options
+// ------------------------------------------------------------------
+
+export async function assignTeacherToBatches(
+  coachingCenterId: string,
+  teacherId: string,
+  assignments: TeachingAssignmentInput[],
+  actorId?: string,
+  actorUser?: SessionUser
+) {
+  const teacher = await prisma.teacher.findFirst({ where: { id: teacherId, coachingCenterId } });
+  if (!teacher) throw new Error('TEACHER_NOT_FOUND: Teacher not found in this coaching center');
+
+  const courseIds = Array.from(new Set(assignments.map((a) => a.courseId)));
+  const batchIds = Array.from(new Set(assignments.map((a) => a.batchId)));
+  const allSubjectIds = Array.from(new Set(assignments.flatMap((a) => a.subjectIds)));
+
+  const [courses, batches, subjects, existingActiveList] = await Promise.all([
+    prisma.course.findMany({ where: { id: { in: courseIds }, coachingCenterId } }),
+    prisma.batch.findMany({
+      where: { id: { in: batchIds }, coachingCenterId },
+      include: {
+        course: { include: { courseSubjects: true } },
+        batchSubjects: true,
+        academicClass: { include: { subjects: true } },
+      },
+    }),
+    prisma.subject.findMany({ where: { id: { in: allSubjectIds }, coachingCenterId } }),
+    prisma.batchTeacherAssignment.findMany({
+      where: {
+        teacherId: teacher.id,
+        batchId: { in: batchIds },
+        subjectId: { in: allSubjectIds },
+        status: 'ACTIVE',
+      },
+    }),
+  ]);
+
+  const courseMap = new Map(courses.map((c) => [c.id, c]));
+  const batchMap = new Map(batches.map((b) => [b.id, b]));
+  const subjectMap = new Map(subjects.map((s) => [s.id, s]));
+  const activeSet = new Set(existingActiveList.map((a) => `${a.batchId}:${a.subjectId}`));
+  const pendingSet = new Set<string>();
+
+  const itemsToCreate: Array<{
+    batch: (typeof batches)[0];
+    subjectId: string;
+    startDate: Date;
+    endDate: Date | null;
+  }> = [];
+
+  for (const assignment of assignments) {
+    const course = courseMap.get(assignment.courseId);
+    if (!course) throw new Error('COURSE_NOT_FOUND: Selected course does not exist in this coaching center');
+
+    const batch = batchMap.get(assignment.batchId);
+    if (!batch) throw new Error('BATCH_NOT_FOUND: Selected batch does not exist in this coaching center');
+    if (batch.courseId !== assignment.courseId) {
+      throw new Error('BATCH_MISMATCH: Selected batch does not belong to the selected course');
+    }
+
+    if (actorUser) assertBranchAccess(actorUser, batch.branchId);
+
+    if (teacher.branchId && batch.branchId && teacher.branchId !== batch.branchId) {
+      throw new Error('BRANCH_MISMATCH: Teacher branch does not match batch branch');
+    }
+
+    const offeredSubjectIds = new Set<string>();
+    batch.batchSubjects.forEach((bs) => offeredSubjectIds.add(bs.subjectId));
+    if (batch.course?.courseSubjects) {
+      batch.course.courseSubjects.forEach((cs) => offeredSubjectIds.add(cs.subjectId));
+    }
+    if (offeredSubjectIds.size === 0 && batch.academicClass?.subjects) {
+      batch.academicClass.subjects.forEach((s) => offeredSubjectIds.add(s.id));
+    }
+
+    const dedupedSubjectIds = Array.from(new Set(assignment.subjectIds));
+    for (const subjectId of dedupedSubjectIds) {
+      if (!offeredSubjectIds.has(subjectId)) {
+        throw new Error('SUBJECT_NOT_OFFERED: Selected subject is not offered by the selected batch');
+      }
+
+      const subject = subjectMap.get(subjectId);
+      if (!subject) throw new Error('SUBJECT_NOT_FOUND: Selected subject does not exist');
+
+      const assignKey = `${batch.id}:${subjectId}`;
+      if (activeSet.has(assignKey) || pendingSet.has(assignKey)) {
+        throw new Error('DUPLICATE_ASSIGNMENT: Teacher already has an active assignment for this batch and subject');
+      }
+      pendingSet.add(assignKey);
+
+      const startDate = assignment.startDate && !isNaN(Date.parse(assignment.startDate))
+        ? new Date(assignment.startDate)
+        : new Date();
+      const endDate = assignment.endDate && !isNaN(Date.parse(assignment.endDate))
+        ? new Date(assignment.endDate)
+        : null;
+
+      itemsToCreate.push({ batch, subjectId, startDate, endDate });
+    }
+  }
+
+  const createdList = await prisma.$transaction(async (tx) => {
+    const results = [];
+    for (const item of itemsToCreate) {
+      const created = await tx.batchTeacherAssignment.create({
+        data: {
+          coachingCenterId,
+          branchId: item.batch.branchId,
+          batchId: item.batch.id,
+          subjectId: item.subjectId,
+          teacherId: teacher.id,
+          status: 'ACTIVE',
+          startDate: item.startDate,
+          endDate: item.endDate,
+        },
+        include: {
+          batch: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              courseId: true,
+              course: { select: { id: true, name: true, banglaName: true, code: true } },
+            },
+          },
+          subject: { select: { id: true, name: true, banglaName: true, code: true } },
+        },
+      });
+      results.push(created);
+    }
+    return results;
+  }, {
+    maxWait: 15000,
+    timeout: 30000,
+  });
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: actorId,
+    action: 'TEACHER_ASSIGNMENTS_ADDED',
+    entity: 'Teacher',
+    entityId: teacherId,
+    details: { count: createdList.length },
+  });
+
+  return createdList;
+}
+
+export async function endBatchTeacherAssignment(
+  coachingCenterId: string,
+  teacherId: string,
+  assignmentId: string,
+  actorId?: string,
+  actorUser?: SessionUser
+) {
+  const assignment = await prisma.batchTeacherAssignment.findFirst({
+    where: { id: assignmentId, teacherId, coachingCenterId },
+  });
+  if (!assignment) throw new Error('ASSIGNMENT_NOT_FOUND: Assignment not found');
+
+  if (actorUser) {
+    assertBranchAccess(actorUser, assignment.branchId);
+  }
+
+  const updated = await prisma.batchTeacherAssignment.update({
+    where: { id: assignmentId },
+    data: {
+      status: 'ENDED',
+      endDate: new Date(),
+    },
+  });
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: actorId,
+    action: 'TEACHER_ASSIGNMENT_ENDED',
+    entity: 'BatchTeacherAssignment',
+    entityId: assignmentId,
+    details: { teacherId, batchId: assignment.batchId, subjectId: assignment.subjectId },
+  });
+
+  return updated;
+}
+
+export async function getTeacherAssignmentOptions(
+  coachingCenterId: string,
+  actorUser?: SessionUser
+) {
+  const courses = await prisma.course.findMany({
+    where: { coachingCenterId, status: 'ACTIVE' },
+    select: {
+      id: true,
+      name: true,
+      banglaName: true,
+      code: true,
+      batches: {
+        where: {
+          status: 'ACTIVE',
+          ...(actorUser?.role !== 'OWNER' && actorUser?.branchId ? { branchId: actorUser.branchId } : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+          banglaName: true,
+          code: true,
+          branchId: true,
+          branch: { select: { id: true, name: true, banglaName: true } },
+          batchSubjects: {
+            where: { status: 'ACTIVE' },
+            select: { subject: { select: { id: true, name: true, banglaName: true, code: true } } },
+          },
+          course: {
+            select: {
+              courseSubjects: {
+                where: { status: 'ACTIVE' },
+                select: { subject: { select: { id: true, name: true, banglaName: true, code: true } } },
+              },
+            },
+          },
+          academicClass: {
+            select: {
+              subjects: { select: { id: true, name: true, banglaName: true, code: true } },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { name: 'asc' },
+  });
+
+  return {
+    courses: courses
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        banglaName: c.banglaName,
+        code: c.code,
+        batches: c.batches.map((b) => {
+          const subjectsMap = new Map<string, { id: string; name: string; banglaName: string | null; code: string }>();
+          b.batchSubjects.forEach((bs) => subjectsMap.set(bs.subject.id, bs.subject));
+          if (b.course?.courseSubjects) {
+            b.course.courseSubjects.forEach((cs) => subjectsMap.set(cs.subject.id, cs.subject));
+          }
+          if (subjectsMap.size === 0 && b.academicClass?.subjects) {
+            b.academicClass.subjects.forEach((s) => subjectsMap.set(s.id, s));
+          }
+          return {
+            id: b.id,
+            name: b.name,
+            banglaName: b.banglaName,
+            code: b.code,
+            branchId: b.branchId,
+            branchName: b.branch?.name || '',
+            branchBanglaName: b.branch?.banglaName || null,
+            subjects: Array.from(subjectsMap.values()),
+          };
+        }),
+      }))
+      .filter((c) => c.batches.length > 0),
+  };
+}
+
+export async function deleteTeacher(coachingCenterId: string, teacherId: string, actorId?: string) {
+  const existing = await prisma.teacher.findFirst({
+    where: { id: teacherId, coachingCenterId },
+    include: {
+      _count: {
+        select: {
+          attendanceSessionsTaught: true,
+          homeworks: true,
+        },
+      },
+    },
+  });
+  if (!existing) throw new Error('TEACHER_NOT_FOUND');
+
+  // Prevent hard delete if teacher has conducted classroom sessions or assigned homeworks
+  if (existing._count.attendanceSessionsTaught > 0 || existing._count.homeworks > 0) {
+    throw new Error('CANNOT_DELETE_TEACHER_WITH_HISTORY');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.batchTeacherAssignment.deleteMany({ where: { teacherId } });
+    await tx.classSchedule.deleteMany({ where: { teacherId } });
+    await tx.teacherAttendance.deleteMany({ where: { teacherId } });
+    await tx.teacherSubject.deleteMany({ where: { teacherId } });
+    await tx.teacher.delete({ where: { id: teacherId } });
+  });
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: actorId,
+    action: 'TEACHER_DELETED',
+    entity: 'Teacher',
+    entityId: teacherId,
+    details: { name: existing.name, teacherCode: existing.teacherCode },
+  });
+
+  return { success: true };
 }

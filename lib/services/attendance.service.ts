@@ -8,7 +8,8 @@ import {
   isScheduleActiveOnDate,
   toDateOnly,
 } from '@/lib/schedule';
-import { DEFAULT_ATTENDANCE_THRESHOLD } from '@/lib/validations/attendance';
+import { DEFAULT_ATTENDANCE_THRESHOLD, type TeacherBulkAttendanceInput } from '@/lib/validations/attendance';
+import { assertBranchAccess, resolveEffectiveBranchId, type SessionUser } from '@/lib/auth/session';
 import type { AttendanceStatus, Prisma } from '@prisma/client';
 
 // StudentBatch.joinedAt/endDate are full timestamps (not @db.Date), so a
@@ -914,6 +915,11 @@ export async function recordTeacherAttendance(
   if (!teacher) throw new Error('TEACHER_NOT_FOUND');
 
   const date = toDateOnly(data.date);
+  const today = getCurrentDhakaDateOnly();
+  if (date.getTime() > today.getTime()) {
+    throw new Error('FUTURE_DATE_NOT_ALLOWED: Attendance cannot be marked for future dates');
+  }
+
   const record = await prisma.teacherAttendance.upsert({
     where: { teacherId_date: { teacherId: data.teacherId, date } },
     update: {
@@ -945,10 +951,239 @@ export async function recordTeacherAttendance(
   return record;
 }
 
-export async function getTeacherAttendanceHistory(coachingCenterId: string, teacherId: string, limit = 30) {
-  return prisma.teacherAttendance.findMany({
-    where: { coachingCenterId, teacherId },
+export async function getTeachersDailyAttendance(
+  coachingCenterId: string,
+  params: { date?: string; branchId?: string } = {},
+  actorUser?: SessionUser
+) {
+  const date = params.date ? toDateOnly(params.date) : getCurrentDhakaDateOnly();
+  const effectiveBranchId = actorUser
+    ? resolveEffectiveBranchId(actorUser, params.branchId)
+    : params.branchId;
+
+  const teacherWhere: Prisma.TeacherWhereInput = {
+    coachingCenterId,
+    status: 'ACTIVE',
+  };
+
+  if (effectiveBranchId && effectiveBranchId !== 'all') {
+    teacherWhere.OR = [
+      { branchId: effectiveBranchId },
+      { branchId: null },
+    ];
+  }
+
+  const teachers = await prisma.teacher.findMany({
+    where: teacherWhere,
+    select: {
+      id: true,
+      name: true,
+      banglaName: true,
+      teacherCode: true,
+      phone: true,
+      designation: true,
+      branchId: true,
+      branch: { select: { id: true, name: true, banglaName: true, code: true } },
+    },
+    orderBy: { name: 'asc' },
+  });
+
+  const teacherIds = teachers.map((t) => t.id);
+
+  const attendances = teacherIds.length
+    ? await prisma.teacherAttendance.findMany({
+        where: { coachingCenterId, date, teacherId: { in: teacherIds } },
+      })
+    : [];
+
+  const attMap = new Map(attendances.map((a) => [a.teacherId, a]));
+
+  let presentCount = 0;
+  let lateCount = 0;
+  let absentCount = 0;
+  let excusedCount = 0;
+
+  const roster = teachers.map((t) => {
+    const att = attMap.get(t.id);
+    if (att) {
+      if (att.status === 'PRESENT') presentCount++;
+      else if (att.status === 'LATE') lateCount++;
+      else if (att.status === 'ABSENT') absentCount++;
+      else if (att.status === 'EXCUSED') excusedCount++;
+    }
+    return {
+      teacher: t,
+      attendance: att
+        ? {
+            id: att.id,
+            status: att.status,
+            inTime: att.inTime,
+            outTime: att.outTime,
+            remarks: att.remarks,
+          }
+        : null,
+    };
+  });
+
+  const markedCount = attendances.length;
+  const unmarkedCount = teachers.length - markedCount;
+
+  return {
+    date: date.toISOString().slice(0, 10),
+    totalTeachers: teachers.length,
+    markedCount,
+    unmarkedCount,
+    presentCount,
+    lateCount,
+    absentCount,
+    excusedCount,
+    roster,
+  };
+}
+
+export async function recordTeacherBulkAttendance(
+  coachingCenterId: string,
+  input: TeacherBulkAttendanceInput,
+  actorId?: string,
+  actorUser?: SessionUser
+) {
+  const date = toDateOnly(input.date);
+  const today = getCurrentDhakaDateOnly();
+  if (date.getTime() > today.getTime()) {
+    throw new Error('FUTURE_DATE_NOT_ALLOWED: Attendance cannot be marked for future dates');
+  }
+
+  const teacherIds = Array.from(new Set(input.records.map((r) => r.teacherId)));
+  const teachers = await prisma.teacher.findMany({
+    where: { id: { in: teacherIds }, coachingCenterId },
+    select: { id: true, branchId: true },
+  });
+  const teacherMap = new Map(teachers.map((t) => [t.id, t]));
+
+  for (const rec of input.records) {
+    const teacher = teacherMap.get(rec.teacherId);
+    if (!teacher) {
+      throw new Error(`TEACHER_NOT_FOUND: Teacher ${rec.teacherId} not found`);
+    }
+    if (actorUser) {
+      assertBranchAccess(actorUser, teacher.branchId);
+    }
+  }
+
+  const results = await prisma.$transaction(async (tx) => {
+    const saved = [];
+    for (const rec of input.records) {
+      const upserted = await tx.teacherAttendance.upsert({
+        where: { teacherId_date: { teacherId: rec.teacherId, date } },
+        update: {
+          status: rec.status,
+          inTime: rec.inTime?.trim() || null,
+          outTime: rec.outTime?.trim() || null,
+          remarks: rec.remarks?.trim() || null,
+        },
+        create: {
+          coachingCenterId,
+          teacherId: rec.teacherId,
+          date,
+          status: rec.status,
+          inTime: rec.inTime?.trim() || null,
+          outTime: rec.outTime?.trim() || null,
+          remarks: rec.remarks?.trim() || null,
+        },
+      });
+      saved.push(upserted);
+    }
+    return saved;
+  }, {
+    maxWait: 15000,
+    timeout: 30000,
+  });
+
+  await recordAuditLog({
+    coachingCenterId,
+    userId: actorId,
+    action: 'TEACHER_BULK_ATTENDANCE_SAVED',
+    entity: 'TeacherAttendance',
+    entityId: date.toISOString().slice(0, 10),
+    details: { date: input.date, count: results.length },
+  });
+
+  return {
+    date: input.date,
+    count: results.length,
+  };
+}
+
+export async function getTeacherAttendanceHistory(
+  coachingCenterId: string,
+  teacherId: string,
+  params?: { month?: string; status?: string; limit?: number } | number
+) {
+  const options = typeof params === 'number' ? { limit: params } : params || {};
+  const limit = options.limit ?? 50;
+
+  const where: Prisma.TeacherAttendanceWhereInput = { coachingCenterId, teacherId };
+
+  if (options.status && options.status !== 'all') {
+    where.status = options.status as AttendanceStatus;
+  }
+
+  if (options.month) {
+    const [yearStr, monthStr] = options.month.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
+    if (!isNaN(year) && !isNaN(month)) {
+      const startOfMonth = new Date(Date.UTC(year, month - 1, 1));
+      const endOfMonth = new Date(Date.UTC(year, month, 0));
+      where.date = { gte: startOfMonth, lte: endOfMonth };
+    }
+  }
+
+  const history = await prisma.teacherAttendance.findMany({
+    where,
     orderBy: { date: 'desc' },
     take: limit,
   });
+
+  // Calculate this month's stats (Asia/Dhaka current month)
+  const today = getCurrentDhakaDateOnly();
+  const thisMonthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const thisMonthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
+
+  const monthAttendances = await prisma.teacherAttendance.findMany({
+    where: {
+      coachingCenterId,
+      teacherId,
+      date: { gte: thisMonthStart, lte: thisMonthEnd },
+    },
+  });
+
+  let present = 0;
+  let late = 0;
+  let absent = 0;
+  let excused = 0;
+
+  for (const a of monthAttendances) {
+    if (a.status === 'PRESENT') present++;
+    else if (a.status === 'LATE') late++;
+    else if (a.status === 'ABSENT') absent++;
+    else if (a.status === 'EXCUSED') excused++;
+  }
+
+  const totalDays = present + late + absent + excused;
+  const attendanceRate = totalDays > 0 ? Math.round(((present + late) / totalDays) * 100) : 0;
+
+  return {
+    history,
+    stats: {
+      thisMonth: {
+        present,
+        late,
+        absent,
+        excused,
+        totalDays,
+        attendanceRate,
+      },
+    },
+  };
 }

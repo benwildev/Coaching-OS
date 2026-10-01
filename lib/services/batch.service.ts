@@ -143,11 +143,6 @@ export async function getBatchById(coachingCenterId: string, batchId: string) {
   };
 }
 
-/** Active enrollment count for a batch, computed live (never stored). */
-export async function getBatchActiveStudentCount(batchId: string): Promise<number> {
-  return prisma.studentBatch.count({ where: { batchId, status: 'ACTIVE' } });
-}
-
 /**
  * Phase 10.5: transaction-safe capacity enforcement, callable from inside
  * ANY existing `$transaction` that is about to insert a new ACTIVE
@@ -376,12 +371,13 @@ export async function assignStudentToBatch(
   // also backstopped by a DB partial unique index either way).
   let assignment;
   try {
-    assignment = await prisma.$transaction(async (tx) => {
-      await assertBatchHasCapacity(tx, batchId, batch.capacity, input.overrideCapacity);
+    assignment = await prisma.$transaction(
+      async (tx) => {
+        await assertBatchHasCapacity(tx, batchId, batch.capacity, input.overrideCapacity);
 
-      const alreadyActive = await tx.studentBatch.findFirst({
-        where: { studentId: input.studentId, batchId, status: 'ACTIVE' },
-      });
+        const alreadyActive = await tx.studentBatch.findFirst({
+          where: { studentId: input.studentId, batchId, status: 'ACTIVE' },
+        });
       if (alreadyActive) throw new Error('Student is already actively assigned to this batch');
 
       return tx.studentBatch.create({
@@ -395,7 +391,9 @@ export async function assignStudentToBatch(
           status: 'ACTIVE',
         },
       });
-    });
+    },
+    { timeout: 20000, maxWait: 10000 }
+  );
   } catch (err) {
     // Backstop: the partial unique index on (studentId, batchId) WHERE
     // status = 'ACTIVE' rejects a duplicate that somehow reached the
@@ -467,21 +465,51 @@ export async function assignTeacherToBatch(
   coachingCenterId: string,
   batchId: string,
   input: BatchTeacherAssignInput,
-  actorId?: string
+  actorId?: string,
+  actorUser?: SessionUser
 ) {
-  const batch = await prisma.batch.findFirst({ where: { id: batchId, coachingCenterId } });
+  const batch = await prisma.batch.findFirst({
+    where: { id: batchId, coachingCenterId },
+    include: {
+      batchSubjects: { select: { subjectId: true } },
+      course: { include: { courseSubjects: { select: { subjectId: true } } } },
+    },
+  });
   if (!batch) throw new Error('BATCH_NOT_FOUND');
+
+  if (actorUser) {
+    assertBranchAccess(actorUser, batch.branchId);
+  }
 
   const teacher = await prisma.teacher.findFirst({ where: { id: input.teacherId, coachingCenterId } });
   if (!teacher) throw new Error('TEACHER_NOT_FOUND');
 
+  if (teacher.branchId && teacher.branchId !== batch.branchId) {
+    throw new Error('FORBIDDEN_BRANCH: Teacher is assigned to a different branch than this batch');
+  }
+
   const subject = await prisma.subject.findFirst({ where: { id: input.subjectId, coachingCenterId } });
   if (!subject) throw new Error('SUBJECT_NOT_FOUND');
+
+  const offeredSubjectIds = new Set<string>();
+  for (const bs of batch.batchSubjects) offeredSubjectIds.add(bs.subjectId);
+  for (const cs of batch.course?.courseSubjects || []) offeredSubjectIds.add(cs.subjectId);
+  if (offeredSubjectIds.size === 0) {
+    const classSubjects = await prisma.subject.findMany({
+      where: { coachingCenterId, academicClassId: batch.academicClassId },
+      select: { id: true },
+    });
+    for (const s of classSubjects) offeredSubjectIds.add(s.id);
+  }
+
+  if (!offeredSubjectIds.has(input.subjectId)) {
+    throw new Error('SUBJECT_NOT_OFFERED: Subject is not offered by the selected batch');
+  }
 
   const dupe = await prisma.batchTeacherAssignment.findFirst({
     where: { batchId, subjectId: input.subjectId, teacherId: input.teacherId, status: 'ACTIVE' },
   });
-  if (dupe) throw new Error('This teacher is already assigned to this subject in this batch');
+  if (dupe) throw new Error('ALREADY_ASSIGNED: This teacher is already assigned to this subject in this batch');
 
   const assignment = await prisma.batchTeacherAssignment.create({
     data: {
@@ -600,11 +628,17 @@ export async function getBatchFormOptions(coachingCenterId: string) {
         banglaName: true,
         code: true,
         branchId: true,
+        courseId: true,
         status: true,
         academicProgramId: true,
         academicClassId: true,
         academicGroupId: true,
         academicSessionId: true,
+        batchSubjects: {
+          select: {
+            subject: { select: { id: true, name: true, banglaName: true } },
+          },
+        },
       },
     }),
   ]);
@@ -675,7 +709,9 @@ export async function transferStudentBatch(
         data: { coachingCenterId, studentId, batchId: destinationBatchId, joinedAt: new Date(), status: 'ACTIVE' },
       });
       return { inserted, fromBatchId: currentActive?.batchId ?? null };
-    });
+    },
+    { timeout: 20000, maxWait: 10000 }
+  );
     created = result.inserted;
     fromBatchId = result.fromBatchId;
   } catch (err) {

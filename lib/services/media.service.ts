@@ -17,10 +17,3 @@ export async function recordMediaUpload(record: MediaUploadRecord) {
   });
 }
 
-export async function getMediaList(coachingCenterId: string, limit: number = 20) {
-  return prisma.media.findMany({
-    where: { coachingCenterId },
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-  });
-}

@@ -536,7 +536,7 @@ export default function FeesOverviewPage() {
               </div>
 
               {/* Section: Urgent Overdue Invoices */}
-              <div className="card rounded-2xl bg-white border border-[#dce5f0] p-6 shadow-2xs flex flex-col">
+              <div className="card rounded-2xl bg-white border border-[#dce5f0] p-6 shadow-2xs flex flex-col flex-1">
                 <div className="flex items-center justify-between pb-4 border-b border-[#edf1f7]">
                   <div>
                     <h3 className="text-base font-bold text-rose-800 flex items-center gap-2">
@@ -689,7 +689,7 @@ export default function FeesOverviewPage() {
               </div>
 
               {/* Section: Course Fees — pricing is configured on each course, not as a separate fee catalog */}
-              <div className="card rounded-2xl bg-white border border-[#dce5f0] p-6 shadow-2xs flex flex-col">
+              <div className="card rounded-2xl bg-white border border-[#dce5f0] p-6 shadow-2xs flex flex-col flex-1">
                 <div className="flex items-center justify-between pb-3 border-b border-[#edf1f7]">
                   <h3 className="text-base font-bold text-[#063b78] flex items-center gap-2">
                     <Icon name="layers" size={17} className="text-[#063b78]" />

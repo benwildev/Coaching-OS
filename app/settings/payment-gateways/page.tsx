@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import PageHeader from '@/components/PageHeader';
 import { useApp } from '@/lib/store';
-import { DICTIONARY, formatDhakaDate } from '@/lib/i18n';
+import { formatDhakaDate } from '@/lib/i18n';
 
 type Tab = 'GATEWAYS' | 'MANUAL_INSTRUCTIONS' | 'SUBMISSIONS';
 

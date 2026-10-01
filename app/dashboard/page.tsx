@@ -183,8 +183,8 @@ export default async function DashboardPage({
       </div>
 
       {/* Main two-column area */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        <div className="lg:col-span-8 flex flex-col gap-5 min-w-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <div className="lg:col-span-8 flex flex-col gap-5 min-w-0 [&>*:last-child]:flex-1">
           {financeVisible && (
             <Panel title="Fee collection" subtitle="Are we collecting what we bill each month?">
               <FeeCollectionChart months={data.feeChart} range={range} />
@@ -195,7 +195,7 @@ export default async function DashboardPage({
             <BatchPerformance rows={data.batchPerformance} lowScore={data.lowScore} />
           </Panel>
         </div>
-        <div className="lg:col-span-4 flex flex-col gap-5 min-w-0">
+        <div className="lg:col-span-4 flex flex-col gap-5 min-w-0 [&>*:last-child]:flex-1">
           {financeVisible && <OutstandingFees data={data.outstanding} />}
           <RecentActivity items={data.activity} now={now} />
           <TodaySchedule agenda={data.todaysAgenda} exams={data.upcomingExams} completion={data.attendanceCompletion} />

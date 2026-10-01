@@ -508,10 +508,6 @@ export function isRecipientMandatory(notificationType: string, recipientType: No
   return rec?.isMandatory ?? false;
 }
 
-export function canDisableNotification(notificationType: string): boolean {
-  return !isNotificationMandatory(notificationType);
-}
-
 /**
  * Auto-seeds / backfills default policies for an organization if any policy
  * is missing. Also enforces DB-level mandatory flags match the catalog rules.

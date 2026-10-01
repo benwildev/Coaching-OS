@@ -50,9 +50,8 @@ function NavLink({
     <Link
       href={href}
       onClick={onClick}
-      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] font-semibold transition-colors ${
-        active ? 'shadow-xs' : 'text-[#e9eef7] hover:bg-white/10'
-      }`}
+      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] font-semibold transition-colors ${active ? 'shadow-xs' : 'text-[#e9eef7] hover:bg-white/10'
+        }`}
       style={active ? { backgroundColor: accentColor, color: primaryColor } : undefined}
       title={collapsed ? label : undefined}
     >
@@ -157,27 +156,15 @@ export function SidebarContent({
           );
         })}
       </nav>
-
-      {/* Bottom Area: Phase status, Collapse and User Profile */}
       <div className="mt-auto pt-2 flex flex-col gap-2 border-t border-white/10">
-        {!collapsed && (
-          <div className="rounded-xl p-3 bg-white/5 border border-white/10 flex flex-col gap-1.5">
-            <div className="text-[10px] font-extrabold tracking-wider uppercase" style={{ color: accentColor }}>
-              Phase 1 Foundation
-            </div>
-            <div className="text-[11px] text-[#8fb3de] leading-snug">
-              Bangladesh-first configurable architecture & multi-tenant isolation.
-            </div>
-          </div>
-        )}
+
 
         {onToggleCollapse && (
           <button
             type="button"
             onClick={onToggleCollapse}
-            className={`flex items-center gap-2 px-2.5 py-2 rounded-xl text-[#c7d4e6] hover:text-white hover:bg-white/10 text-xs font-semibold transition-colors ${
-              collapsed ? 'justify-center' : ''
-            }`}
+            className={`flex items-center gap-2 px-2.5 py-2 rounded-xl text-[#c7d4e6] hover:text-white hover:bg-white/10 text-xs font-semibold transition-colors ${collapsed ? 'justify-center' : ''
+              }`}
           >
             <Icon name="panel" size={16} />
             {!collapsed && <span>Collapse Sidebar</span>}

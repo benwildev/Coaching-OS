@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       assertBranchAccess(user, validated.data.branchId);
     }
 
-    const teacher = await createTeacher(coachingCenterId, validated.data, user.userId);
+    const teacher = await createTeacher(coachingCenterId, validated.data, user.userId, user);
     return NextResponse.json({ success: true, teacher }, { status: 201 });
   } catch (error) {
     return apiErrorResponse(error, '/api/teachers POST');

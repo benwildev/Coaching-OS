@@ -27,14 +27,6 @@ function denial(state: Awaited<ReturnType<typeof loadTenantSubscription>>, used:
   return null;
 }
 
-/** Checks (does not reserve) — for display and for callers that only need a yes/no. */
-export async function checkMessageLimit(coachingCenterId: string, channel: MessageChannel) {
-  const state = await loadTenantSubscription(prisma, coachingCenterId);
-  const limit = state.limits[CHANNEL_LIMIT[channel]];
-  const used = await countMessages(prisma, coachingCenterId, channel);
-  return { allowed: denial(state, used, limit) === null, used, limit, reason: denial(state, used, limit) };
-}
-
 /**
  * Atomically reserves one unit by creating the QUEUED log. Returns the created
  * log, or the reason it was refused (nothing is created on refusal — the caller

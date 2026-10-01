@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bell, Clock, CheckCircle2, TrendingUp, FileText, AlertCircle } from 'lucide-react';
+import { Bell, CheckCircle2, TrendingUp, FileText, AlertCircle } from 'lucide-react';
 import { usePortal } from '@/components/portal/PortalProvider';
 import { formatDhakaDate, formatBDT } from '@/lib/i18n';
 

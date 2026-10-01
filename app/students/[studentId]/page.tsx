@@ -10,7 +10,7 @@ import StudentFinancialSummary from '@/components/StudentFinancialSummary';
 import StudentAcademicPerformance from '@/components/StudentAcademicPerformance';
 import PortalAccessCard from '@/components/PortalAccessCard';
 import { useApp } from '@/lib/store';
-import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
+import { DICTIONARY, formatDhakaDate } from '@/lib/i18n';
 import { formatBdPhoneDisplay } from '@/lib/validations/student';
 
 interface StudentProfileData {

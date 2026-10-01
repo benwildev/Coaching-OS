@@ -250,8 +250,6 @@ const USAGE_FIELD: Record<LimitKey, string> = {
   maxEmail: 'email',
   maxStorageMb: 'storageMb',
 };
-export const usageFieldOf = (k: LimitKey): string => USAGE_FIELD[k];
-
 /** Limits the tenant currently exceeds. Existing records are never removed; only NEW creation is blocked. */
 export function computeOverLimits(limits: Limits, usage: Record<string, number | string>): OverLimit[] {
   const out: OverLimit[] = [];

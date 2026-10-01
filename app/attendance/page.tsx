@@ -90,7 +90,11 @@ export default function AttendancePage() {
           <h1 className="text-2xl md:text-3xl font-extrabold text-[#063b78] tracking-tight">{dict.attendance.title}</h1>
           <p className="text-[13.5px] text-[#64748b] mt-0.5 font-medium">{dict.attendance.subtitle}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link href="/attendance/teacher" className="inline-flex items-center gap-1.5 rounded-xl border border-[#063b78] bg-[#063b78] text-white px-3.5 py-2 text-[12.5px] font-semibold hover:bg-[#052e5e]">
+            <Icon name="check" size={15} />
+            {dict.teachers.teacherAttendanceTitle}
+          </Link>
           <Link href="/attendance/alerts" className="inline-flex items-center gap-1.5 rounded-xl border border-[#dce5f0] bg-white px-3.5 py-2 text-[12.5px] font-semibold text-[#092f63] hover:bg-[#f8fafc]">
             <Icon name="alert" size={15} />
             {dict.attendance.lowAttendance}

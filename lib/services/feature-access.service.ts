@@ -1,4 +1,4 @@
-import { loadTenantSubscription, getTenantSubscription } from './subscription.service';
+import { loadTenantSubscription } from './subscription.service';
 import prisma from '@/lib/db';
 import type { FeatureKey } from '@/lib/subscription';
 
@@ -19,6 +19,3 @@ export async function requireFeature(coachingCenterId: string, feature: FeatureK
   }
 }
 
-export async function getEnabledFeatures(coachingCenterId: string) {
-  return (await getTenantSubscription(coachingCenterId)).features;
-}

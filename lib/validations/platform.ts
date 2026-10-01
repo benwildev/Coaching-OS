@@ -54,11 +54,6 @@ export const subscriptionAssignSchema = z.object({
 });
 export type SubscriptionAssignInput = z.infer<typeof subscriptionAssignSchema>;
 
-export const tenantStatusSchema = z.object({
-  status: z.enum(['ACTIVE', 'SUSPENDED']),
-  reason: z.string().trim().max(300).optional(),
-});
-
 export const tenantCreateSchema = setupWizardSchema.extend({
   planId: z.string().min(1).optional(),
   trialDays: z.number().int().min(1).max(365).optional(),

@@ -63,6 +63,21 @@ export const teacherAttendanceSchema = z.object({
 });
 export type TeacherAttendanceInput = z.infer<typeof teacherAttendanceSchema>;
 
+export const teacherBulkAttendanceItemSchema = z.object({
+  teacherId: z.string().min(1, 'Teacher is required'),
+  status: z.enum(ATTENDANCE_STATUSES),
+  inTime: z.string().optional().or(z.literal('')),
+  outTime: z.string().optional().or(z.literal('')),
+  remarks: z.string().max(300).optional().or(z.literal('')),
+});
+
+export const teacherBulkAttendanceSchema = z.object({
+  date: z.string().min(4, 'Date is required'),
+  branchId: z.string().optional().or(z.literal('')),
+  records: z.array(teacherBulkAttendanceItemSchema).min(1, 'At least one attendance record must be provided'),
+});
+export type TeacherBulkAttendanceInput = z.infer<typeof teacherBulkAttendanceSchema>;
+
 export const thresholdSchema = z.object({
   threshold: z.number().min(1).max(100),
 });

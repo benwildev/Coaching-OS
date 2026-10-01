@@ -14,14 +14,11 @@ import type {
   NotificationCategory,
 } from '@/lib/notifications/events';
 import {
-  Bell,
   ShieldAlert,
   Sliders,
   Radio,
   Lock,
   Search,
-  CheckCircle2,
-  AlertTriangle,
   RotateCcw,
   Save,
   UserCheck,
@@ -30,7 +27,6 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronRight,
-  Sparkles,
 } from 'lucide-react';
 
 interface PreferenceRow {

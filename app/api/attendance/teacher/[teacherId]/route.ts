@@ -32,8 +32,13 @@ export async function GET(request: Request, props: { params: Promise<{ teacherId
       assertBranchAccess(user, teacher.branchId);
     }
 
-    const history = await getTeacherAttendanceHistory(coachingCenterId, teacherId);
-    return NextResponse.json({ success: true, history });
+    const { searchParams } = new URL(request.url);
+    const month = searchParams.get('month') || undefined;
+    const status = searchParams.get('status') || undefined;
+    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!, 10) : 100;
+
+    const result = await getTeacherAttendanceHistory(coachingCenterId, teacherId, { month, status, limit });
+    return NextResponse.json({ success: true, ...result });
   } catch (error) {
     return apiErrorResponse(error, '/api/attendance/teacher/[teacherId] GET');
   }

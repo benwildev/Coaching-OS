@@ -15,18 +15,6 @@ export async function saApi<T = Record<string, any>>(
   return { ok: res.ok, status: res.status, data };
 }
 
-export const LIMIT_FIELDS = [
-  'maxStudents',
-  'maxTeachers',
-  'maxStaffUsers',
-  'maxPortalAccounts',
-  'maxBranches',
-  'maxSms',
-  'maxWhatsapp',
-  'maxEmail',
-  'maxStorageMb',
-] as const;
-
 /** Empty string → unlimited (null). */
 export const toLimit = (v: string): number | null => (v.trim() === '' ? null : Math.max(0, Math.floor(Number(v)) || 0));
 export const fromLimit = (v: number | null | undefined): string => (v === null || v === undefined ? '' : String(v));

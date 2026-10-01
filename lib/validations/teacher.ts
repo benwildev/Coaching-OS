@@ -53,11 +53,39 @@ export const teacherSchema = z.object({
       message: 'Invalid joining date format',
     }),
   subjectIds: z.array(z.string()).default([]),
+  teachingAssignments: z
+    .array(
+      z.object({
+        courseId: z.string().trim().min(1, 'Course is required'),
+        batchId: z.string().trim().min(1, 'Batch is required'),
+        subjectIds: z.array(z.string().trim().min(1)).min(1, 'At least one subject must be selected for each batch'),
+        startDate: z.string().optional().or(z.literal('')),
+        endDate: z.string().optional().or(z.literal('')),
+      })
+    )
+    .default([]),
 });
 
-export type TeacherInput = z.infer<typeof teacherSchema>;
+export type TeachingAssignmentInput = z.infer<typeof teacherSchema>['teachingAssignments'][number];
+export type TeacherInput = z.input<typeof teacherSchema>;
+export type TeacherOutput = z.infer<typeof teacherSchema>;
 export const teacherUpdateSchema = teacherSchema.partial();
 export type TeacherUpdateInput = z.infer<typeof teacherUpdateSchema>;
+
+export const teacherAssignmentCreateSchema = z.object({
+  courseId: z.string().trim().min(1, 'Course is required'),
+  batchId: z.string().trim().min(1, 'Batch is required'),
+  subjectIds: z.array(z.string().trim().min(1)).min(1, 'At least one subject must be selected'),
+  startDate: z.string().optional().or(z.literal('')),
+  endDate: z.string().optional().or(z.literal('')),
+});
+export type TeacherAssignmentCreateInput = z.infer<typeof teacherAssignmentCreateSchema>;
+
+export const teacherAssignmentUpdateSchema = z.object({
+  status: z.enum(['ACTIVE', 'ENDED']).optional(),
+  endDate: z.string().optional().or(z.literal('')),
+});
+export type TeacherAssignmentUpdateInput = z.infer<typeof teacherAssignmentUpdateSchema>;
 
 // Phase 10.5: OWNER/ADMIN-only teacher <-> login account linking.
 export const teacherAccountLinkSchema = z.discriminatedUnion('mode', [

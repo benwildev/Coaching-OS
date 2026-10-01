@@ -21,10 +21,3 @@ export const brandingSchema = z.object({
   faviconUrl: z.string().optional().refine(isHttpOrRelativeUrl, { message: RESOURCE_URL_MESSAGE }),
 });
 
-export const regionSchema = z.object({
-  language: z.enum(['en', 'bn']),
-  currency: z.string().default('BDT'),
-  timezone: z.string().default('Asia/Dhaka'),
-  dateFormat: z.string().default('DD/MM/YYYY'),
-  numberFormat: z.enum(['lakh', 'intl']).default('lakh'),
-});

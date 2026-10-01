@@ -8,12 +8,6 @@ export async function getAcademicSessions(coachingCenterId: string) {
   });
 }
 
-export async function getCurrentAcademicSession(coachingCenterId: string) {
-  return prisma.academicSession.findFirst({
-    where: { coachingCenterId, isCurrent: true },
-  });
-}
-
 export async function createAcademicSession(
   coachingCenterId: string,
   data: {
@@ -139,75 +133,6 @@ export async function createAcademicClass(
   });
 
   return academicClass;
-}
-
-export async function createAcademicGroup(
-  coachingCenterId: string,
-  data: {
-    academicClassId: string;
-    name: string;
-    banglaName?: string;
-    code: string;
-  },
-  userId?: string
-) {
-  const parentClass = await prisma.academicClass.findFirst({ where: { id: data.academicClassId, coachingCenterId } });
-  if (!parentClass) throw new Error('ACADEMIC_CLASS_NOT_FOUND');
-
-  const group = await prisma.academicGroup.create({
-    data: {
-      coachingCenterId,
-      academicClassId: data.academicClassId,
-      name: data.name,
-      banglaName: data.banglaName,
-      code: data.code.toUpperCase(),
-    },
-  });
-
-  await recordAuditLog({
-    coachingCenterId,
-    userId,
-    action: 'ACADEMIC_GROUP_CREATED',
-    entity: 'AcademicGroup',
-    entityId: group.id,
-    details: data,
-  });
-
-  return group;
-}
-
-export async function createSubject(
-  coachingCenterId: string,
-  data: {
-    academicClassId: string;
-    academicGroupId?: string;
-    name: string;
-    banglaName?: string;
-    code: string;
-  },
-  userId?: string
-) {
-  const subject = await prisma.subject.create({
-    data: {
-      coachingCenterId,
-      academicClassId: data.academicClassId,
-      academicGroupId: data.academicGroupId,
-      name: data.name,
-      banglaName: data.banglaName,
-      code: data.code.toUpperCase(),
-    },
-  });
-
-  await recordAuditLog({
-    coachingCenterId,
-    userId,
-    action: 'SUBJECT_CREATED',
-    entity: 'Subject',
-    entityId: subject.id,
-    details: data,
-  });
-
-  return subject;
 }
 
 export async function getEducationBoards() {
