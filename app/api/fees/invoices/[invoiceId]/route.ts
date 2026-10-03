@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getInvoiceById, updateInvoice } from '@/lib/services/invoice.service';
 import { invoiceUpdateSchema } from '@/lib/validations/invoice';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request, props: { params: Promise<{ invoiceId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.read');
     const { invoiceId } = await props.params;
     const invoice = await getInvoiceById(coachingCenterId, invoiceId);
     if (!invoice) return NextResponse.json({ success: false, error: 'Invoice not found' }, { status: 404 });
@@ -23,7 +23,7 @@ export async function GET(request: Request, props: { params: Promise<{ invoiceId
 export async function PUT(request: Request, props: { params: Promise<{ invoiceId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.invoices.create');
 
     const { invoiceId } = await props.params;
     const body = await request.json();

@@ -121,7 +121,7 @@ export async function getEligibleStudentsForBatchOnDate(
       coachingCenterId,
       batchId,
       joinedAt: { lt: startOfNextDay(date) },
-      OR: [{ endDate: null }, { endDate: { gte: date } }],
+      OR: [{ endDate: null, status: 'ACTIVE' }, { endDate: { gte: date } }],
     },
     include: {
       student: {
@@ -130,7 +130,7 @@ export async function getEligibleStudentsForBatchOnDate(
     },
     orderBy: { student: { name: 'asc' } },
   });
-  return memberships.map((m) => m.student);
+  return memberships.filter((m) => m.student.status === 'ACTIVE').map((m) => m.student);
 }
 
 // ==========================================
@@ -155,6 +155,25 @@ export async function getOrCreateAttendanceSession(
   if (!schedule) throw new Error('SCHEDULE_NOT_FOUND');
 
   const date = toDateOnly(dateInput);
+  const today = getCurrentDhakaDateOnly();
+  if (date.getTime() > today.getTime()) {
+    throw new Error('FUTURE_DATE_NOT_ALLOWED: Attendance cannot be created for future dates');
+  }
+
+  if (schedule.status !== 'ACTIVE') {
+    throw new Error('SCHEDULE_INACTIVE: Schedule is not active');
+  }
+  if (schedule.effectiveStartDate && schedule.effectiveStartDate.getTime() > date.getTime()) {
+    throw new Error('SCHEDULE_NOT_EFFECTIVE: Schedule is not yet effective on this date');
+  }
+  if (schedule.effectiveEndDate && schedule.effectiveEndDate.getTime() < date.getTime()) {
+    throw new Error('SCHEDULE_EXPIRED: Schedule has expired before this date');
+  }
+
+  const actualDay = getCurrentDhakaDayOfWeek(date);
+  if (schedule.dayOfWeek !== actualDay) {
+    throw new Error(`WRONG_WEEKDAY: Class is scheduled for ${schedule.dayOfWeek} but attendance date is ${actualDay}`);
+  }
 
   const existing = await prisma.attendanceSession.findFirst({
     where: { classScheduleId, date },
@@ -237,7 +256,7 @@ export async function getAttendanceSessionDetail(coachingCenterId: string, sessi
     else if (s.attendance.status === 'EXCUSED') counts.excused++;
   }
 
-  const { studentAttendances, ...sessionRest } = session;
+  const { studentAttendances: _studentAttendances, ...sessionRest } = session;
   return { session: sessionRest, students, counts };
 }
 
@@ -257,6 +276,11 @@ export async function markStudentAttendance(
   const session = await prisma.attendanceSession.findFirst({ where: { id: sessionId, coachingCenterId } });
   if (!session) throw new Error('SESSION_NOT_FOUND');
   assertSessionEditable(session);
+
+  const today = getCurrentDhakaDateOnly();
+  if (session.date.getTime() > today.getTime()) {
+    throw new Error('FUTURE_DATE_NOT_ALLOWED: Attendance cannot be marked for future dates');
+  }
 
   const eligible = await getEligibleStudentsForBatchOnDate(coachingCenterId, session.batchId, session.date);
   if (!eligible.some((s) => s.id === studentId)) {
@@ -317,12 +341,25 @@ export async function bulkMarkAttendance(
   if (!session) throw new Error('SESSION_NOT_FOUND');
   assertSessionEditable(session);
 
+  const today = getCurrentDhakaDateOnly();
+  if (session.date.getTime() > today.getTime()) {
+    throw new Error('FUTURE_DATE_NOT_ALLOWED: Attendance cannot be marked for future dates');
+  }
+
   const eligible = await getEligibleStudentsForBatchOnDate(coachingCenterId, session.batchId, session.date);
   const eligibleIds = new Set(eligible.map((s) => s.id));
 
+  if (!data.markAllPresent && data.marks) {
+    for (const mark of data.marks) {
+      if (!eligibleIds.has(mark.studentId)) {
+        throw new Error(`STUDENT_NOT_ELIGIBLE: Student ${mark.studentId} was not assigned to this batch on the class date`);
+      }
+    }
+  }
+
   const entries = data.markAllPresent
     ? eligible.map((s) => ({ studentId: s.id, status: 'PRESENT' as AttendanceStatus, remarks: null as string | null }))
-    : data.marks.filter((m) => eligibleIds.has(m.studentId));
+    : data.marks;
 
   if (entries.length === 0) return { updated: 0 };
 
@@ -503,6 +540,7 @@ export interface AttendanceHistoryParams {
   classId?: string;
   groupId?: string;
   batchId?: string;
+  batchIds?: string[];
   subjectId?: string;
   teacherId?: string;
   status?: string;
@@ -515,9 +553,14 @@ export async function getAttendanceHistory(coachingCenterId: string, params: Att
   const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
   const skip = (page - 1) * pageSize;
 
+  if (params.batchIds !== undefined && params.batchIds.length === 0) {
+    return { sessions: [], total: 0, page, pageSize, totalPages: 1 };
+  }
+
   const where: Prisma.AttendanceSessionWhereInput = { coachingCenterId };
   if (params.branchId && params.branchId !== 'all') where.branchId = params.branchId;
-  if (params.batchId && params.batchId !== 'all') where.batchId = params.batchId;
+  if (params.batchIds !== undefined) where.batchId = { in: params.batchIds };
+  else if (params.batchId && params.batchId !== 'all') where.batchId = params.batchId;
   if (params.subjectId && params.subjectId !== 'all') where.subjectId = params.subjectId;
   if (params.teacherId && params.teacherId !== 'all') where.teacherId = params.teacherId;
   if (params.status && params.status !== 'all') where.status = params.status;
@@ -561,7 +604,7 @@ export async function getAttendanceHistory(coachingCenterId: string, params: Att
       else if (sa.status === 'LATE') counts.late++;
       else if (sa.status === 'EXCUSED') counts.excused++;
     }
-    const { studentAttendances, ...rest } = s;
+    const { studentAttendances: _studentAttendances, ...rest } = s;
     return { ...rest, counts, markedCount: s.studentAttendances.length };
   });
 
@@ -742,7 +785,7 @@ export async function getBatchAttendanceSummary(coachingCenterId: string, batchI
       else if (sa.status === 'LATE') counts.late++;
       else if (sa.status === 'EXCUSED') counts.excused++;
     }
-    const { studentAttendances, ...rest } = s;
+    const { studentAttendances: _studentAttendances, ...rest } = s;
     return { ...rest, counts };
   });
 
@@ -785,8 +828,12 @@ export async function getBatchAttendanceSummary(coachingCenterId: string, batchI
 
 export async function getLowAttendanceStudents(
   coachingCenterId: string,
-  params: { branchId?: string; threshold?: number } = {}
+  params: { branchId?: string; threshold?: number; batchIds?: string[] } = {}
 ) {
+  if (params.batchIds !== undefined && params.batchIds.length === 0) {
+    return [];
+  }
+
   const threshold = params.threshold ?? (await getAttendanceThreshold(coachingCenterId));
 
   const memberships = await prisma.studentBatch.findMany({
@@ -794,6 +841,7 @@ export async function getLowAttendanceStudents(
       coachingCenterId,
       status: 'ACTIVE',
       ...(params.branchId && params.branchId !== 'all' ? { batch: { branchId: params.branchId } } : {}),
+      ...(params.batchIds !== undefined ? { batchId: { in: params.batchIds } } : {}),
     },
     include: {
       student: {
@@ -857,12 +905,22 @@ export async function getLowAttendanceStudents(
 // DASHBOARD KPIs
 // ==========================================
 
-export async function getAttendanceDashboard(coachingCenterId: string, branchId?: string) {
+export async function getAttendanceDashboard(
+  coachingCenterId: string,
+  branchId?: string,
+  teacherScope?: { teacherId?: string; batchIds?: string[] }
+) {
   const today = getCurrentDhakaDateOnly();
   const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   const sessionWhere: Prisma.AttendanceSessionWhereInput = { coachingCenterId };
   if (branchId && branchId !== 'all') sessionWhere.branchId = branchId;
+  if (teacherScope) {
+    if (teacherScope.teacherId) sessionWhere.teacherId = teacherScope.teacherId;
+    if (teacherScope.batchIds !== undefined) {
+      sessionWhere.batchId = { in: teacherScope.batchIds };
+    }
+  }
 
   const [todaysSessions, todaysMarks, recentMarks] = await Promise.all([
     prisma.attendanceSession.count({ where: { ...sessionWhere, date: today } }),
@@ -966,7 +1024,9 @@ export async function getTeachersDailyAttendance(
     status: 'ACTIVE',
   };
 
-  if (effectiveBranchId && effectiveBranchId !== 'all') {
+  if (actorUser?.role === 'TEACHER') {
+    teacherWhere.userId = actorUser.userId;
+  } else if (effectiveBranchId && effectiveBranchId !== 'all') {
     teacherWhere.OR = [
       { branchId: effectiveBranchId },
       { branchId: null },

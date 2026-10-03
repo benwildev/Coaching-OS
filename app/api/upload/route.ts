@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { uploadBufferToCloudinary } from '@/lib/cloudinary';
 import { recordMediaUpload } from '@/lib/services/media.service';
 import { apiErrorResponse } from '@/lib/api-error';
@@ -58,15 +58,20 @@ const SCOPES = {
   },
 } as const;
 
+import { assertTeacherCanAccessUpload } from '@/lib/auth/teacher-scope';
+
 type Scope = keyof typeof SCOPES;
 
 export async function POST(req: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('upload.use');
 
     const formData = await req.formData();
     const file = formData.get('file');
     const scopeRaw = formData.get('scope');
+    const batchId = formData.get('batchId')?.toString() || undefined;
+    const homeworkId = formData.get('homeworkId')?.toString() || undefined;
 
     if (!(file instanceof File)) {
       throw new Error('VALIDATION_FAILED: A file is required');
@@ -76,6 +81,8 @@ export async function POST(req: Request) {
     }
     const scope = scopeRaw as Scope;
     const config = SCOPES[scope];
+
+    await assertTeacherCanAccessUpload(user, { scope, batchId, homeworkId });
 
     if (file.size === 0) {
       throw new Error('VALIDATION_FAILED: The uploaded file is empty');

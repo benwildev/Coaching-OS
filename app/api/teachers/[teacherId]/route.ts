@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getTeacherById, updateTeacher, deleteTeacher, getTeacherByUserId } from '@/lib/services/teacher.service';
 import { teacherUpdateSchema } from '@/lib/validations/teacher';
@@ -11,25 +11,20 @@ export async function GET(request: Request, props: { params: Promise<{ teacherId
     const { coachingCenterId, user } = await requireTenant();
     const { teacherId } = await props.params;
 
+    // TEACHER may only view their own profile. Other roles require teachers.read.
+    if (user.role === 'TEACHER') {
+      const own = await getTeacherByUserId(coachingCenterId, user.userId);
+      if (!own || own.id !== teacherId) {
+        throw new Error('FORBIDDEN_TEACHER_SCOPE');
+      }
+    } else {
+      await requirePermission('teachers.read');
+    }
+
     const teacher = await getTeacherById(coachingCenterId, teacherId);
     if (!teacher) return NextResponse.json({ success: false, error: 'Teacher not found' }, { status: 404 });
 
-    // Phase 10.5: previously no branch check at all — a branch-locked
-    // STAFF could view any teacher's profile regardless of branch.
     assertBranchAccess(user, teacher.branchId);
-
-    // Teachers may see their own full profile; other teachers' contact/HR
-    // details are unnecessary for them and are redacted.
-    if (user.role === 'TEACHER') {
-      const own = await getTeacherByUserId(coachingCenterId, user.userId);
-      if (own?.id !== teacherId) {
-        // Phase 10.5: `user` (the linked login's email/name/status) is now
-        // part of getTeacherById's result too — strip it here for the same
-        // reason phone/email/bio already are.
-        const { phone, email, bio, joiningDate, attendances, user: _linkedUser, ...publicFields } = teacher as any;
-        return NextResponse.json({ success: true, teacher: publicFields, redacted: true });
-      }
-    }
 
     return NextResponse.json({ success: true, teacher });
   } catch (error) {
@@ -40,7 +35,7 @@ export async function GET(request: Request, props: { params: Promise<{ teacherId
 export async function PUT(request: Request, props: { params: Promise<{ teacherId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('teachers.update');
 
     const { teacherId } = await props.params;
     const body = await request.json();
@@ -68,7 +63,7 @@ export async function PUT(request: Request, props: { params: Promise<{ teacherId
 export async function DELETE(request: Request, props: { params: Promise<{ teacherId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('teachers.delete');
 
     const { teacherId } = await props.params;
     const existing = await getTeacherById(coachingCenterId, teacherId);

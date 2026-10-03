@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { testCommunicationProvider } from '@/lib/services/communication-settings.service';
 import { COMMUNICATION_CHANNELS } from '@/lib/validations/communication-template';
@@ -24,7 +24,7 @@ const TEST_RATE_LIMIT_MAX = 20;
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.communication.update');
     const rateLimit = await checkRateLimit(`comm-test:${coachingCenterId}`, TEST_RATE_LIMIT_WINDOW_MS, TEST_RATE_LIMIT_MAX);
     if (!rateLimit.allowed) {
       return NextResponse.json(

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { resolveQuestionScope } from '@/lib/services/question.service';
 import { getQuestionPaperById, updateQuestionPaper } from '@/lib/services/question-paper.service';
@@ -13,6 +13,7 @@ type Ctx = { params: Promise<{ paperId: string }> };
 export async function GET(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('question_papers.read');
     const { paperId } = await params;
     const forPrint = new URL(request.url).searchParams.get('print') === '1';
     const scope = await resolveQuestionScope(coachingCenterId, user);
@@ -26,6 +27,7 @@ export async function GET(request: Request, { params }: Ctx) {
 export async function PUT(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('question_papers.update');
     const { paperId } = await params;
     const body = await request.json().catch(() => null);
     const parsed = updateQuestionPaperSchema.safeParse(body);

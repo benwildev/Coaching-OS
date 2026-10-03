@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import {
   deleteMaterial,
@@ -16,6 +16,7 @@ type Ctx = { params: Promise<{ materialId: string }> };
 export async function GET(_request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('materials.read');
     const { materialId } = await params;
     const scope = await resolveMaterialScope(coachingCenterId, user);
     const material = await getMaterialById(scope, materialId);
@@ -28,6 +29,7 @@ export async function GET(_request: Request, { params }: Ctx) {
 export async function PUT(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('materials.update');
     const { materialId } = await params;
     const body = await request.json().catch(() => null);
     const parsed = updateMaterialSchema.safeParse(body);
@@ -43,6 +45,7 @@ export async function PUT(request: Request, { params }: Ctx) {
 export async function DELETE(_request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('materials.delete');
     const { materialId } = await params;
     const scope = await resolveMaterialScope(coachingCenterId, user);
     const result = await deleteMaterial(scope, materialId);

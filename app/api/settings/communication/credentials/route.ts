@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { saveProviderCredentials } from '@/lib/services/communication-settings.service';
 import { communicationCredentialsUpdateSchema } from '@/lib/validations/communication-provider-config';
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export async function PUT(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.communication.update');
     const body = await request.json().catch(() => null);
     const parsed = communicationCredentialsUpdateSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

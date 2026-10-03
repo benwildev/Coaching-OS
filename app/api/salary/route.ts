@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getSalaryOverview } from '@/lib/services/salary.service';
 import { getCurrentDhakaDateString } from '@/lib/schedule';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('salary.read');
     const sp = new URL(request.url).searchParams;
     const today = getCurrentDhakaDateString();
     const year = Number(sp.get('year')) || Number(today.slice(0, 4));

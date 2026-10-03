@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getManualSubmissions } from '@/lib/services/payment-gateway.service';
 import { ManualPaymentStatus } from '@prisma/client';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   try {
     const { coachingCenterId, branchId: userBranchId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.read');
 
     const url = new URL(req.url);
     const statusParam = url.searchParams.get('status') as ManualPaymentStatus | null;

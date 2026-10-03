@@ -31,12 +31,12 @@ const MAX_RETRY_ATTEMPTS = 3;
 const LOG_STATUSES = ['QUEUED', 'SENT', 'DELIVERED', 'FAILED', 'SKIPPED'] as const;
 
 export default function CommunicationLogsPage() {
-  const { lang, currentUser, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const t = DICTIONARY[lang];
   const comm = t.communication;
   const c = t.common;
   const num = (x: number) => localizeNumber(lang, x);
-  const canRetry = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canRetry = can('communication.retry');
 
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);

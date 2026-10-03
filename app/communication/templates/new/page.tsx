@@ -7,9 +7,9 @@ import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
 
 export default function NewTemplatePage() {
-  const { lang, currentUser } = useApp();
+  const { lang, can } = useApp();
   const t = DICTIONARY[lang];
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canManage = can('communication.templates.manage');
 
   return (
     <div className="max-w-[900px] mx-auto flex flex-col gap-5">

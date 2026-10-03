@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getPaymentById, refundPayment } from '@/lib/services/payment.service';
 import { paymentRefundSchema } from '@/lib/validations/payment';
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, props: { params: Promise<{ paymentId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('fees.refund');
 
     const { paymentId } = await props.params;
     const body = await request.json();

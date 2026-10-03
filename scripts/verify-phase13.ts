@@ -24,6 +24,7 @@ import { openCashSession, closeCashSession } from '../lib/services/cash-session.
 import { getCurrentDhakaDateString, toDateOnly } from '../lib/schedule';
 import { DICTIONARY } from '../lib/i18n';
 import type { SessionUser } from '../lib/auth/session';
+import { defaultPermissionsFor } from '../lib/auth/permissions';
 
 const TAG = `P13VERIFY-${Date.now()}`;
 let passed = 0;
@@ -152,10 +153,10 @@ async function main() {
 
     const owner: SessionUser = {
       userId: setupA.owner.id, coachingCenterId: tenantAId, email: setupA.owner.email, name: 'Owner', phone: null, banglaName: null,
-      role: 'OWNER', branchId: null, sessionVersion: 1,
+      role: 'OWNER', branchId: null, sessionVersion: 1, permissions: defaultPermissionsFor('OWNER'),
     } as any;
     const mk = (role: 'ADMIN' | 'STAFF' | 'TEACHER', userId: string, branchId: string | null): SessionUser =>
-      ({ userId, coachingCenterId: tenantAId, email: `${role}@t.local`, name: role, phone: null, banglaName: null, role, branchId, sessionVersion: 1 }) as any;
+      ({ userId, coachingCenterId: tenantAId, email: `${role}@t.local`, name: role, phone: null, banglaName: null, role, branchId, sessionVersion: 1, permissions: defaultPermissionsFor(role) }) as any;
     const admin1 = mk('ADMIN', owner.userId, branch1.id); // branch-locked admin (uses a real id for FK-safe audit)
     const admin2 = mk('ADMIN', owner.userId, branch2.id);
     const centerAdmin = mk('ADMIN', owner.userId, null);
@@ -164,7 +165,7 @@ async function main() {
     const teacher4User = mk('TEACHER', teacher2UserRow.id, branch1.id);
     const ownerB: SessionUser = {
       userId: setupB.owner.id, coachingCenterId: tenantBId, email: setupB.owner.email, name: 'OwnerB', phone: null, banglaName: null,
-      role: 'OWNER', branchId: null, sessionVersion: 1,
+      role: 'OWNER', branchId: null, sessionVersion: 1, permissions: defaultPermissionsFor('OWNER'),
     } as any;
 
     // Timeline: P = last month, P1 = month before, P2 = two before.

@@ -2,6 +2,7 @@ import prisma from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import type { CommunicationChannel } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
 import { getCommunicationProvider } from './communication/providers';
 import { interpolate, interpolateHtml, SAMPLE_TEMPLATE_VARIABLES } from './template-interpolation';
@@ -66,7 +67,7 @@ export async function getTemplateById(scope: CommunicationScope, templateId: str
 }
 
 function assertTemplateManageable(user: SessionUser) {
-  if (user.role !== 'OWNER' && user.role !== 'ADMIN') {
+  if (!can(user, 'communication.templates.manage')) {
     throw new Error('TEMPLATE_ACCESS_DENIED: only Owner or Admin can manage communication templates');
   }
 }

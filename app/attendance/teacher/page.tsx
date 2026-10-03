@@ -38,9 +38,9 @@ interface DailyAttendanceState {
 }
 
 export default function TeacherAttendancePage() {
-  const { lang, showToast, currentUser } = useApp();
+  const { lang, showToast, can, currentUser } = useApp();
   const dict = DICTIONARY[lang];
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN' || currentUser?.role === 'STAFF';
+  const canManage = can('teacher_attendance.create') && currentUser?.role !== 'TEACHER';
 
   // Current date in YYYY-MM-DD
   const todayDhaka = new Date().toISOString().slice(0, 10);
@@ -255,10 +255,14 @@ export default function TeacherAttendancePage() {
               <Icon name="chevleft" size={15} />
               <span>{dict.attendance.backToAttendance}</span>
             </Link>
-            <span className="text-[#94a3b8]">·</span>
-            <Link href="/teachers" className="text-[13px] font-semibold text-[#64748b] hover:underline">
-              {dict.teachers.title}
-            </Link>
+            {can('teachers.read') && (
+              <>
+                <span className="text-[#94a3b8]">·</span>
+                <Link href="/teachers" className="text-[13px] font-semibold text-[#64748b] hover:underline">
+                  {dict.teachers.title}
+                </Link>
+              </>
+            )}
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-[#063b78] tracking-tight">
             {dict.teachers.teacherAttendanceTitle}
@@ -304,18 +308,20 @@ export default function TeacherAttendancePage() {
             />
           </div>
 
-          <select
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-            className="rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[13px] text-[#092f63] font-medium outline-none focus:border-[#063b78]"
-          >
-            <option value="all">{dict.teachers.filterBranch}: {dict.teachers.all}</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {lang === 'bn' && b.banglaName ? b.banglaName : b.name}
-              </option>
-            ))}
-          </select>
+          {currentUser?.role !== 'TEACHER' && (
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[13px] text-[#092f63] font-medium outline-none focus:border-[#063b78]"
+            >
+              <option value="all">{dict.teachers.filterBranch}: {dict.teachers.all}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {lang === 'bn' && b.banglaName ? b.banglaName : b.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="text-[12.5px] text-[#64748b] font-medium w-full sm:w-auto text-left sm:text-right">

@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import type { RoleCode } from '@prisma/client';
 import prisma from '@/lib/db';
 import { getStaffSecretKey } from './secret';
+import { can, type PermissionCode } from '@/lib/auth/permissions';
 import { staffIdentityInclude, toStaffIdentity, type StaffIdentity } from '@/lib/services/user.service';
 
 export const SESSION_COOKIE_NAME = 'coaching_os_session';
@@ -155,6 +156,20 @@ export async function requireRole(allowedRoles: RoleCode[]): Promise<SessionUser
 }
 
 /**
+ * Guard (Phase 14.1): require a configurable permission. OWNER always passes;
+ * everyone else needs the code granted to their role. This is ONE layer —
+ * callers must still apply tenant, branch and teacher-assignment checks.
+ * Not yet used by existing routes (they keep `requireRole` until Phase 14.2).
+ */
+export async function requirePermission(code: PermissionCode): Promise<SessionUser> {
+  const user = await requireAuth();
+  if (!can(user, code)) {
+    throw new Error('FORBIDDEN');
+  }
+  return user;
+}
+
+/**
  * Guard: Asserts that a user has authorization to operate on a branch-scoped resource.
  *
  * Safe Null-Branch Policy (Phase 11.1):
@@ -189,6 +204,20 @@ export function resolveEffectiveBranchId(user: SessionUser, requestedBranchId?: 
     return user.branchId;
   }
   return requestedBranchId;
+}
+
+/**
+ * Guard / helper: Determines whether a user is restricted to operating on a single branch.
+ *
+ * Safe Branch Policy:
+ * 1. OWNER is always center-wide (returns false).
+ * 2. Unassigned users (!user.branchId) are center-wide (returns false).
+ * 3. Branch-assigned users (has user.branchId, e.g. branch-locked ADMIN, STAFF, TEACHER)
+ *    are branch-scoped (returns true).
+ */
+export function isBranchScoped(user: { role: string; branchId?: string | null }): boolean {
+  if (user.role === 'OWNER') return false;
+  return Boolean(user.branchId);
 }
 
 /**

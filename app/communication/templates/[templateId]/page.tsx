@@ -16,11 +16,11 @@ interface PreviewResult {
 
 export default function TemplateDetailPage({ params }: { params: Promise<{ templateId: string }> }) {
   const { templateId } = use(params);
-  const { lang, showToast, currentUser } = useApp();
+  const { lang, showToast, can } = useApp();
   const t = DICTIONARY[lang];
   const comm = t.communication;
   const c = t.common;
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canManage = can('communication.templates.manage');
   const [template, setTemplate] = useState<TemplateFormInitial | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import {
   deleteQuestion,
@@ -16,6 +16,7 @@ type Ctx = { params: Promise<{ questionId: string }> };
 export async function GET(_request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('questions.read');
     const { questionId } = await params;
     const scope = await resolveQuestionScope(coachingCenterId, user);
     const question = await getQuestionById(scope, questionId);
@@ -28,6 +29,7 @@ export async function GET(_request: Request, { params }: Ctx) {
 export async function PUT(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('questions.update');
     const { questionId } = await params;
     const body = await request.json().catch(() => null);
     const parsed = updateQuestionSchema.safeParse(body);
@@ -44,6 +46,7 @@ export async function PUT(request: Request, { params }: Ctx) {
 export async function DELETE(_request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('questions.delete');
     const { questionId } = await params;
     const scope = await resolveQuestionScope(coachingCenterId, user);
     const result = await deleteQuestion(scope, questionId);

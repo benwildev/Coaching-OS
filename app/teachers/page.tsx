@@ -78,9 +78,9 @@ const emptyForm = {
 };
 
 export default function TeachersPage() {
-  const { lang, showToast, currentUser } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canManage = can('teachers.create');
 
   const [search, setSearch] = useState('');
   const [branchFilter, setBranchFilter] = useState('all');

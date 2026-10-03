@@ -1564,6 +1564,7 @@ model ExpenseCategory {
   banglaName       String?
   // Phase 13: stable system key (e.g. "TEACHER_SALARY") so code can find-or-create its category
   code             String?
+  isActive         Boolean @default(true)
 
   coachingCenter CoachingCenter @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
   expenses       Expense[]
@@ -1585,13 +1586,23 @@ model Expense {
   notes            String?
   createdById      String?
   createdAt        DateTime      @default(now())
+  // Phase 15.2 foundation: ACTIVE expenses are counted everywhere; CANCELLED ones never are (rows are never deleted).
+  status           String        @default("ACTIVE") // ACTIVE | CANCELLED
+  cancelledAt      DateTime?
+  cancelledById    String?
+  cancelReason     String?
+  idempotencyKey   String?
 
   coachingCenter CoachingCenter  @relation(fields: [coachingCenterId], references: [id], onDelete: Cascade)
   branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  category       ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category       ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   createdBy      User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
   salaryPayment  SalaryPayment?
 
+  @@unique([coachingCenterId, idempotencyKey])
+  @@index([coachingCenterId, branchId, date])
+  @@index([coachingCenterId, status, date])
+  @@index([coachingCenterId, categoryId])
   @@map("expenses")
 }
 

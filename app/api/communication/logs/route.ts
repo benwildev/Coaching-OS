@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { listCommunicationLogs, resolveCommunicationScope } from '@/lib/services/communication.service';
 
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('communication.logs.read');
     const sp = new URL(request.url).searchParams;
     const scope = resolveCommunicationScope(coachingCenterId, user);
     const result = await listCommunicationLogs(scope, {

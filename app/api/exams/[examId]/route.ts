@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getExamById, updateExam } from '@/lib/services/exam.service';
 import { updateExamSchema } from '@/lib/validations/exam';
@@ -12,7 +12,7 @@ export async function GET(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
+    await requirePermission('exams.read');
     const { examId } = await params;
     const branchId = resolveEffectiveBranchId(user);
 
@@ -39,7 +39,7 @@ export async function PUT(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('exams.update');
     const { examId } = await params;
 
     const body = await request.json();

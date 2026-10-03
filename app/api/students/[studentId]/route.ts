@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { getStudentById, updateStudent } from '@/lib/services/student.service';
 import { studentUpdateSchema } from '@/lib/validations/student';
+import { assertTeacherCanAccessStudent } from '@/lib/auth/teacher-scope';
 
 export const dynamic = 'force-dynamic';
 
-// Phase 10.4: see app/api/students/route.ts — reads stay open to TEACHER,
-// scoped to the caller's branch; edits are office-staff only.
-const READ_ROLES = ['OWNER', 'ADMIN', 'STAFF', 'TEACHER'] as const;
-const WRITE_ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
+// Phase 10.4 / 14.3: reads stay open to TEACHER, but strictly scoped to the teacher's
+// active assigned batches and active enrolled students.
 
 export async function GET(
   request: Request,
@@ -16,7 +15,7 @@ export async function GET(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole([...READ_ROLES]);
+    await requirePermission('students.read');
 
     const { studentId } = await props.params;
     const student = await getStudentById(coachingCenterId, studentId);
@@ -28,11 +27,12 @@ export async function GET(
     // branch — closes the cross-branch profile/PII leak (guardian details,
     // NID, address, phone) that existed here before.
     assertBranchAccess(user, student.branchId);
+    await assertTeacherCanAccessStudent(user, student.id);
 
     return NextResponse.json({ student });
   } catch (error: any) {
     console.error('[API /api/students/[studentId] GET] Error:', error);
-    if (error?.message === 'FORBIDDEN_BRANCH' || error?.message === 'FORBIDDEN') {
+    if (error?.message?.startsWith('FORBIDDEN') || error?.message === 'FORBIDDEN_BRANCH' || error?.message === 'FORBIDDEN_TEACHER_SCOPE') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     if (error?.message === 'UNAUTHORIZED') {
@@ -51,7 +51,7 @@ export async function PUT(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole([...WRITE_ROLES]);
+    await requirePermission('students.update');
 
     const { studentId } = await props.params;
 

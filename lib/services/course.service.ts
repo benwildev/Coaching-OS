@@ -9,6 +9,7 @@ export interface CourseFilterParams {
   classId?: string;
   groupId?: string;
   status?: string;
+  courseIds?: string[];
   page?: number;
   pageSize?: number;
 }
@@ -19,6 +20,14 @@ export async function getCoursesList(coachingCenterId: string, params: CourseFil
   const skip = (page - 1) * pageSize;
 
   const where: Prisma.CourseWhereInput = { coachingCenterId };
+
+  if (params.courseIds !== undefined) {
+    if (params.courseIds.length === 0) {
+      where.id = '00000000-0000-0000-0000-000000000000';
+    } else {
+      where.id = { in: params.courseIds };
+    }
+  }
 
   if (params.status && params.status !== 'all') where.status = params.status;
   if (params.programId && params.programId !== 'all') where.academicProgramId = params.programId;

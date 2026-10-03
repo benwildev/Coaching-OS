@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { listExams, createExam } from '@/lib/services/exam.service';
 import { createExamSchema } from '@/lib/validations/exam';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('exams.read');
     const { searchParams } = new URL(request.url);
 
     const branchId = resolveEffectiveBranchId(user, searchParams.get('branch') || undefined);
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('exams.create');
 
     const body = await request.json();
     const validated = createExamSchema.safeParse(body);

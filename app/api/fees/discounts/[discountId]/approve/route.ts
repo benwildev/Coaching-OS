@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { recordAuditLog } from '@/lib/services/audit.service';
 import { notifyUser } from '@/lib/services/notification.service';
@@ -20,7 +20,7 @@ export async function POST(request: Request, props: RouteProps) {
   try {
     const { coachingCenterId, user } = await requireTenant();
     // Deliverable 3: Owner-only permission to approve
-    await requireRole(['OWNER']);
+    await requirePermission('fees.discount.approve');
 
     const { discountId } = await props.params;
 

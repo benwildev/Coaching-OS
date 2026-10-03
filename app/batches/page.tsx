@@ -40,7 +40,7 @@ interface BatchItem {
 }
 
 export default function BatchesPage() {
-  const { lang } = useApp();
+  const { lang, can } = useApp();
   const dict = DICTIONARY[lang];
 
   const [search, setSearch] = useState('');
@@ -125,13 +125,15 @@ export default function BatchesPage() {
           <h1 className="text-2xl md:text-3xl font-extrabold text-[#063b78] tracking-tight">{dict.batches.title}</h1>
           <p className="text-[13.5px] text-[#64748b] mt-0.5 font-medium">{dict.batches.subtitle}</p>
         </div>
-        <Link
-          href="/batches/new"
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
-        >
-          <Icon name="plus" size={17} />
-          <span>{dict.batches.createBtn}</span>
-        </Link>
+        {can('batches.create') && (
+          <Link
+            href="/batches/new"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
+          >
+            <Icon name="plus" size={17} />
+            <span>{dict.batches.createBtn}</span>
+          </Link>
+        )}
       </div>
 
       <div className="card p-4 md:p-5 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs flex flex-col gap-3.5">

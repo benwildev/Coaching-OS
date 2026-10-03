@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getExamPublishStatus } from '@/lib/services/exam-result.service';
 import prisma from '@/lib/db';
@@ -12,7 +12,7 @@ export async function GET(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('exams.update');
     const { examId } = await params;
 
     // Phase 10.5: previously no branch check — a branch-locked STAFF could

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getNotificationPolicies, updateNotificationPolicies } from '@/lib/services/notification-policy.service';
 import { z } from 'zod';
@@ -14,7 +14,7 @@ const updatePoliciesBodySchema = z.object({
 export async function GET() {
   try {
     const { coachingCenterId } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.notification_policy.update');
     const policies = await getNotificationPolicies(coachingCenterId);
     return NextResponse.json({ success: true, policies });
   } catch (error) {
@@ -25,6 +25,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('settings.notification_policy.update');
     const body = await request.json().catch(() => null);
     const parsed = updatePoliciesBodySchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

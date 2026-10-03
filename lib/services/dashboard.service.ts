@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import type { Prisma, AttendanceStatus, RoleCode } from '@prisma/client';
+import { can, defaultPermissionsFor, type PermissionSubject } from '@/lib/auth/permissions';
 import {
   getCurrentDhakaDateOnly,
   getCurrentDhakaDayOfWeek,
@@ -8,6 +9,7 @@ import {
 } from '@/lib/schedule';
 import { getSystemSettings } from './settings.service';
 import { getAttendanceThreshold, getTodaysClasses } from './attendance.service';
+import { getTeacherAuthorizedBatchIds, getTeacherAuthorizedStudentIds } from '@/lib/auth/teacher-scope';
 
 // Every figure on the owner dashboard is derived from real tenant rows. When a
 // module has no data yet the section renders an empty state — nothing here is
@@ -72,11 +74,12 @@ function pctChange(curr: number, prev: number): number | null {
  * the page choosing not to render a card, so it also protects any future
  * caller of this function (e.g. an API route) that a UI-only hide would not.
  */
-function canViewFinance(role: RoleCode): boolean {
-  return role !== 'TEACHER';
+function canViewFinance(viewer: PermissionSubject): boolean {
+  // Phase 14.2: was `role !== 'TEACHER'`; fees.read is held by ADMIN/STAFF by default, not TEACHER.
+  return can(viewer, 'fees.read');
 }
 
-export async function getDashboardData(coachingCenterId: string, params: DashboardParams, viewerRole: RoleCode) {
+export async function getDashboardData(coachingCenterId: string, params: DashboardParams, viewerIn: PermissionSubject | RoleCode) {
   const cc = coachingCenterId;
   const range: DashboardRange = params.range && DASHBOARD_RANGES.includes(params.range) ? params.range : 3;
   const classId = params.classId && params.classId !== 'all' ? params.classId : undefined;
@@ -108,10 +111,51 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
   const weeklyTarget = Number(settings['teacher_weekly_class_target']) > 0 ? Number(settings['teacher_weekly_class_target']) : DEFAULT_WEEKLY_CLASS_TARGET;
   const lowScore = Number(settings['low_score_threshold']) > 0 ? Number(settings['low_score_threshold']) : DEFAULT_LOW_SCORE_THRESHOLD;
 
-  // ---------- Class scope ----------
+  // ---------- Teacher & Class scope ----------
+  const isTeacher = typeof viewerIn === 'string' ? viewerIn === 'TEACHER' : viewerIn.role === 'TEACHER';
+  let teacherProfile: { id: string } | null = null;
+  let teacherAuthorizedBatches: string[] | null = null;
+  let teacherAuthorizedStudents: string[] | null = null;
+
+  if (isTeacher) {
+    const userId = typeof viewerIn === 'object' && viewerIn && 'userId' in viewerIn ? (viewerIn as { userId?: string }).userId : undefined;
+    if (userId) {
+      teacherProfile = await prisma.teacher.findFirst({
+        where: { coachingCenterId: cc, userId },
+        select: { id: true },
+      });
+    }
+    if (teacherProfile) {
+      teacherAuthorizedBatches = await getTeacherAuthorizedBatchIds(cc, teacherProfile.id, today);
+      teacherAuthorizedStudents = await getTeacherAuthorizedStudentIds(cc, teacherProfile.id, today);
+    } else {
+      teacherAuthorizedBatches = [];
+      teacherAuthorizedStudents = [];
+    }
+  }
+
   let scopedStudentIds: string[] | undefined;
   let scopedBatchIds: string[] | undefined;
-  if (classId) {
+
+  if (isTeacher) {
+    if (classId) {
+      const [classBatches, classEnrollments] = await Promise.all([
+        prisma.batch.findMany({ where: { coachingCenterId: cc, academicClassId: classId }, select: { id: true } }),
+        prisma.studentEnrollment.findMany({ where: { coachingCenterId: cc, academicClassId: classId }, select: { studentId: true } }),
+      ]);
+      const classBatchIds = classBatches.map((b) => b.id);
+      scopedBatchIds = classBatchIds.filter((id) => teacherAuthorizedBatches!.includes(id));
+      const members = await prisma.studentBatch.findMany({
+        where: { coachingCenterId: cc, batchId: { in: scopedBatchIds } },
+        select: { studentId: true },
+      });
+      const classStudentIds = Array.from(new Set([...members.map((m) => m.studentId), ...classEnrollments.map((e) => e.studentId)]));
+      scopedStudentIds = classStudentIds.filter((id) => teacherAuthorizedStudents!.includes(id));
+    } else {
+      scopedBatchIds = teacherAuthorizedBatches!;
+      scopedStudentIds = teacherAuthorizedStudents!;
+    }
+  } else if (classId) {
     const [classBatches, classEnrollments] = await Promise.all([
       prisma.batch.findMany({ where: { coachingCenterId: cc, academicClassId: classId }, select: { id: true } }),
       prisma.studentEnrollment.findMany({ where: { coachingCenterId: cc, academicClassId: classId }, select: { studentId: true } }),
@@ -123,6 +167,9 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
     });
     scopedStudentIds = Array.from(new Set([...members.map((m) => m.studentId), ...classEnrollments.map((e) => e.studentId)]));
   }
+  // Phase 15.2: a branch-locked non-OWNER viewer only ever sees their own branch's finance figures (server-side, not a UI hide).
+  const viewerBranchId = typeof viewerIn === 'object' && viewerIn.role !== 'OWNER' ? (viewerIn as { branchId?: string | null }).branchId : null;
+  const financeBranchScope = viewerBranchId ? { branchId: viewerBranchId } : {};
   const studentScope = scopedStudentIds ? { studentId: { in: scopedStudentIds } } : {};
   const batchScope = scopedBatchIds ? { batchId: { in: scopedBatchIds } } : {};
 
@@ -170,7 +217,11 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
       take: DASHBOARD_ROW_SAFETY_CAP,
     }),
     prisma.batch.findMany({
-      where: { coachingCenterId: cc, status: 'ACTIVE', ...(classId ? { academicClassId: classId } : {}) },
+      where: {
+        coachingCenterId: cc,
+        status: 'ACTIVE',
+        ...(scopedBatchIds ? { id: { in: scopedBatchIds } } : classId ? { academicClassId: classId } : {}),
+      },
       select: {
         id: true,
         name: true,
@@ -186,9 +237,24 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
         },
       },
     }),
-    prisma.teacher.findMany({ where: { coachingCenterId: cc, status: 'ACTIVE' }, select: { id: true, name: true, createdAt: true } }),
+    prisma.teacher.findMany({
+      where: {
+        coachingCenterId: cc,
+        status: 'ACTIVE',
+        ...(isTeacher ? { id: teacherProfile?.id || '__none__' } : {}),
+      },
+      select: { id: true, name: true, createdAt: true },
+    }),
     prisma.classSchedule.findMany({
-      where: { coachingCenterId: cc, status: 'ACTIVE', batch: { status: 'ACTIVE', ...(classId ? { academicClassId: classId } : {}) } },
+      where: {
+        coachingCenterId: cc,
+        status: 'ACTIVE',
+        ...(isTeacher ? { teacherId: teacherProfile?.id || '__none__' } : {}),
+        batch: {
+          status: 'ACTIVE',
+          ...(scopedBatchIds ? { id: { in: scopedBatchIds } } : classId ? { academicClassId: classId } : {}),
+        },
+      },
       select: {
         teacherId: true,
         dayOfWeek: true,
@@ -203,19 +269,19 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
       select: { status: true, studentId: true, attendanceSession: { select: { date: true, batchId: true } } },
     }),
     prisma.feeInvoice.findMany({
-      where: { coachingCenterId: cc, status: { notIn: ['DRAFT', 'CANCELLED'] }, invoiceDate: { gte: historyStart }, ...studentScope },
+      where: { coachingCenterId: cc, status: { notIn: ['DRAFT', 'CANCELLED'] }, invoiceDate: { gte: historyStart }, ...financeBranchScope, ...studentScope },
       select: { invoiceDate: true, totalAmount: true },
     }),
     prisma.feeInvoice.findMany({
-      where: { coachingCenterId: cc, status: { in: ['ISSUED', 'PARTIAL', 'OVERDUE'] }, dueAmount: { gt: 0 }, ...studentScope },
+      where: { coachingCenterId: cc, status: { in: ['ISSUED', 'PARTIAL', 'OVERDUE'] }, dueAmount: { gt: 0 }, ...financeBranchScope, ...studentScope },
       select: { studentId: true, dueAmount: true, dueDate: true, invoiceDate: true },
     }),
     prisma.payment.findMany({
-      where: { coachingCenterId: cc, status: { not: 'VOIDED' }, paymentDate: { gte: historyStart }, ...studentScope },
+      where: { coachingCenterId: cc, status: { not: 'VOIDED' }, paymentDate: { gte: historyStart }, ...financeBranchScope, ...studentScope },
       select: { amount: true, paymentDate: true },
     }),
     prisma.payment.findMany({
-      where: { coachingCenterId: cc, status: { not: 'VOIDED' }, ...studentScope },
+      where: { coachingCenterId: cc, status: { not: 'VOIDED' }, ...financeBranchScope, ...studentScope },
       select: {
         id: true,
         amount: true,
@@ -250,7 +316,13 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
       },
     }),
     prisma.attendanceSession.findMany({
-      where: { coachingCenterId: cc, status: 'COMPLETED', completedAt: { not: null }, ...batchScope },
+      where: {
+        coachingCenterId: cc,
+        status: 'COMPLETED',
+        completedAt: { not: null },
+        ...(isTeacher ? { teacherId: teacherProfile?.id || '__none__' } : {}),
+        ...batchScope,
+      },
       select: {
         id: true,
         completedAt: true,
@@ -268,7 +340,7 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
       orderBy: { createdAt: 'desc' },
       take: 4,
     }),
-    getTodaysClasses(cc),
+    getTodaysClasses(cc, isTeacher ? { teacherId: teacherProfile?.id || '__none__' } : {}),
     prisma.examSubject.findMany({
       where: {
         examDate: { gte: todayStart, lt: new Date(todayStart.getTime() + DAY_MS) },
@@ -627,7 +699,9 @@ export async function getDashboardData(coachingCenterId: string, params: Dashboa
   const collectedPrev = sumPrev(collectedByMonth, range);
   const billedNow = sumLast(billedByMonth, range);
 
-  const financeVisible = canViewFinance(viewerRole);
+  // A bare RoleCode (legacy callers/scripts) is resolved to that role's default permissions.
+  const viewer: PermissionSubject = typeof viewerIn === 'string' ? { role: viewerIn, permissions: defaultPermissionsFor(viewerIn) } : viewerIn;
+  const financeVisible = canViewFinance(viewer);
 
   // Phase 10.4: a TEACHER gets every non-financial section as normal, but
   // collection/outstanding figures, the fee chart, per-student overdue

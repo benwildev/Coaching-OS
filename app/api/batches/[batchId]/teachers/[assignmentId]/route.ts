@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { updateBatchTeacherAssignment, getBatchById } from '@/lib/services/batch.service';
 import { batchTeacherUpdateSchema } from '@/lib/validations/batch';
@@ -12,7 +12,7 @@ export async function PUT(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('batches.assign_teacher');
 
     const { batchId, assignmentId } = await props.params;
 

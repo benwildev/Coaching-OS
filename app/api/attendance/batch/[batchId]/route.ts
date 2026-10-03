@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getBatchAttendanceSummary } from '@/lib/services/attendance.service';
 import prisma from '@/lib/db';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request, props: { params: Promise<{ batchId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('attendance.read');
     const { batchId } = await props.params;
 
     const batch = await prisma.batch.findFirst({ where: { id: batchId, coachingCenterId }, select: { branchId: true } });

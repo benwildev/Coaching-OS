@@ -1,21 +1,15 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission, isBranchScoped } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import prisma from '@/lib/db';
 import { normalizeBdPhone, isValidBdPhone } from '@/lib/validations/student';
 
 export const dynamic = 'force-dynamic';
 
-const ALLOWED_ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
-
-function isBranchScoped(user: { role: string; branchId: string | null }) {
-  return user.role !== 'OWNER' && user.role !== 'ADMIN' && !!user.branchId;
-}
-
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole([...ALLOWED_ROLES]);
+    await requirePermission('students.create');
 
     const { searchParams } = new URL(request.url);
     const phone = searchParams.get('phone') || searchParams.get('q');

@@ -38,7 +38,7 @@ interface StatsData {
 }
 
 export default function ExamsPage() {
-  const { lang, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const [exams, setExams] = useState<ExamItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<StatsData>({
@@ -185,13 +185,15 @@ export default function ExamsPage() {
             <span>{lang === 'bn' ? 'ট্যাবুলেশন ও ফলাফল শিট' : 'Results History'}</span>
           </Link>
 
-          <Link
-            href="/exams/new"
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#063b78] hover:bg-[#00296b] text-white text-[13px] font-bold transition-all shadow-sm hover:shadow"
-          >
-            <Icon name="plus" size={16} />
-            <span>{lang === 'bn' ? 'নতুন পরীক্ষা তৈরি করুন' : 'Schedule New Exam'}</span>
-          </Link>
+          {can('exams.create') && (
+            <Link
+              href="/exams/new"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#063b78] hover:bg-[#00296b] text-white text-[13px] font-bold transition-all shadow-sm hover:shadow"
+            >
+              <Icon name="plus" size={16} />
+              <span>{lang === 'bn' ? 'নতুন পরীক্ষা তৈরি করুন' : 'Schedule New Exam'}</span>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -403,13 +405,15 @@ export default function ExamsPage() {
                 ? 'আপনার নির্বাচিত ফিল্টারের সাথে মিলে এমন কোনো পরীক্ষা নেই।'
                 : 'No examinations match your current filters. Try changing filters or schedule a new exam.'}
             </p>
-            <Link
-              href="/exams/new"
-              className="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-xl bg-[#063b78] text-white text-xs font-bold shadow-xs hover:bg-[#00296b]"
-            >
-              <Icon name="plus" size={14} />
-              <span>{lang === 'bn' ? 'নতুন পরীক্ষা সূচি তৈরি করুন' : 'Schedule New Exam'}</span>
-            </Link>
+            {can('exams.create') && (
+              <Link
+                href="/exams/new"
+                className="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-xl bg-[#063b78] text-white text-xs font-bold shadow-xs hover:bg-[#00296b]"
+              >
+                <Icon name="plus" size={14} />
+                <span>{lang === 'bn' ? 'নতুন পরীক্ষা সূচি তৈরি করুন' : 'Schedule New Exam'}</span>
+              </Link>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto scroll">

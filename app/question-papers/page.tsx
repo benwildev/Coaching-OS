@@ -28,7 +28,7 @@ interface PaperRow {
 }
 
 export default function QuestionPapersPage() {
-  const { lang } = useApp();
+  const { lang, can } = useApp();
   const t = DICTIONARY[lang];
   const qp = t.questionPapers;
   const c = t.common;
@@ -90,10 +90,12 @@ export default function QuestionPapersPage() {
           <Icon name="target" size={16} />
           {t.nav.questions}
         </Link>
-        <Link href="/question-papers/new" className="primary">
-          <Icon name="plus" size={16} />
-          {qp.newPaper}
-        </Link>
+        {can('question_papers.create') && (
+          <Link href="/question-papers/new" className="primary">
+            <Icon name="plus" size={16} />
+            {qp.newPaper}
+          </Link>
+        )}
       </PageHeader>
 
       {stats && stats.total > 0 && (
@@ -129,7 +131,12 @@ export default function QuestionPapersPage() {
           hasFilters ? (
             <EmptyState message={qp.noMatch} icon="search" />
           ) : (
-            <EmptyState message={qp.empty} actionHref="/question-papers/new" actionLabel={qp.newPaper} icon="file" />
+            <EmptyState
+              message={qp.empty}
+              actionHref={can('question_papers.create') ? '/question-papers/new' : undefined}
+              actionLabel={qp.newPaper}
+              icon="file"
+            />
           )
         ) : (
           <>

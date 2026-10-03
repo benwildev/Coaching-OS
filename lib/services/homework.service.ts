@@ -1,6 +1,6 @@
 import prisma from '@/lib/db';
 import { Prisma } from '@prisma/client';
-import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import { assertBranchAccess, isBranchScoped, type SessionUser } from '@/lib/auth/session';
 import { recordAuditLog } from './audit.service';
 import { assertTeacherSubjectAccess, getTeacherAuthorizedBatchSubjectPairs } from './exam-result.service';
 import { notifyStudentGuardians } from './guardian-notify.service';
@@ -29,10 +29,6 @@ export interface HomeworkScope {
 
 export async function resolveHomeworkScope(coachingCenterId: string, user: SessionUser): Promise<HomeworkScope> {
   return { coachingCenterId, user, teacherBatchSubjectPairs: await getTeacherAuthorizedBatchSubjectPairs(coachingCenterId, user) };
-}
-
-function isBranchScoped(user: SessionUser) {
-  return user.role !== 'OWNER' && user.role !== 'ADMIN' && !!user.branchId;
 }
 
 /**

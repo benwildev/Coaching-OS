@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getTenantSubscription } from '@/lib/services/subscription.service';
 import { getTenantUsage } from '@/lib/services/usage.service';
@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const { coachingCenterId } = await requireTenant();
-    await requireRole(['OWNER']);
+    await requirePermission('settings.subscription.read');
 
     const [state, usage] = await Promise.all([getTenantSubscription(coachingCenterId), getTenantUsage(coachingCenterId)]);
 

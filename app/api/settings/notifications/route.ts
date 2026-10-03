@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTenant } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getNotificationPreferences, updateNotificationPreferences } from '@/lib/services/notification-preference.service';
 import { getNotificationPolicies, updateNotificationPolicies } from '@/lib/services/notification-policy.service';
@@ -15,7 +16,7 @@ export async function GET() {
     // to view/edit; the tenant-wide policy configuration and channel-setup
     // status are admin-only settings — a TEACHER has no legitimate reason
     // to read them and previously could, since this route had no role gate.
-    const isAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
+    const isAdmin = can(user, 'settings.notification_policy.update');
     const [policies, preferences, channelsConfigured] = await Promise.all([
       isAdmin ? getNotificationPolicies(coachingCenterId) : Promise.resolve(undefined),
       getNotificationPreferences(coachingCenterId, user),

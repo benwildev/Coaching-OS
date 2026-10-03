@@ -1,21 +1,22 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getBatchById, updateBatch } from '@/lib/services/batch.service';
 import { batchUpdateSchema } from '@/lib/validations/batch';
+import { assertTeacherCanAccessBatch } from '@/lib/auth/teacher-scope';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request, props: { params: Promise<{ batchId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
+    await requirePermission('batches.read');
     const { batchId } = await props.params;
     const batch = await getBatchById(coachingCenterId, batchId);
     if (!batch) return NextResponse.json({ success: false, error: 'Batch not found' }, { status: 404 });
-    // Phase 10.5: previously no branch check at all — a branch-locked user
-    // could read any branch's batch (incl. its student roster/phones) by id.
+    // Phase 10.5 / 14.3: branch check + teacher academic assignment scope
     assertBranchAccess(user, batch.branchId);
+    await assertTeacherCanAccessBatch(user, batchId);
     return NextResponse.json({ success: true, batch });
   } catch (error) {
     return apiErrorResponse(error, '/api/batches/[batchId] GET');
@@ -25,7 +26,7 @@ export async function GET(request: Request, props: { params: Promise<{ batchId: 
 export async function PUT(request: Request, props: { params: Promise<{ batchId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('batches.update');
 
     const { batchId } = await props.params;
     const body = await request.json();

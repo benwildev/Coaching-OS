@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertTeacherSelfAccess, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertTeacherSelfAccess, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { completeAttendanceSession, getAttendanceSessionDetail } from '@/lib/services/attendance.service';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
 import { completeSessionSchema } from '@/lib/validations/attendance';
+
+import { assertTeacherCanAccessAttendanceSession } from '@/lib/auth/teacher-scope';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request, props: { params: Promise<{ sessionId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
+    await requirePermission('attendance.update');
 
     const { sessionId } = await props.params;
     const existing = await getAttendanceSessionDetail(coachingCenterId, sessionId);
@@ -18,8 +20,7 @@ export async function POST(request: Request, props: { params: Promise<{ sessionI
 
     assertBranchAccess(user, existing.session.branchId);
     if (user.role === 'TEACHER') {
-      const own = await getTeacherByUserId(coachingCenterId, user.userId);
-      assertTeacherSelfAccess(user, existing.session.teacherId, own?.id || null);
+      await assertTeacherCanAccessAttendanceSession(user, existing.session);
     }
 
     const body = await request.json().catch(() => ({}));

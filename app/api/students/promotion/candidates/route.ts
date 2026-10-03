@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getPromotionCandidates } from '@/lib/services/promotion.service';
 import { promotionCandidatesQuerySchema } from '@/lib/validations/bulk-student';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('students.promote');
     const sp = new URL(request.url).searchParams;
     const parsed = promotionCandidatesQuerySchema.safeParse({
       sourceSessionId: sp.get('sourceSessionId') || undefined,

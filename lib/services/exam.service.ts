@@ -2,6 +2,7 @@ import prisma from '@/lib/db';
 import { recordAuditLog } from './audit.service';
 import { notifyStudentGuardians } from './guardian-notify.service';
 import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { assertTeacherSubjectAccess } from './exam-result.service';
 import {
   ALLOWED_STATUS_TRANSITIONS,
@@ -600,7 +601,8 @@ export async function transitionExamStatus(
   examId: string,
   targetStatus: string,
   actorId: string,
-  userRole: string,
+  // SessionUser (routes) is evaluated via can(); a bare role string (legacy scripts) falls back to OWNER/ADMIN.
+  userOrRole: SessionUser | string,
   reason?: string
 ) {
   const exam = await prisma.exam.findFirst({
@@ -626,7 +628,9 @@ export async function transitionExamStatus(
 
   // Elevated role requirement for reopening published/completed exams
   if (currentStatus === EXAM_STATUS.PUBLISHED || (currentStatus === EXAM_STATUS.COMPLETED && targetStatus === EXAM_STATUS.ONGOING)) {
-    if (userRole !== 'OWNER' && userRole !== 'ADMIN') {
+    const mayReopen =
+      typeof userOrRole === 'string' ? userOrRole === 'OWNER' || userOrRole === 'ADMIN' : can(userOrRole, 'exams.reopen');
+    if (!mayReopen) {
       throw new Error('FORBIDDEN: Only Center Owner or Admin can reopen completed or published exams.');
     }
   }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getSchedulesList, createClassSchedule } from '@/lib/services/schedule.service';
 import { classScheduleSchema } from '@/lib/validations/schedule';
@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('routine.read');
     const { searchParams } = new URL(request.url);
 
     // Phase 10.5: previously trusted ?branch= verbatim.
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('routine.manage');
 
     const body = await request.json();
     const validated = classScheduleSchema.safeParse(body);

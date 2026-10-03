@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
 import {
   type NotificationRecipientType,
@@ -651,7 +652,7 @@ export async function updateNotificationPolicies(
   user: SessionUser,
   updates: NotificationPolicyUpdateItem[]
 ): Promise<EnrichedNotificationPolicy[]> {
-  if (user.role !== 'OWNER' && user.role !== 'ADMIN') {
+  if (!can(user, 'settings.notification_policy.update')) {
     throw new Error('NOTIFICATION_POLICY_ACCESS_DENIED: Only Center Owners and Admins can configure alert policies.');
   }
 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { resolveCommunicationScope, setTemplateActive } from '@/lib/services/communication.service';
 
@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, { params }: { params: Promise<{ templateId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('communication.templates.manage');
     const { templateId } = await params;
     const body = await request.json().catch(() => null);
     if (typeof body?.isActive !== 'boolean') {

@@ -8,6 +8,7 @@ import Icon from '@/components/Icon';
 import FileUploadButton from '@/components/FileUploadButton';
 import { useApp } from '@/lib/store';
 import { ROOM_STATUSES } from '@/lib/validations/room';
+import { canAny, type PermissionCode } from '@/lib/auth/permissions';
 
 const SECTIONS: {
   id: string;
@@ -15,24 +16,37 @@ const SECTIONS: {
   bnLabel: string;
   href?: string;
   badge?: string;
+  /** Visible when the user holds ANY of these. Omitted = every user who can open Settings. */
+  permission?: readonly PermissionCode[];
+  /** Immutable Owner-only page (not a catalog permission). */
+  ownerOnly?: boolean;
 }[] = [
-  { id: 'profile', label: 'Centre Profile', bnLabel: 'সেন্টার প্রোফাইল' },
-  { id: 'academic', label: 'Academic Setup', bnLabel: 'একাডেমিক সেটআপ' },
-  { id: 'rooms', label: 'Rooms', bnLabel: 'কক্ষসমূহ' },
-  { id: 'branding', label: 'Branding & Theme', bnLabel: 'ব্র্যান্ডিং ও থিম' },
-  { id: 'users', label: 'Users & Permissions', bnLabel: 'ব্যবহারকারী ও অনুমতি' },
+  { id: 'profile', label: 'Centre Profile', bnLabel: 'সেন্টার প্রোফাইল', permission: ['settings.profile.read'] },
+  { id: 'academic', label: 'Academic Setup', bnLabel: 'একাডেমিক সেটআপ', permission: ['settings.academic.read'] },
+  { id: 'rooms', label: 'Rooms', bnLabel: 'কক্ষসমূহ', permission: ['routine.manage'] },
+  { id: 'branding', label: 'Branding & Theme', bnLabel: 'ব্র্যান্ডিং ও থিম', permission: ['settings.branding.read'] },
+  { id: 'users', label: 'Users & Permissions', bnLabel: 'ব্যবহারকারী ও অনুমতি', permission: ['settings.users.read'] },
   { id: 'notifications', label: 'Notification Policies', bnLabel: 'নোটিফিকেশন পলিসি', href: '/settings/notifications', badge: 'Alerts 🔔' },
-  { id: 'communication', label: 'SMS & Gateway', bnLabel: 'এসএমএস ও গেটওয়ে', href: '/settings/communication' },
-  { id: 'payment-gateways', label: 'Payment Gateways', bnLabel: 'পেমেন্ট গেটওয়ে', href: '/settings/payment-gateways', badge: 'Online Pay' },
+  { id: 'communication', label: 'SMS & Gateway', bnLabel: 'এসএমএস ও গেটওয়ে', href: '/settings/communication', permission: ['settings.communication.update'] },
+  { id: 'payment-gateways', label: 'Payment Gateways', bnLabel: 'পেমেন্ট গেটওয়ে', href: '/settings/payment-gateways', badge: 'Online Pay', permission: ['settings.payment_gateways.read', 'fees.read'] },
   { id: 'region', label: 'Language & Region', bnLabel: 'ভাষা ও অঞ্চল' },
+  { id: 'roles-permissions', label: 'Roles & Permissions', bnLabel: 'ভূমিকা ও অনুমতি', href: '/settings/roles-permissions', ownerOnly: true },
   { id: 'security', label: 'Security & Roles', bnLabel: 'নিরাপত্তা ও ভূমিকা' },
-  { id: 'subscription', label: 'Subscription', bnLabel: 'সাবস্ক্রিপশন', href: '/settings/subscription' },
-  { id: 'system', label: 'System Audit', bnLabel: 'সিস্টেম অডিট' },
+  { id: 'subscription', label: 'Subscription', bnLabel: 'সাবস্ক্রিপশন', href: '/settings/subscription', permission: ['settings.subscription.read'] },
+  { id: 'system', label: 'System Audit', bnLabel: 'সিস্টেম অডিট', permission: ['settings.users.read'] },
 ];
 
 export default function SettingsPage() {
   const { showToast, lang, refreshAuth, currentUser } = useApp();
-  const [sec, setSec] = useState('profile');
+  const [secRaw, setSec] = useState('profile');
+  // Sections the user may see (permission-driven; the APIs enforce the same permissions).
+  const visibleSections = SECTIONS.filter((s) =>
+    s.ownerOnly ? currentUser?.role === 'OWNER' : !s.permission || canAny(currentUser, s.permission)
+  );
+  // Never render a section's content (or fire its requests) unless it is visible.
+  const sec = visibleSections.some((s) => !s.href && s.id === secRaw)
+    ? secRaw
+    : (visibleSections.find((s) => !s.href)?.id ?? '');
   const [loading, setLoading] = useState(false);
 
   // Profile State
@@ -428,7 +442,7 @@ export default function SettingsPage() {
     <div className="max-w-[1400px] mx-auto flex flex-col md:flex-row gap-5">
       {/* Settings Navigation Sidebar */}
       <div className="card p-3 md:w-64 shrink-0 flex flex-row md:flex-col gap-1 overflow-x-auto hs self-start">
-        {SECTIONS.filter((s) => s.id !== 'subscription' || currentUser?.role === 'OWNER').map((s) => {
+        {visibleSections.map((s) => {
           const isCurrent = sec === s.id;
           const innerContent = (
             <div className="flex items-center justify-between gap-1.5 w-full">

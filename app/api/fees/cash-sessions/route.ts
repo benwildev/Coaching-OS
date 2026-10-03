@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { listCashSessions, openCashSession } from '@/lib/services/cash-session.service';
 import { cashSessionOpenSchema } from '@/lib/validations/cash-session';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.cash_session.manage');
     const sp = new URL(request.url).searchParams;
     const branchId = resolveEffectiveBranchId(user, sp.get('branch') || undefined);
 
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.cash_session.manage');
     const body = await request.json().catch(() => null);
     const parsed = cashSessionOpenSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

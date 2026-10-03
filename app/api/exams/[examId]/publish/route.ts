@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { verifyAndPublishExam } from '@/lib/services/exam-result.service';
 
@@ -11,7 +11,7 @@ export async function POST(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('exams.publish');
     const { examId } = await params;
 
     let allowIncomplete = false;

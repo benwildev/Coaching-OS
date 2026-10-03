@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import {
   getTeacherById,
   getEligibleTeacherAccounts,
@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request, props: { params: Promise<{ teacherId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('teachers.account');
     const { teacherId } = await props.params;
 
     const teacher = await getTeacherById(coachingCenterId, teacherId);
@@ -39,7 +39,7 @@ export async function GET(request: Request, props: { params: Promise<{ teacherId
 export async function POST(request: Request, props: { params: Promise<{ teacherId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('teachers.account');
     const { teacherId } = await props.params;
 
     const teacher = await getTeacherById(coachingCenterId, teacherId);
@@ -65,7 +65,7 @@ export async function POST(request: Request, props: { params: Promise<{ teacherI
 export async function DELETE(request: Request, props: { params: Promise<{ teacherId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('teachers.account');
     const { teacherId } = await props.params;
 
     const teacher = await getTeacherById(coachingCenterId, teacherId);

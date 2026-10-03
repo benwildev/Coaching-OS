@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
+import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from '@/lib/services/audit.service';
 import { notifyUsers } from '@/lib/services/notification.service';
 import prisma from '@/lib/db';
@@ -19,7 +20,7 @@ const discountRequestSchema = z.object({
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.read');
 
     const { searchParams } = new URL(request.url);
     const filterStatus = searchParams.get('status') || 'ALL'; // PENDING, APPROVED, REJECTED, ALL
@@ -146,7 +147,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.discount.request');
 
     const body = await request.json();
     const validated = discountRequestSchema.safeParse(body);
@@ -192,7 +193,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const isOwner = user.role === 'OWNER';
+    // OWNER-only permission (ownerLocked): equivalent to the old OWNER role check.
+    const isOwner = can(user, 'fees.discount.approve');
     const assignmentId = invoice.items[0]?.studentFeeAssignmentId || null;
 
     if (isOwner) {

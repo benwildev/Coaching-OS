@@ -22,7 +22,7 @@ interface NoticeRow {
 }
 
 export default function NoticesPage() {
-  const { lang } = useApp();
+  const { lang, can } = useApp();
   const t = DICTIONARY[lang];
   const n = t.notices;
   const c = t.common;
@@ -73,10 +73,12 @@ export default function NoticesPage() {
   return (
     <div className="max-w-[1200px] mx-auto flex flex-col gap-5">
       <PageHeader eyebrow={t.nav.notices} title={n.title} subtitle={n.subtitle}>
-        <Link href="/notices/new" className="primary">
-          <Icon name="plus" size={16} />
-          {n.newNotice}
-        </Link>
+        {can('notices.create') && (
+          <Link href="/notices/new" className="primary">
+            <Icon name="plus" size={16} />
+            {n.newNotice}
+          </Link>
+        )}
       </PageHeader>
 
       <div className="card p-4 grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-3 items-end">
@@ -105,7 +107,12 @@ export default function NoticesPage() {
           hasFilters ? (
             <EmptyState message={n.noMatch} icon="search" />
           ) : (
-            <EmptyState message={n.empty} actionHref="/notices/new" actionLabel={n.newNotice} icon="pin" />
+            <EmptyState
+              message={n.empty}
+              actionHref={can('notices.create') ? '/notices/new' : undefined}
+              actionLabel={n.newNotice}
+              icon="pin"
+            />
           )
         ) : (
           <>

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import {
   getExamSubjectResults,
@@ -15,6 +15,7 @@ export async function GET(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('exams.marks.enter');
     const { examId, examSubjectId } = await params;
 
     const data = await getExamSubjectResults(
@@ -36,6 +37,7 @@ export async function PUT(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('exams.marks.enter');
     const { examId, examSubjectId } = await params;
 
     const body = await request.json();

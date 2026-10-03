@@ -59,9 +59,17 @@ interface StatsData {
 function StudentsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { lang } = useApp();
+  const { lang, can, currentUser } = useApp();
   const dict = DICTIONARY[lang];
   const [, startTransition] = useTransition();
+
+  const canAdmit = can('students.create') && currentUser?.role !== 'TEACHER';
+  const canEditStudent = can('students.update');
+  const canIdCard = can('students.id_card');
+  const canCertificates = can('students.certificates');
+  const canBulkManage =
+    (can('students.promote') || can('students.archive') || can('students.transfer')) &&
+    currentUser?.role !== 'TEACHER';
 
   // Search & Filters from URL or default
   const [search, setSearch] = useState(searchParams.get('search') || '');
@@ -237,13 +245,15 @@ function StudentsPageContent() {
             {dict.students.subtitle}
           </p>
         </div>
-        <Link
-          href="/students/new"
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
-        >
-          <Icon name="userplus" size={17} />
-          <span>{dict.students.admitBtn}</span>
-        </Link>
+        {canAdmit && (
+          <Link
+            href="/students/new"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
+          >
+            <Icon name="userplus" size={17} />
+            <span>{dict.students.admitBtn}</span>
+          </Link>
+        )}
       </div>
 
       {/* Real Database KPI Metrics (Zero Fabricated Metrics) */}
@@ -458,12 +468,14 @@ function StudentsPageContent() {
         </div>
       </div>
 
-      <BulkActionBar
-        selectedIds={Array.from(selectedIds)}
-        students={students.map((s) => ({ id: s.id, name: s.name, studentIdCode: s.studentIdCode }))}
-        onClearSelection={() => setSelectedIds(new Set())}
-        onActionComplete={fetchStudents}
-      />
+      {canBulkManage && (
+        <BulkActionBar
+          selectedIds={Array.from(selectedIds)}
+          students={students.map((s) => ({ id: s.id, name: s.name, studentIdCode: s.studentIdCode }))}
+          onClearSelection={() => setSelectedIds(new Set())}
+          onActionComplete={fetchStudents}
+        />
+      )}
 
       {/* Student List View */}
       {loading ? (
@@ -499,9 +511,11 @@ function StudentsPageContent() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-[#e2e8f0] bg-[#f8fafc] text-[12px] font-bold text-[#64748b] uppercase tracking-wider">
-                    <th className="py-3.5 px-4 w-10">
-                      <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} aria-label={dict.bulkOps.clearSelection} />
-                    </th>
+                    {canBulkManage && (
+                      <th className="py-3.5 px-4 w-10">
+                        <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} aria-label={dict.bulkOps.clearSelection} />
+                      </th>
+                    )}
                     <th className="py-3.5 px-4">{dict.students.colId}</th>
                     <th className="py-3.5 px-4">{dict.students.colName}</th>
                     <th className="py-3.5 px-4">{dict.students.colProgram}</th>
@@ -525,9 +539,11 @@ function StudentsPageContent() {
                         key={student.id}
                         className="hover:bg-[#f8fafc]/80 transition-colors group"
                       >
-                        <td className="py-3.5 px-4">
-                          <input type="checkbox" checked={selectedIds.has(student.id)} onChange={() => toggleSelectOne(student.id)} aria-label={student.name} />
-                        </td>
+                        {canBulkManage && (
+                          <td className="py-3.5 px-4">
+                            <input type="checkbox" checked={selectedIds.has(student.id)} onChange={() => toggleSelectOne(student.id)} aria-label={student.name} />
+                          </td>
+                        )}
                         {/* Student ID */}
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <Link
@@ -663,27 +679,33 @@ function StudentsPageContent() {
                             >
                               <Icon name="user" size={16} />
                             </Link>
-                            <Link
-                              href={`/students/${student.id}/edit`}
-                              className="p-1.5 rounded-lg text-[#64748b] hover:text-[#063b78] hover:bg-blue-50 transition-colors"
-                              title={dict.students.editStudent}
-                            >
-                              <Icon name="sliders" size={16} />
-                            </Link>
-                            <Link
-                              href={`/students/${student.id}/id-card`}
-                              className="p-1.5 rounded-lg text-[#64748b] hover:text-[#063b78] hover:bg-blue-50 transition-colors"
-                              title={dict.students.idCardLink}
-                            >
-                              <Icon name="shield" size={16} />
-                            </Link>
-                            <Link
-                              href={`/students/${student.id}/certificates`}
-                              className="p-1.5 rounded-lg text-[#64748b] hover:text-[#063b78] hover:bg-blue-50 transition-colors"
-                              title={dict.students.certificatesLink}
-                            >
-                              <Icon name="award" size={16} />
-                            </Link>
+                            {canEditStudent && (
+                              <Link
+                                href={`/students/${student.id}/edit`}
+                                className="p-1.5 rounded-lg text-[#64748b] hover:text-[#063b78] hover:bg-blue-50 transition-colors"
+                                title={dict.students.editStudent}
+                              >
+                                <Icon name="sliders" size={16} />
+                              </Link>
+                            )}
+                            {canIdCard && (
+                              <Link
+                                href={`/students/${student.id}/id-card`}
+                                className="p-1.5 rounded-lg text-[#64748b] hover:text-[#063b78] hover:bg-blue-50 transition-colors"
+                                title={dict.students.idCardLink}
+                              >
+                                <Icon name="shield" size={16} />
+                              </Link>
+                            )}
+                            {canCertificates && (
+                              <Link
+                                href={`/students/${student.id}/certificates`}
+                                className="p-1.5 rounded-lg text-[#64748b] hover:text-[#063b78] hover:bg-blue-50 transition-colors"
+                                title={dict.students.certificatesLink}
+                              >
+                                <Icon name="award" size={16} />
+                              </Link>
+                            )}
                           </div>
                         </td>
                       </tr>

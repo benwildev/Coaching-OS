@@ -68,11 +68,11 @@ const CHANNEL_LABELS: Record<NotificationDeliveryChannel, string> = {
 };
 
 export default function NotificationSettingsPage() {
-  const { lang, showToast, currentUser } = useApp();
+  const { lang, showToast, can } = useApp();
   const t = DICTIONARY[lang];
   const ns = t.notificationSettings;
   const c = t.common;
-  const canManagePolicies = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canManagePolicies = can('settings.notification_policy.update');
 
   // Tabs: 'policies' | 'preferences'
   const [activeTab, setActiveTab] = useState<'policies' | 'preferences'>('policies');

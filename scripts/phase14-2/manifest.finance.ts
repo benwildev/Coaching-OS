@@ -1,0 +1,55 @@
+import type { RouteAuthEntry } from './types';
+
+const OAS = ['OWNER', 'ADMIN', 'STAFF'] as const;
+const OA = ['OWNER', 'ADMIN'] as const;
+
+export const entries: RouteAuthEntry[] = [
+  { route: '/api/fees/assignments/[assignmentId]', method: 'PUT', oldRoles: [...OA], permissions: ['fees.structures.update'] },
+  { route: '/api/fees/cash-sessions/current', method: 'GET', oldRoles: [...OAS], permissions: ['fees.cash_session.manage'] },
+  { route: '/api/fees/cash-sessions', method: 'GET', oldRoles: [...OAS], permissions: ['fees.cash_session.manage'] },
+  { route: '/api/fees/cash-sessions', method: 'POST', oldRoles: [...OAS], permissions: ['fees.cash_session.manage'] },
+  { route: '/api/fees/cash-sessions/[id]/close', method: 'POST', oldRoles: [...OAS], permissions: ['fees.cash_session.manage'] },
+  { route: '/api/fees/collect/students', method: 'GET', oldRoles: [...OAS], permissions: ['fees.collect'] },
+  { route: '/api/fees/collection', method: 'GET', oldRoles: [...OAS], permissions: ['fees.collect'] },
+  { route: '/api/fees/collectors', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/dashboard', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/discounts', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/discounts', method: 'POST', oldRoles: [...OAS], permissions: ['fees.discount.request'], note: 'Inside handler: isOwner (apply directly vs request approval) is now can(user, fees.discount.approve), an ownerLocked code, so OWNER only, same as before.' },
+  { route: '/api/fees/discounts/[discountId]/approve', method: 'POST', oldRoles: ['OWNER'], permissions: ['fees.discount.approve'], note: 'ownerLocked code; previously requireRole([OWNER]).' },
+  { route: '/api/fees/discounts/[discountId]/reject', method: 'POST', oldRoles: ['OWNER'], permissions: ['fees.discount.approve'], note: 'ownerLocked code; previously requireRole([OWNER]).' },
+  { route: '/api/fees/invoices', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/invoices', method: 'POST', oldRoles: [...OAS], permissions: ['fees.invoices.create'] },
+  { route: '/api/fees/invoices/[invoiceId]', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/invoices/[invoiceId]', method: 'PUT', oldRoles: [...OAS], permissions: ['fees.invoices.create'], note: 'Invoice edit has no dedicated code; matched by parity (AS-).' },
+  { route: '/api/fees/invoices/[invoiceId]/cancel', method: 'POST', oldRoles: [...OAS], permissions: ['fees.invoices.create'] },
+  { route: '/api/fees/invoices/[invoiceId]/payments', method: 'POST', oldRoles: [...OAS], permissions: ['fees.collect'] },
+  { route: '/api/fees/manual-submissions', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/manual-submissions/[submissionId]/review', method: 'POST', oldRoles: [...OAS], permissions: ['fees.collect'], note: 'Approving creates a payment; parity AS-.' },
+  { route: '/api/fees/options', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'], note: 'Was OAS-gated (not open); kept gated.' },
+  { route: '/api/fees/payments', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/payments/[paymentId]', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/payments/[paymentId]/refund', method: 'POST', oldRoles: [...OA], permissions: ['fees.refund'] },
+  { route: '/api/fees/reports/collection', method: 'GET', oldRoles: [...OAS], permissions: ['fees.reports.read'] },
+  { route: '/api/fees/reports/due', method: 'GET', oldRoles: [...OAS], permissions: ['fees.reports.read'] },
+  { route: '/api/fees/structures', method: 'GET', oldRoles: [...OAS], permissions: ['fees.structures.read'] },
+  { route: '/api/fees/structures', method: 'POST', oldRoles: [...OA], permissions: ['fees.structures.create'] },
+  { route: '/api/fees/structures/[feeStructureId]', method: 'GET', oldRoles: [...OAS], permissions: ['fees.structures.read'] },
+  { route: '/api/fees/structures/[feeStructureId]', method: 'PUT', oldRoles: [...OA], permissions: ['fees.structures.update'] },
+  { route: '/api/fees/students/[studentId]', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'] },
+  { route: '/api/fees/students/[studentId]/assignments', method: 'POST', oldRoles: [...OA], permissions: ['fees.structures.update'] },
+
+  { route: '/api/batches/[batchId]/financial', method: 'GET', oldRoles: [...OAS], permissions: ['fees.read'], note: 'Was already migrated in the working tree by another agent before this pass; verified equal to old OAS gate.' },
+
+  { route: '/api/salary', method: 'GET', oldRoles: [...OAS], permissions: ['salary.read'], note: 'Previously service-gated only (assertFinance); route gate added, service gate now can().' },
+  { route: '/api/salary/generate', method: 'POST', oldRoles: [...OA], permissions: ['salary.generate'] },
+  { route: '/api/salary/periods/[periodId]/finalize', method: 'POST', oldRoles: [...OA], permissions: ['salary.finalize'] },
+  { route: '/api/salary/[salaryPayableId]', method: 'GET', oldRoles: [...OAS], permissions: ['salary.read'] },
+  { route: '/api/salary/[salaryPayableId]/cancel', method: 'POST', oldRoles: [...OA], permissions: ['salary.cancel'] },
+  { route: '/api/salary/[salaryPayableId]/payment', method: 'POST', oldRoles: [...OAS], permissions: ['salary.pay'], note: 'STAFF can pay today (assertFinance); salary.pay default AS-.' },
+
+  { route: '/api/teachers/[teacherId]/compensation', method: 'GET', oldRoles: ['OWNER', 'ADMIN', 'TEACHER'], permissions: ['compensation.read'], selfAllowedRoles: ['TEACHER'], note: 'No route-level gate on purpose: service does TEACHER-self OR can(compensation.read). TEACHER may read only their OWN rules (else FORBIDDEN_TEACHER_SCOPE); non-teachers need compensation.read (default A--, STAFF denied).' },
+  { route: '/api/teachers/[teacherId]/compensation', method: 'POST', oldRoles: [...OA], permissions: ['compensation.manage'] },
+  { route: '/api/teachers/[teacherId]/compensation/[compensationId]', method: 'PUT', oldRoles: [...OA], permissions: ['compensation.manage'] },
+  { route: '/api/teachers/[teacherId]/compensation/[compensationId]', method: 'DELETE', oldRoles: [...OA], permissions: ['compensation.manage'] },
+  { route: '/api/teachers/[teacherId]/salary-history', method: 'GET', oldRoles: ['OWNER', 'ADMIN', 'STAFF', 'TEACHER'], permissions: ['salary.read'], selfAllowedRoles: ['TEACHER'], note: 'No route-level gate on purpose: service does TEACHER-self OR can(salary.read). TEACHER own record only (else FORBIDDEN_TEACHER_SCOPE); others need salary.read (default AS-).' },
+];

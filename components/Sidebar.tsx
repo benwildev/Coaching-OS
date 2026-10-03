@@ -5,28 +5,7 @@ import { usePathname } from 'next/navigation';
 import Icon from './Icon';
 import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
-
-const NAV_ITEMS: { id: string; icon: string; href: string; staffOnly?: boolean; feature?: string }[] = [
-  { id: 'dashboard', icon: 'chart', href: '/dashboard' },
-  { id: 'students', icon: 'user', href: '/students' },
-  { id: 'courses', icon: 'book', href: '/courses' },
-  { id: 'batches', icon: 'layers', href: '/batches' },
-  { id: 'routine', icon: 'calendar', href: '/routine' },
-  { id: 'attendance', icon: 'check', href: '/attendance' },
-  { id: 'fees', icon: 'wallet', href: '/fees' },
-  { id: 'salary', icon: 'banknote', href: '/salary', staffOnly: true },
-  { id: 'exams', icon: 'award', href: '/exams' },
-  { id: 'questions', icon: 'target', href: '/questions' },
-  { id: 'questionPapers', icon: 'file', href: '/question-papers' },
-  { id: 'materials', icon: 'book', href: '/materials' },
-  { id: 'homework', icon: 'calcheck', href: '/homework', feature: 'HOMEWORK' },
-  { id: 'teachers', icon: 'grad', href: '/teachers' },
-  { id: 'notifications', icon: 'bell', href: '/notifications' },
-  { id: 'notices', icon: 'pin', href: '/notices' },
-  { id: 'communication', icon: 'message', href: '/communication', staffOnly: true },
-  { id: 'reports', icon: 'doc', href: '/reports', feature: 'ADVANCED_REPORTS' },
-  { id: 'settings', icon: 'sliders', href: '/settings' },
-];
+import { filterNavigation, isNavActive, type NavItem } from '@/lib/navigation';
 
 function NavLink({
   label,
@@ -62,6 +41,56 @@ function NavLink({
   );
 }
 
+/** One navigation entry (and its already-filtered children, if any). */
+function NavTree({
+  item,
+  pathname,
+  dict,
+  collapsed,
+  onNavigate,
+  accentColor,
+  primaryColor,
+  depth = 0,
+}: {
+  item: NavItem;
+  pathname: string;
+  dict: Record<string, string>;
+  collapsed: boolean;
+  onNavigate?: () => void;
+  accentColor: string;
+  primaryColor: string;
+  depth?: number;
+}) {
+  return (
+    <>
+      <NavLink
+        label={dict[item.id] || item.id}
+        icon={item.icon}
+        href={item.href}
+        collapsed={collapsed}
+        active={isNavActive(pathname, item.href)}
+        onClick={onNavigate}
+        accentColor={accentColor}
+        primaryColor={primaryColor}
+      />
+      {item.children?.map((child) => (
+        <div key={child.id} className={collapsed ? '' : 'pl-3'}>
+          <NavTree
+            item={child}
+            pathname={pathname}
+            dict={dict}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+            accentColor={accentColor}
+            primaryColor={primaryColor}
+            depth={depth + 1}
+          />
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function SidebarContent({
   collapsed,
   onNavigate,
@@ -72,8 +101,10 @@ export function SidebarContent({
   onToggleCollapse?: () => void;
 }) {
   const pathname = usePathname();
-  const { lang, currentCenter, currentUser } = useApp();
+  const { lang, currentCenter, currentUser, authStatus } = useApp();
   const dict = DICTIONARY[lang].nav;
+  // Single permission-driven navigation (shared with the mobile bottom bar): nothing until the user is known.
+  const navItems = filterNavigation(currentUser, currentCenter?.features);
 
   const centerName =
     (lang === 'bn' && currentCenter?.banglaName) ||
@@ -84,12 +115,13 @@ export function SidebarContent({
     currentCenter?.branches?.[0]?.name ||
     (currentCenter?.district ? `${currentCenter.district} Campus` : 'Main Campus');
 
+  // No role/name fallback: a loading or logged-out user must never look like anyone (least of all the Owner).
   const userDisplayName =
     (lang === 'bn' && currentUser?.banglaName) ||
     currentUser?.name ||
-    'Administrator';
+    '';
 
-  const userRole = currentUser?.role || 'OWNER';
+  const userRole = currentUser?.role ?? '';
 
   const primaryColor = currentCenter?.branding?.primaryColor || '#063b78';
   const secondaryColor = currentCenter?.branding?.secondaryColor || '#001d4d';
@@ -136,26 +168,22 @@ export function SidebarContent({
 
       {/* Navigation List */}
       <nav className="flex flex-col gap-1 overflow-y-auto scroll">
-        {NAV_ITEMS.filter((n) => (!n.staffOnly || userRole !== 'TEACHER') && !(n.feature && currentCenter?.features?.[n.feature] === false)).map((n) => {
-          const label = (dict as any)[n.id] || n.id;
-          const isActive =
-            pathname === n.href ||
-            pathname.startsWith(`${n.href}/`) ||
-            (n.id === 'dashboard' && pathname === '/');
-          return (
-            <NavLink
-              key={n.id}
-              label={label}
-              icon={n.icon}
-              href={n.href}
-              collapsed={collapsed}
-              active={isActive}
-              onClick={onNavigate}
-              accentColor={accentColor}
-              primaryColor={primaryColor}
-            />
-          );
-        })}
+        {authStatus === 'loading' &&
+          [0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-10 rounded-xl bg-white/10 animate-pulse" aria-hidden />
+          ))}
+        {navItems.map((n) => (
+          <NavTree
+            key={n.id}
+            item={n}
+            pathname={pathname}
+            dict={dict as Record<string, string>}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+            accentColor={accentColor}
+            primaryColor={primaryColor}
+          />
+        ))}
       </nav>
       <div className="mt-auto pt-2 flex flex-col gap-2 border-t border-white/10">
 

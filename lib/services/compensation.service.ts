@@ -2,6 +2,7 @@ import prisma from '@/lib/db';
 import type { Prisma } from '@prisma/client';
 import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
 import { getCurrentDhakaDateString, toDateOnly } from '@/lib/schedule';
+import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
 import type { CompensationCreateInput, CompensationUpdateInput, CompensationType } from '@/lib/validations/salary';
 
@@ -44,7 +45,7 @@ export function rangesOverlap(aFrom: string, aTo: string | null, bFrom: string, 
 }
 
 function assertManager(user: SessionUser) {
-  if (user.role !== 'OWNER' && user.role !== 'ADMIN') {
+  if (!can(user, 'compensation.manage')) {
     throw new Error('COMPENSATION_ACCESS_DENIED: only Owner or Admin can manage teacher compensation');
   }
 }
@@ -137,7 +138,7 @@ export async function listTeacherCompensation(coachingCenterId: string, user: Se
 
   if (user.role === 'TEACHER') {
     if (teacher.userId !== user.userId) throw new Error('FORBIDDEN_TEACHER_SCOPE');
-  } else if (user.role === 'OWNER' || user.role === 'ADMIN') {
+  } else if (can(user, 'compensation.read')) {
     if (teacher.branchId) assertBranchAccess(user, teacher.branchId);
   } else {
     throw new Error('COMPENSATION_ACCESS_DENIED: not allowed to view teacher compensation');
@@ -236,7 +237,7 @@ export async function createCompensation(
       },
       include: compensationInclude,
     });
-  });
+  }, { timeout: 20000, maxWait: 10000 });
 
   await recordAuditLog({
     coachingCenterId,

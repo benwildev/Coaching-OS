@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { getPortalAccountStatus, staffProvisionPortalAccount } from '@/lib/services/portal-auth.service';
 import { apiErrorResponse } from '@/lib/api-error';
 
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('portal_accounts.manage');
     const sp = new URL(request.url).searchParams;
     const studentId = sp.get('studentId') || undefined;
     const guardianId = sp.get('guardianId') || undefined;
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('portal_accounts.manage');
     const body = await request.json().catch(() => null);
     const studentId: string | undefined = body?.studentId || undefined;
     const guardianId: string | undefined = body?.guardianId || undefined;

@@ -44,7 +44,7 @@ const EMPTY_FILTERS = {
 
 export default function QuestionBankPage() {
   const router = useRouter();
-  const { lang, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const t = DICTIONARY[lang];
   const qb = t.questionBank;
   const c = t.common;
@@ -135,10 +135,12 @@ export default function QuestionBankPage() {
           <Icon name="file" size={16} />
           {t.nav.questionPapers}
         </Link>
-        <Link href="/questions/new" className="primary">
-          <Icon name="plus" size={16} />
-          {qb.newQuestion}
-        </Link>
+        {can('questions.create') && (
+          <Link href="/questions/new" className="primary">
+            <Icon name="plus" size={16} />
+            {qb.newQuestion}
+          </Link>
+        )}
       </PageHeader>
 
       {stats && stats.total > 0 && (
@@ -217,7 +219,12 @@ export default function QuestionBankPage() {
           hasFilters ? (
             <EmptyState message={qb.noMatch} icon="search" />
           ) : (
-            <EmptyState message={qb.empty} actionHref="/questions/new" actionLabel={qb.firstQuestion} icon="target" />
+            <EmptyState
+              message={qb.empty}
+              actionHref={can('questions.create') ? '/questions/new' : undefined}
+              actionLabel={qb.firstQuestion}
+              icon="target"
+            />
           )
         ) : (
           <>
@@ -273,9 +280,11 @@ export default function QuestionBankPage() {
                               <Icon name="sliders" size={16} />
                             </Link>
                           )}
-                          <button type="button" className="ibtn" title={qb.duplicate} aria-label={qb.duplicate} onClick={() => duplicate(q.id)}>
-                            <Icon name="copy" size={16} />
-                          </button>
+                          {can('questions.create') && (
+                            <button type="button" className="ibtn" title={qb.duplicate} aria-label={qb.duplicate} onClick={() => duplicate(q.id)}>
+                              <Icon name="copy" size={16} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

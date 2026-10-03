@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getResultsList, getTeacherResultAccessWhere } from '@/lib/services/exam-result.service';
 import { resultFilterSchema } from '@/lib/validations/result';
@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
+    await requirePermission('results.read');
     const { searchParams } = new URL(request.url);
 
     const queryObj: Record<string, string> = {};

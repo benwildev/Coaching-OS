@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { transitionExamStatus } from '@/lib/services/exam.service';
 import { EXAM_STATUS } from '@/lib/validations/exam';
@@ -12,7 +12,7 @@ export async function POST(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('exams.cancel');
     const { examId } = await params;
 
     let reason: string | undefined;
@@ -28,7 +28,7 @@ export async function POST(
       examId,
       EXAM_STATUS.CANCELLED,
       user.userId,
-      user.role,
+      user,
       reason
     );
 

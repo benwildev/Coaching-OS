@@ -45,10 +45,7 @@ export default function SuperAdminShell({ children }: { children: React.ReactNod
   const [admin, setAdmin] = useState<{ name: string; email: string } | null>(null);
   const [checked, setChecked] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const isLogin = pathname === '/super-admin/login';
-
   useEffect(() => {
-    if (isLogin) return;
     fetch('/api/super-admin/auth/me')
       .then((r) => r.json())
       .then((d) => {
@@ -57,12 +54,11 @@ export default function SuperAdminShell({ children }: { children: React.ReactNod
       })
       .catch(() => router.replace('/login'))
       .finally(() => setChecked(true));
-  }, [isLogin, router]);
+  }, [router]);
 
   // Close sidebar on route change
   useEffect(() => { setSidebarOpen(false); }, [pathname]);
 
-  if (isLogin) return <>{children}</>;
   if (!checked || !admin) return <div className="min-h-screen bg-[#f5f8fc]" />;
 
   const nav = [

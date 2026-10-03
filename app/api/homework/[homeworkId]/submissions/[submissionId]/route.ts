@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { resolveHomeworkScope, reviewSubmission } from '@/lib/services/homework.service';
 import { reviewSubmissionSchema } from '@/lib/validations/homework';
@@ -12,6 +12,7 @@ type Ctx = { params: Promise<{ homeworkId: string; submissionId: string }> };
 export async function PATCH(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('homework.update');
     await requireFeature(coachingCenterId, 'HOMEWORK');
     const { homeworkId, submissionId } = await params;
     const body = await request.json().catch(() => null);

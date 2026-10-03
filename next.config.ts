@@ -52,6 +52,11 @@ const nextConfig: NextConfig = {
         destination: "/login",
         permanent: false,
       },
+      {
+        source: "/portal/forgot-password",
+        destination: "/forgot-password",
+        permanent: false,
+      },
     ];
   },
   async headers() {

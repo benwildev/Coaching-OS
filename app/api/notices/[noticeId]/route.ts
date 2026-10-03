@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getNoticeById, resolveNoticeScope, updateNotice } from '@/lib/services/notice.service';
 import { updateNoticeSchema } from '@/lib/validations/notice';
@@ -11,6 +11,7 @@ type Ctx = { params: Promise<{ noticeId: string }> };
 export async function GET(_request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('notices.read');
     const { noticeId } = await params;
     const scope = resolveNoticeScope(coachingCenterId, user);
     const notice = await getNoticeById(scope, noticeId);
@@ -23,6 +24,7 @@ export async function GET(_request: Request, { params }: Ctx) {
 export async function PUT(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('notices.update');
     const { noticeId } = await params;
     const body = await request.json().catch(() => null);
     const parsed = updateNoticeSchema.safeParse(body);

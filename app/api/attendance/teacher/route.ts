@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getTeachersDailyAttendance, recordTeacherBulkAttendance } from '@/lib/services/attendance.service';
 import { teacherBulkAttendanceSchema } from '@/lib/validations/attendance';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('teacher_attendance.read');
 
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date') || undefined;
@@ -31,7 +31,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('teacher_attendance.create');
+
+    if (user.role === 'TEACHER') {
+      throw new Error('FORBIDDEN_TEACHER_SCOPE');
+    }
 
     const body = await request.json();
     const validated = teacherBulkAttendanceSchema.safeParse(body);

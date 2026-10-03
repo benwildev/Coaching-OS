@@ -2,6 +2,7 @@ import prisma from '@/lib/db';
 import { hashPassword } from '@/lib/auth/password';
 import { recordAuditLog } from './audit.service';
 import { seedStandardSubjectsForCenter } from './academic.service';
+import { initializeTenantPermissions } from './permission.service';
 import type { SetupWizardInput } from '@/lib/validations/setup';
 
 export async function isSetupCompleted(): Promise<boolean> {
@@ -163,6 +164,10 @@ export async function completeInitialSetup(input: SetupWizardInput, options: { e
         },
       ],
     });
+
+    // C2. Phase 14.1: sync the permission catalog and seed this tenant's
+    // ADMIN/STAFF/TEACHER default permissions (OWNER is unrestricted, no rows).
+    await initializeTenantPermissions(tx, center.id);
 
     // D. Create Owner User
     const owner = await tx.user.create({

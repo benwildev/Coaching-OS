@@ -1,8 +1,11 @@
 import prisma from '@/lib/db';
 import type { RoleCode } from '@prisma/client';
-import { resolveEffectiveBranchId, type SessionUser } from '@/lib/auth/session';
+import { isBranchScoped, resolveEffectiveBranchId, type SessionUser } from '@/lib/auth/session';
+import { can, type PermissionCode } from '@/lib/auth/permissions';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
 import { getTeacherAuthorizedSubjectIds } from '@/lib/services/exam-result.service';
+import { getCurrentDhakaDateOnly } from '@/lib/schedule';
+import { startOfNextDay } from '@/lib/auth/teacher-scope';
 import type { ReportFilters } from './filters';
 
 /**
@@ -19,20 +22,21 @@ export type ReportCategory = 'students' | 'attendance' | 'finance' | 'exams' | '
 
 export const REPORT_CATEGORIES: ReportCategory[] = ['students', 'attendance', 'finance', 'exams', 'teachers', 'batches', 'communications'];
 
-// Finance mirrors the Phase 5 fee read routes (OWNER/ADMIN/STAFF);
-// communications mirrors /api/communication/logs (OWNER/ADMIN/STAFF).
-const CATEGORY_ROLES: Record<ReportCategory, RoleCode[]> = {
-  students: ['OWNER', 'ADMIN', 'STAFF', 'TEACHER'],
-  attendance: ['OWNER', 'ADMIN', 'STAFF', 'TEACHER'],
-  finance: ['OWNER', 'ADMIN', 'STAFF'],
-  exams: ['OWNER', 'ADMIN', 'STAFF', 'TEACHER'],
-  teachers: ['OWNER', 'ADMIN', 'STAFF', 'TEACHER'],
-  batches: ['OWNER', 'ADMIN', 'STAFF', 'TEACHER'],
-  communications: ['OWNER', 'ADMIN', 'STAFF'],
+// Phase 14.2: category access is a permission, not a role list. Default grants keep
+// finance and communications away from TEACHER, exactly as the old role lists did.
+// (The report category key is 'communications'; the permission is reports.communication.read.)
+export const CATEGORY_PERMISSION: Record<ReportCategory, PermissionCode> = {
+  students: 'reports.students.read',
+  attendance: 'reports.attendance.read',
+  finance: 'reports.finance.read',
+  exams: 'reports.exams.read',
+  teachers: 'reports.teachers.read',
+  batches: 'reports.batches.read',
+  communications: 'reports.communication.read',
 };
 
-export function canAccessCategory(role: RoleCode, category: ReportCategory): boolean {
-  return CATEGORY_ROLES[category].includes(role);
+export function canAccessCategory(user: SessionUser, category: ReportCategory): boolean {
+  return can(user, CATEGORY_PERMISSION[category]);
 }
 
 /** Cross-branch financial comparison: center-wide roles only. */
@@ -41,8 +45,8 @@ export function canCompareBranches(role: RoleCode): boolean {
 }
 
 /** Fee figures inside non-finance reports (e.g. batch report). */
-export function canViewFinance(role: RoleCode): boolean {
-  return canAccessCategory(role, 'finance');
+export function canViewFinance(user: SessionUser): boolean {
+  return canAccessCategory(user, 'finance');
 }
 
 /** Unpublished ("internal") result data: never for TEACHER in reports. */
@@ -71,9 +75,21 @@ export interface ReportScope {
 export async function resolveTeacherScope(coachingCenterId: string, user: SessionUser): Promise<TeacherScope> {
   const teacher = await getTeacherByUserId(coachingCenterId, user.userId);
   if (!teacher) return { teacherId: null, batchIds: [], subjectIds: [], pairs: [] };
+  const refDate = getCurrentDhakaDateOnly();
+  const nextDay = startOfNextDay(refDate);
+
   const [assignments, subjectIds] = await Promise.all([
     prisma.batchTeacherAssignment.findMany({
-      where: { coachingCenterId, teacherId: teacher.id, status: 'ACTIVE' },
+      where: {
+        coachingCenterId,
+        teacherId: teacher.id,
+        status: 'ACTIVE',
+        startDate: { lt: nextDay },
+        OR: [
+          { endDate: null },
+          { endDate: { gte: refDate } },
+        ],
+      },
       select: { batchId: true, subjectId: true },
     }),
     getTeacherAuthorizedSubjectIds(coachingCenterId, user),
@@ -92,9 +108,9 @@ export async function resolveReportScope(
   category: ReportCategory,
   filters: Pick<ReportFilters, 'branchId' | 'batchId' | 'subjectId' | 'teacherId'>
 ): Promise<ReportScope> {
-  if (!canAccessCategory(user.role, category)) throw new Error('FORBIDDEN_REPORT');
+  if (!canAccessCategory(user, category)) throw new Error('FORBIDDEN_REPORT');
 
-  const branchLocked = user.role !== 'OWNER' && user.role !== 'ADMIN' && !!user.branchId;
+  const branchLocked = isBranchScoped(user);
   const branchId = resolveEffectiveBranchId(user, filters.branchId);
   if (branchLocked && filters.branchId && filters.branchId !== user.branchId) {
     throw new Error('FORBIDDEN_BRANCH');

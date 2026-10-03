@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { updateClassSchedule, deleteClassSchedule } from '@/lib/services/schedule.service';
 import { classScheduleUpdateSchema } from '@/lib/validations/schedule';
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export async function PUT(request: Request, props: { params: Promise<{ scheduleId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('routine.manage');
 
     const { scheduleId } = await props.params;
 
@@ -49,7 +49,7 @@ export async function PUT(request: Request, props: { params: Promise<{ scheduleI
 export async function DELETE(request: Request, props: { params: Promise<{ scheduleId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('routine.manage');
 
     const { scheduleId } = await props.params;
 

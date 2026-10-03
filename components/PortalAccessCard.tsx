@@ -14,9 +14,9 @@ interface AccountStatus {
 
 /** Minimal staff-side portal-account control — embedded on Student/Guardian detail views (AGENTS.md Phase 9 §23). */
 export default function PortalAccessCard({ studentId, guardianId, compact }: { studentId?: string; guardianId?: string; compact?: boolean }) {
-  const { lang, currentUser, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const t = DICTIONARY[lang].portalAccess;
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canManage = can('portal_accounts.manage');
 
   const [account, setAccount] = useState<AccountStatus | null>(null);
   const [loading, setLoading] = useState(true);

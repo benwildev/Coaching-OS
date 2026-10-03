@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { assignTeacherToBatches } from '@/lib/services/teacher.service';
 import { teacherAssignmentCreateSchema } from '@/lib/validations/teacher';
@@ -18,7 +18,7 @@ const payloadSchema = z.union([
 export async function POST(request: Request, props: { params: Promise<{ teacherId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('teachers.assignments');
 
     const { teacherId } = await props.params;
     const body = await request.json();

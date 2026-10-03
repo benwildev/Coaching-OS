@@ -32,11 +32,11 @@ const nextKey = () => `row-${++rowCounter}`;
  * fees, invoices or payments (the server enforces that; the notice below says it).
  */
 export default function CoursePricingPanel({ courseId }: { courseId: string }) {
-  const { lang, showToast, currentUser } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
   const t = dict.coursePricing;
   const money = (n: number) => formatBDTExact(n, lang);
-  const canEdit = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canEdit = can('courses.pricing.update');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

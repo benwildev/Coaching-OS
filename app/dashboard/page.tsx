@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
+import ForbiddenState from '@/components/ForbiddenState';
 import { isSetupCompleted } from '@/lib/services/tenant.service';
 import { DASHBOARD_RANGES, getDashboardData, type DashboardRange } from '@/lib/services/dashboard.service';
 import { getTeacherDashboardData } from '@/lib/services/teacher.service';
@@ -45,6 +47,8 @@ export default async function DashboardPage({
   if (!(await isSetupCompleted())) redirect('/setup');
   const session = await getSession();
   if (!session) redirect('/login');
+  // Phase 14.2: decide access before any dashboard data is queried.
+  if (!can(session, 'dashboard.read')) return <ForbiddenState />;
 
   const now0 = new Date();
   const dhakaHour0 = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Asia/Dhaka' }).format(now0));
@@ -77,7 +81,7 @@ export default async function DashboardPage({
   const range = (DASHBOARD_RANGES as readonly number[]).includes(rawRange) ? (rawRange as DashboardRange) : 3;
   const classId = typeof sp.class === 'string' ? sp.class : 'all';
 
-  const data = await getDashboardData(session.coachingCenterId, { classId, range }, session.role);
+  const data = await getDashboardData(session.coachingCenterId, { classId, range }, session);
   const k = data.kpis;
   const now = data.generatedAt;
   // Phase 10.4: getDashboardData already zeroes/empties every financial
@@ -127,7 +131,7 @@ export default async function DashboardPage({
     // KPIs — omitted entirely (not shown as zero) for a role that must not
     // see them (Phase 10.4 §15/§16).
     ...(financeVisible ? [{
-      id: 'fees', label: 'Fees collected', tone: 'cyan' as const, icon: ic('wallet'),
+      id: 'fees', label: 'Fees collected (gross)', tone: 'cyan' as const, icon: ic('wallet'),
       value: tkCompact(k.collected.value), num: k.collected.value, delta: deltaText(k.collected.delta),
       up: (k.collected.delta ?? 0) >= 0, good: (k.collected.delta ?? 0) >= 0, neutral: k.collected.delta == null, sub: cmp,
       progress: collectedPct ?? undefined,

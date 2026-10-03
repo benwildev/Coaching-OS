@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { endCompensation, updateCompensation } from '@/lib/services/compensation.service';
 import { compensationEndSchema, compensationUpdateSchema } from '@/lib/validations/salary';
@@ -11,6 +11,7 @@ type Params = { params: Promise<{ teacherId: string; compensationId: string }> }
 export async function PUT(request: Request, props: Params) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('compensation.manage');
     const { teacherId, compensationId } = await props.params;
     const body = await request.json().catch(() => null);
     const parsed = compensationUpdateSchema.safeParse(body);
@@ -26,6 +27,7 @@ export async function PUT(request: Request, props: Params) {
 export async function DELETE(request: Request, props: Params) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('compensation.manage');
     const { teacherId, compensationId } = await props.params;
     const body = await request.json().catch(() => ({}));
     const parsed = compensationEndSchema.safeParse(body ?? {});

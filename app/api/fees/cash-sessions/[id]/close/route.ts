@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { closeCashSession } from '@/lib/services/cash-session.service';
 import { cashSessionCloseSchema } from '@/lib/validations/cash-session';
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function POST(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.cash_session.manage');
     const { id } = await params;
 
     const existing = await prisma.cashSession.findFirst({ where: { id, coachingCenterId }, select: { branchId: true } });

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getRoomById, updateRoom } from '@/lib/services/room.service';
 import { roomUpdateSchema } from '@/lib/validations/room';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request, props: { params: Promise<{ roomId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('routine.read');
     const { roomId } = await props.params;
     const room = await getRoomById(coachingCenterId, roomId);
     if (!room) return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
@@ -23,7 +24,7 @@ export async function GET(request: Request, props: { params: Promise<{ roomId: s
 export async function PUT(request: Request, props: { params: Promise<{ roomId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('routine.manage');
 
     const { roomId } = await props.params;
 

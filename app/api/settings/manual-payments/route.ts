@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import {
   getManualPaymentInstructions,
@@ -27,7 +27,7 @@ const manualInstructionSchema = z.object({
 export async function GET() {
   try {
     const { coachingCenterId } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.read');
 
     const instructions = await getManualPaymentInstructions(coachingCenterId);
     return NextResponse.json({ success: true, instructions });
@@ -39,7 +39,7 @@ export async function GET() {
 export async function PUT(req: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.payment_gateways.update');
 
     const body = await req.json();
     const parsed = manualInstructionSchema.safeParse(body);

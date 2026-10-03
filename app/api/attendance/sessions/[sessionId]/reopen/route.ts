@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { reopenAttendanceSession } from '@/lib/services/attendance.service';
 import { reopenSessionSchema } from '@/lib/validations/attendance';
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, props: { params: Promise<{ sessionId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('attendance.reopen');
 
     const { sessionId } = await props.params;
     const body = await request.json();

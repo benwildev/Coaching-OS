@@ -47,11 +47,16 @@ export default function CourseDetailPage() {
   const params = useParams();
   const router = useRouter();
   const courseId = params.courseId as string;
-  const { lang, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
+
+  const canUpdate = can('courses.update');
+  const canDelete = can('courses.delete');
+  const canViewFees = can('courses.pricing.update') || can('fees.read');
 
   const [course, setCourse] = useState<CourseDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
   const [saving, setSaving] = useState(false);
   const [availableSubjects, setAvailableSubjects] = useState<SubjectOption[]>([]);
 
@@ -73,6 +78,10 @@ export default function CourseDetailPage() {
         fetch(`/api/courses/${courseId}`),
         fetch('/api/batches/options'),
       ]);
+      if (courseRes.status === 403) {
+        setForbidden(true);
+        return;
+      }
       if (courseRes.ok) {
         const data = await courseRes.json();
         if (data.success) {
@@ -116,6 +125,7 @@ export default function CourseDetailPage() {
   }, [load]);
 
   const saveDetails = async () => {
+    if (!canUpdate) return;
     if (editForm.name && hasBangla(editForm.name)) {
       showToast(lang === 'bn' ? 'কোর্সের নাম ইংরেজিতে লিখুন' : 'Course name must be in English');
       return;
@@ -147,6 +157,7 @@ export default function CourseDetailPage() {
   };
 
   const saveSubjects = async () => {
+    if (!canUpdate) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/courses/${courseId}/subjects`, {
@@ -175,6 +186,7 @@ export default function CourseDetailPage() {
   };
 
   const archiveCourse = async () => {
+    if (!canDelete) return;
     const res = await fetch(`/api/courses/${courseId}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.success) {
@@ -193,6 +205,31 @@ export default function CourseDetailPage() {
     );
   }
 
+  if (forbidden) {
+    return (
+      <div className="max-w-[800px] mx-auto py-12 text-center">
+        <div className="p-8 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs flex flex-col items-center">
+          <Icon name="shield" size={32} className="text-rose-500 mb-3" />
+          <h2 className="text-xl font-bold text-[#092f63]">
+            {lang === 'bn' ? 'অনুমতি নেই (Forbidden)' : 'Access Forbidden'}
+          </h2>
+          <p className="text-[13.5px] text-[#64748b] mt-1 mb-5">
+            {lang === 'bn'
+              ? 'এই কোর্সের তথ্য দেখার আপনার কোনো অনুমতি নেই।'
+              : 'You do not have authorization to view this course.'}
+          </p>
+          <Link
+            href="/courses"
+            className="inline-flex items-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[13.5px] font-semibold text-white"
+          >
+            <Icon name="chevleft" size={15} />
+            <span>{lang === 'bn' ? 'কোর্স তালিকায় ফিরুন' : 'Back to Courses'}</span>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!course) {
     return (
       <div className="max-w-[1000px] mx-auto text-center py-16">
@@ -206,6 +243,14 @@ export default function CourseDetailPage() {
 
   const unusedSubjects = availableSubjects.filter((s) => !subjectDraft.some((d) => d.subjectId === s.id));
 
+  const tabs: Array<{ id: 'overview' | 'students' | 'batches' | 'schedule' | 'fees'; text: string }> = [
+    { id: 'overview', text: lang === 'bn' ? 'সারসংক্ষেপ' : 'Overview' },
+    { id: 'students', text: lang === 'bn' ? 'শিক্ষার্থীবৃন্দ' : 'Students' },
+    { id: 'batches', text: dict.batches.title },
+    { id: 'schedule', text: lang === 'bn' ? 'ক্লাস রুটিন' : 'Schedule' },
+    ...(canViewFees ? [{ id: 'fees' as const, text: dict.coursePricing.tab }] : []),
+  ];
+
   return (
     <div className="max-w-[1000px] mx-auto flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
@@ -217,13 +262,7 @@ export default function CourseDetailPage() {
       </div>
 
       <div role="tablist" className="flex gap-1 border-b border-[#dce5f0]">
-        {([
-          ['overview', lang === 'bn' ? 'সারসংক্ষেপ' : 'Overview'],
-          ['students', lang === 'bn' ? 'শিক্ষার্থীবৃন্দ' : 'Students'],
-          ['batches', dict.batches.title],
-          ['schedule', lang === 'bn' ? 'ক্লাস রুটিন' : 'Schedule'],
-          ['fees', dict.coursePricing.tab],
-        ] as const).map(([id, text]) => (
+        {tabs.map(({ id, text }) => (
           <button
             key={id}
             type="button"
@@ -239,7 +278,7 @@ export default function CourseDetailPage() {
         ))}
       </div>
 
-      {tab === 'fees' && <CoursePricingPanel courseId={courseId} />}
+      {tab === 'fees' && canViewFees && <CoursePricingPanel courseId={courseId} />}
       {tab === 'students' && <CourseStudentsTab courseId={courseId} />}
       {tab === 'schedule' && <CourseScheduleTab courseId={courseId} />}
 
@@ -247,7 +286,7 @@ export default function CourseDetailPage() {
       <div className="card p-5 md:p-6 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[#063b78]">{dict.courses.title.replace(/s$/, '')} {lang === 'bn' ? 'তথ্য' : 'Details'}</h2>
-          {course.status !== 'ARCHIVED' && (
+          {canDelete && course.status !== 'ARCHIVED' && (
             <button type="button" onClick={archiveCourse} className="text-[12.5px] font-semibold text-rose-600 hover:underline">
               {dict.courses.archive}
             </button>
@@ -256,19 +295,19 @@ export default function CourseDetailPage() {
         <div className="grid md:grid-cols-2 gap-4">
           <div className="fld">
             <label>{dict.courses.name}</label>
-            <EnglishInput value={editForm.name} onChange={(val) => setEditForm({ ...editForm, name: val })} />
+            <EnglishInput disabled={!canUpdate} value={editForm.name} onChange={(val) => setEditForm({ ...editForm, name: val })} />
           </div>
           <div className="fld">
             <label>{dict.courses.banglaName}</label>
-            <BanglaInput value={editForm.banglaName || ''} onChange={(val) => setEditForm({ ...editForm, banglaName: val })} />
+            <BanglaInput disabled={!canUpdate} value={editForm.banglaName || ''} onChange={(val) => setEditForm({ ...editForm, banglaName: val })} />
           </div>
           <div className="fld">
             <label>{dict.courses.code}</label>
-            <input value={editForm.code} onChange={(e) => setEditForm({ ...editForm, code: e.target.value.toUpperCase() })} />
+            <input disabled={!canUpdate} value={editForm.code} onChange={(e) => setEditForm({ ...editForm, code: e.target.value.toUpperCase() })} />
           </div>
           <div className="fld">
             <label>{dict.courses.status}</label>
-            <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
+            <select disabled={!canUpdate} value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
               {COURSE_STATUSES.map((s) => (
                 <option key={s} value={s}>{(dict.courseStatus as any)[s]}</option>
               ))}
@@ -278,13 +317,14 @@ export default function CourseDetailPage() {
             <label>{dict.courses.duration}</label>
             <input
               type="number"
+              disabled={!canUpdate}
               value={editForm.durationMonths}
               onChange={(e) => setEditForm({ ...editForm, durationMonths: Number(e.target.value) })}
             />
           </div>
           <div className="fld md:col-span-2">
             <label>{dict.courses.description}</label>
-            <textarea rows={2} value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+            <textarea disabled={!canUpdate} rows={2} value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
           </div>
           <div className="md:col-span-2 flex items-center gap-2 text-[12.5px] text-[#64748b]">
             <span className="font-semibold text-[#092f63]">
@@ -299,11 +339,13 @@ export default function CourseDetailPage() {
               </>
             )}
           </div>
-          <div className="md:col-span-2 pt-2">
-            <button type="button" onClick={saveDetails} disabled={saving} className="primary">
-              {saving ? '…' : dict.courses.save}
-            </button>
-          </div>
+          {canUpdate && (
+            <div className="md:col-span-2 pt-2">
+              <button type="button" onClick={saveDetails} disabled={saving} className="primary">
+                {saving ? '…' : dict.courses.save}
+              </button>
+            </div>
+          )}
         </div>
       </div>
       )}
@@ -325,6 +367,7 @@ export default function CourseDetailPage() {
                   <label className="flex items-center gap-1.5 text-[12px] text-[#64748b]">
                     <input
                       type="checkbox"
+                      disabled={!canUpdate}
                       checked={s.isMandatory}
                       onChange={(e) => {
                         const next = [...subjectDraft];
@@ -336,6 +379,7 @@ export default function CourseDetailPage() {
                   </label>
                   <input
                     type="number"
+                    disabled={!canUpdate}
                     placeholder={dict.courses.totalMarks}
                     value={s.totalMarks}
                     onChange={(e) => {
@@ -343,15 +387,17 @@ export default function CourseDetailPage() {
                       next[idx] = { ...next[idx], totalMarks: e.target.value };
                       setSubjectDraft(next);
                     }}
-                    className="w-24 rounded-lg border border-[#dce5f0] px-2 py-1 text-[12.5px]"
+                    className="w-24 rounded-lg border border-[#dce5f0] px-2 py-1 text-[12.5px] disabled:bg-slate-50"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setSubjectDraft(subjectDraft.filter((_, i) => i !== idx))}
-                    className="text-rose-600 hover:text-rose-700"
-                  >
-                    <Icon name="x" size={16} />
-                  </button>
+                  {canUpdate && (
+                    <button
+                      type="button"
+                      onClick={() => setSubjectDraft(subjectDraft.filter((_, i) => i !== idx))}
+                      className="text-rose-600 hover:text-rose-700"
+                    >
+                      <Icon name="x" size={16} />
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -360,35 +406,39 @@ export default function CourseDetailPage() {
           <p className="text-[13px] text-[#94a3b8] italic">{dict.courses.noSubjects}</p>
         )}
 
-        <div className="flex items-center gap-2 mt-4">
-          <select
-            value={addSubjectId}
-            onChange={(e) => setAddSubjectId(e.target.value)}
-            className="grow rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[13px]"
-          >
-            <option value="">{lang === 'bn' ? 'বিষয় নির্বাচন করুন' : 'Select a subject'}</option>
-            {unusedSubjects.map((s) => (
-              <option key={s.id} value={s.id}>{lang === 'bn' && s.banglaName ? s.banglaName : s.name}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            disabled={!addSubjectId}
-            onClick={() => {
-              setSubjectDraft([...subjectDraft, { subjectId: addSubjectId, isMandatory: true, totalMarks: '' }]);
-              setAddSubjectId('');
-            }}
-            className="tb disabled:opacity-40"
-          >
-            {dict.courses.addSubject}
-          </button>
-        </div>
+        {canUpdate && (
+          <>
+            <div className="flex items-center gap-2 mt-4">
+              <select
+                value={addSubjectId}
+                onChange={(e) => setAddSubjectId(e.target.value)}
+                className="grow rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[13px]"
+              >
+                <option value="">{lang === 'bn' ? 'বিষয় নির্বাচন করুন' : 'Select a subject'}</option>
+                {unusedSubjects.map((s) => (
+                  <option key={s.id} value={s.id}>{lang === 'bn' && s.banglaName ? s.banglaName : s.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!addSubjectId}
+                onClick={() => {
+                  setSubjectDraft([...subjectDraft, { subjectId: addSubjectId, isMandatory: true, totalMarks: '' }]);
+                  setAddSubjectId('');
+                }}
+                className="tb disabled:opacity-40"
+              >
+                {dict.courses.addSubject}
+              </button>
+            </div>
 
-        <div className="pt-4">
-          <button type="button" onClick={saveSubjects} disabled={saving} className="primary">
-            {saving ? '…' : dict.courses.saveSubjects}
-          </button>
-        </div>
+            <div className="pt-4">
+              <button type="button" onClick={saveSubjects} disabled={saving} className="primary">
+                {saving ? '…' : dict.courses.saveSubjects}
+              </button>
+            </div>
+          </>
+        )}
       </div>
       )}
 

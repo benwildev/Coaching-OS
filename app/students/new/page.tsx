@@ -158,7 +158,7 @@ const courseIsPriced = (c: Pick<CoursePricingConfig, 'fee' | 'additionalFees'>) 
   c.fee > 0 || c.additionalFees.some((f) => f.isActive && f.isRequired);
 
 export default function NewStudentPage() {
-  const { lang, showToast, currentUser, currentCenter } = useApp();
+  const { lang, showToast, currentUser, currentCenter, can } = useApp();
   const dict = DICTIONARY[lang];
 
   const [step, setStep] = useState<number>(1);
@@ -372,7 +372,7 @@ export default function NewStudentPage() {
   const waiver = Number(form.waiverAmount) || 0;
   const totalAdjustments = discount + waiver;
 
-  const isOwner = currentUser?.role === 'OWNER';
+  const isOwner = can('fees.discount.approve');
   const effectivePayable = Math.max(0, originalFee - (isOwner ? totalAdjustments : 0));
   const requestedPayable = Math.max(0, originalFee - totalAdjustments);
 
@@ -631,7 +631,7 @@ export default function NewStudentPage() {
   };
 
   // Check if current user is teacher
-  if (currentUser?.role === 'TEACHER') {
+  if (currentUser && !can('students.create')) {
     return (
       <div className="max-w-[700px] mx-auto p-8 rounded-2xl bg-white border border-rose-200 text-center shadow-xs">
         <Icon name="lock" size={36} className="mx-auto text-rose-500 mb-3" />

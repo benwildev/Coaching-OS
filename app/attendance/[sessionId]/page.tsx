@@ -22,9 +22,9 @@ const STATUS_BUTTON_LABEL: Record<AttStatus, string> = { PRESENT: 'P', ABSENT: '
 export default function TakeAttendancePage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
-  const { lang, showToast, currentUser } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
-  const canReopen = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canReopen = can('attendance.reopen');
 
   const [session, setSession] = useState<any>(null);
   const [students, setStudents] = useState<StudentRow[]>([]);

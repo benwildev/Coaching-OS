@@ -17,8 +17,10 @@ export async function POST(request: Request) {
     // Phase 10.4: changing the password revokes every session for this
     // account, including this one's cookie — reissue it with the new
     // sessionVersion so the caller isn't logged out of their own device.
-    await setPortalSessionCookie(await createPortalSessionToken({ portalAccountId: session.portalAccountId, sessionVersion }));
-    return NextResponse.json({ success: true });
+    // The token is also returned for the mobile app, which uses Bearer auth.
+    const token = await createPortalSessionToken({ portalAccountId: session.portalAccountId, sessionVersion });
+    await setPortalSessionCookie(token);
+    return NextResponse.json({ success: true, token });
   } catch (error) {
     return apiErrorResponse(error, '/api/portal/auth/change-password POST');
   }

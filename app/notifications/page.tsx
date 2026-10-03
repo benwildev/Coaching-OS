@@ -18,8 +18,8 @@ interface NotificationRow {
 }
 
 export default function NotificationsPage() {
-  const { lang, currentUser } = useApp();
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const { lang, can } = useApp();
+  const canManage = can('settings.notification_policy.update');
   const t = DICTIONARY[lang];
   const n = t.notifications;
   const c = t.common;

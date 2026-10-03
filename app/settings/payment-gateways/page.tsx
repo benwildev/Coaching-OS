@@ -54,10 +54,10 @@ interface ManualSubmission {
 }
 
 export default function PaymentGatewaysSettingsPage() {
-  const { lang, currentUser, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const isBn = lang === 'bn';
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
-  const canReview = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN' || currentUser?.role === 'STAFF';
+  const canManage = can('settings.payment_gateways.update');
+  const canReview = can('settings.payment_gateways.read') || can('fees.read');
 
   const [activeTab, setActiveTab] = useState<Tab>('GATEWAYS');
   const [configs, setConfigs] = useState<GatewayConfig[]>([]);

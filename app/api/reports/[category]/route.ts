@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { parseReportFilters } from '@/lib/reports/filters';
 import { isReportCategory, runReport } from '@/lib/reports/run-report';
+import { CATEGORY_PERMISSION } from '@/lib/reports/access';
 import { requireFeature } from '@/lib/services/feature-access.service';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ cate
 
     const parsed = parseReportFilters(new URL(request.url).searchParams);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);
+    // Phase 14.2: per-category report permission (also re-checked in resolveReportScope).
+    await requirePermission(CATEGORY_PERMISSION[category]);
 
     const output = await runReport(user, category, parsed.data, {
       ipAddress: request.headers.get('x-forwarded-for'),

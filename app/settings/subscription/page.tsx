@@ -47,7 +47,7 @@ const LEVEL_STYLE: Record<UsageLevel, { bar: string; text: string }> = {
 };
 
 export default function SubscriptionPage() {
-  const { lang, currentUser } = useApp();
+  const { lang, currentUser, can } = useApp();
   const dict = DICTIONARY[lang].subscription;
   const so = DICTIONARY[lang].subOps;
   const [data, setData] = useState<SubscriptionView | null>(null);
@@ -77,7 +77,7 @@ export default function SubscriptionPage() {
     );
   }
 
-  if (forbidden || (currentUser && currentUser.role !== 'OWNER') || !data) {
+  if (forbidden || (currentUser && !can('settings.subscription.read')) || !data) {
     return <div className="max-w-[900px] mx-auto p-6 rounded-2xl bg-white border border-[#dce5f0] text-[14px] text-[#64748b]">{dict.ownerOnly}</div>;
   }
 

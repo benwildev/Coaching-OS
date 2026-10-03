@@ -1,10 +1,11 @@
 import prisma from '@/lib/db';
 import { Prisma } from '@prisma/client';
+import { isBranchScoped } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
 import { resolveAcademicContext } from './academic.service';
 import {
   assertCanUseSubject,
-  canManageQuestions,
   questionVisibilityWhere,
   type QuestionScope,
 } from './question.service';
@@ -26,13 +27,9 @@ type Tx = Prisma.TransactionClient;
 /** Marks are stored with 2 decimals; compare in hundredths to avoid float drift. */
 const cents = (n: number) => Math.round(n * 100);
 
-function isBranchScoped(scope: QuestionScope) {
-  return scope.user.role !== 'OWNER' && scope.user.role !== 'ADMIN' && !!scope.user.branchId;
-}
-
 function paperVisibilityWhere(scope: QuestionScope): Prisma.QuestionPaperWhereInput {
   const and: Prisma.QuestionPaperWhereInput[] = [{ coachingCenterId: scope.coachingCenterId }];
-  if (isBranchScoped(scope)) and.push({ OR: [{ branchId: scope.user.branchId }, { branchId: null }] });
+  if (isBranchScoped(scope.user)) and.push({ OR: [{ branchId: scope.user.branchId }, { branchId: null }] });
   if (scope.teacherSubjectIds) and.push({ subjectId: { in: scope.teacherSubjectIds } });
   return { AND: and };
 }
@@ -40,7 +37,7 @@ function paperVisibilityWhere(scope: QuestionScope): Prisma.QuestionPaperWhereIn
 function assertCanModifyPaper(scope: QuestionScope, p: { createdById: string | null; subjectId: string; branchId: string | null }) {
   const { user } = scope;
   if (user.role === 'OWNER' || user.role === 'ADMIN') return;
-  if (isBranchScoped(scope) && p.branchId && p.branchId !== user.branchId) throw new Error('QUESTION_PAPER_ACCESS_DENIED');
+  if (isBranchScoped(scope.user) && p.branchId && p.branchId !== user.branchId) throw new Error('QUESTION_PAPER_ACCESS_DENIED');
   if (user.role === 'STAFF') return;
   if (user.role === 'TEACHER') {
     assertCanUseSubject(scope, p.subjectId);
@@ -259,7 +256,7 @@ export async function getQuestionPaperById(scope: QuestionScope, paperId: string
 
 export async function createQuestionPaper(scope: QuestionScope, input: CreateQuestionPaperInput) {
   const { coachingCenterId, user } = scope;
-  if (!canManageQuestions(user)) throw new Error('QUESTION_PAPER_ACCESS_DENIED');
+  if (!can(user, 'question_papers.create')) throw new Error('QUESTION_PAPER_ACCESS_DENIED');
   assertCanUseSubject(scope, input.subjectId);
   const ctx = await resolveAcademicContext(coachingCenterId, input);
 
@@ -269,7 +266,7 @@ export async function createQuestionPaper(scope: QuestionScope, input: CreateQue
     const created = await tx.questionPaper.create({
       data: {
         coachingCenterId,
-        branchId: isBranchScoped(scope) ? user.branchId! : null,
+        branchId: isBranchScoped(scope.user) ? user.branchId! : null,
         academicSessionId: ctx.academicSessionId,
         academicProgramId: ctx.academicProgramId,
         academicClassId: ctx.academicClassId,

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { updateExamSubject, deleteExamSubject } from '@/lib/services/exam.service';
 import { updateExamSubjectSchema } from '@/lib/validations/exam';
 import { apiErrorResponse } from '@/lib/api-error';
@@ -12,7 +12,7 @@ export async function PUT(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('exams.update');
     const { examId, examSubjectId } = await params;
 
     const body = await request.json();
@@ -49,7 +49,7 @@ export async function DELETE(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('exams.update');
     const { examId, examSubjectId } = await params;
 
     await deleteExamSubject(coachingCenterId, user, examId, examSubjectId, user.userId);

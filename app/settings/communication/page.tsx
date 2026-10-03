@@ -59,11 +59,11 @@ type CommSettingsDict = DeepString<(typeof DICTIONARY)['en']['communicationSetti
 type CommonDict = DeepString<(typeof DICTIONARY)['en']['common']>;
 
 export default function CommunicationSettingsPage() {
-  const { lang, currentUser, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const t = DICTIONARY[lang];
   const cs = t.communicationSettings;
   const c = t.common;
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canManage = can('settings.communication.update');
 
   const [activeTab, setActiveTab] = useState<Tab>('SMS');
   const [channels, setChannels] = useState<ChannelStatus[] | null>(null);

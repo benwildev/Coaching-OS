@@ -2,6 +2,7 @@ import prisma from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { assertBranchAccess, resolveEffectiveBranchId, type SessionUser } from '@/lib/auth/session';
 import { getCurrentDhakaDateString, toDateOnly } from '@/lib/schedule';
+import { can, type PermissionCode } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
 import { scopeKey, ymd } from './compensation.service';
 import type { SalaryGenerateInput, SalaryPaymentInput, CompensationType } from '@/lib/validations/salary';
@@ -29,14 +30,11 @@ function n(value: Prisma.Decimal | number | null | undefined): number {
 const cents = (v: number) => Math.round(v * 100);
 const fromCents = (c: number) => c / 100;
 
-const FINANCE_ROLES = new Set(['OWNER', 'ADMIN', 'STAFF']);
-const MANAGER_ROLES = new Set(['OWNER', 'ADMIN']);
-
-function assertFinance(user: SessionUser) {
-  if (!FINANCE_ROLES.has(user.role)) throw new Error('SALARY_ACCESS_DENIED: only Owner, Admin or Staff can view salary');
+function assertFinance(user: SessionUser, code: PermissionCode) {
+  if (!can(user, code)) throw new Error('SALARY_ACCESS_DENIED: only Owner, Admin or Staff can view salary');
 }
-function assertManager(user: SessionUser) {
-  if (!MANAGER_ROLES.has(user.role)) throw new Error('SALARY_ACCESS_DENIED: only Owner or Admin can do this');
+function assertManager(user: SessionUser, code: PermissionCode) {
+  if (!can(user, code)) throw new Error('SALARY_ACCESS_DENIED: only Owner or Admin can do this');
 }
 
 export const TEACHER_SALARY_CATEGORY_CODE = 'TEACHER_SALARY';
@@ -200,7 +198,7 @@ async function resolveBranch(coachingCenterId: string, user: SessionUser, reques
 // ---------------------------------------------------------------------------
 
 export async function generateSalary(coachingCenterId: string, user: SessionUser, input: SalaryGenerateInput) {
-  assertManager(user);
+  assertManager(user, 'salary.generate');
   const { branch } = await resolveBranch(coachingCenterId, user, input.branchId);
   const { year, month } = input;
   const { start, end } = monthBounds(year, month);
@@ -375,7 +373,10 @@ export async function getSalaryOverview(
   user: SessionUser,
   params: { year: number; month: number; branchId?: string }
 ) {
-  assertFinance(user);
+  assertFinance(user, 'salary.read');
+  if (user.role === 'TEACHER') {
+    throw new Error('FORBIDDEN_TEACHER_SCOPE: salary overview is administrative');
+  }
   const { branch, branches } = await resolveBranch(coachingCenterId, user, params.branchId);
   const period = await prisma.salaryPeriod.findUnique({
     where: { coachingCenterId_branchId_year_month: { coachingCenterId, branchId: branch.id, year: params.year, month: params.month } },
@@ -424,7 +425,7 @@ export async function getSalaryOverview(
 }
 
 export async function getSalaryPayableDetail(coachingCenterId: string, user: SessionUser, payableId: string) {
-  assertFinance(user);
+  assertFinance(user, 'salary.read');
   const p = await prisma.salaryPayable.findFirst({
     where: { id: payableId, coachingCenterId },
     include: {
@@ -436,6 +437,16 @@ export async function getSalaryPayableDetail(coachingCenterId: string, user: Ses
   });
   if (!p) throw new Error('SALARY_PAYABLE_NOT_FOUND');
   assertBranchAccess(user, p.branchId);
+
+  if (user.role === 'TEACHER') {
+    const own = await prisma.teacher.findFirst({
+      where: { coachingCenterId, userId: user.userId },
+      select: { id: true },
+    });
+    if (!own || p.teacherId !== own.id) {
+      throw new Error('FORBIDDEN_TEACHER_SCOPE');
+    }
+  }
 
   const recorderIds = [...new Set(p.payments.map((x) => x.recordedById).filter((v): v is string => !!v))];
   const recorders = recorderIds.length
@@ -480,7 +491,7 @@ export async function listTeacherSalaryHistory(coachingCenterId: string, user: S
   if (user.role === 'TEACHER') {
     if (teacher.userId !== user.userId) throw new Error('FORBIDDEN_TEACHER_SCOPE');
   } else {
-    assertFinance(user);
+    assertFinance(user, 'salary.read');
   }
 
   const rows = await prisma.salaryPayable.findMany({
@@ -519,7 +530,7 @@ async function settlePeriodIfComplete(tx: Prisma.TransactionClient, salaryPeriod
 }
 
 export async function finalizeSalaryPeriod(coachingCenterId: string, user: SessionUser, periodId: string) {
-  assertManager(user);
+  assertManager(user, 'salary.finalize');
   const period = await prisma.salaryPeriod.findFirst({ where: { id: periodId, coachingCenterId } });
   if (!period) throw new Error('SALARY_PERIOD_NOT_FOUND');
   assertBranchAccess(user, period.branchId);
@@ -546,7 +557,7 @@ export async function finalizeSalaryPeriod(coachingCenterId: string, user: Sessi
 }
 
 export async function cancelSalaryPayable(coachingCenterId: string, user: SessionUser, payableId: string, reason: string) {
-  assertManager(user);
+  assertManager(user, 'salary.cancel');
   const p = await prisma.salaryPayable.findFirst({ where: { id: payableId, coachingCenterId } });
   if (!p) throw new Error('SALARY_PAYABLE_NOT_FOUND');
   assertBranchAccess(user, p.branchId);
@@ -607,7 +618,7 @@ export async function recordSalaryPayment(
   payableId: string,
   input: SalaryPaymentInput
 ) {
-  assertFinance(user);
+  assertFinance(user, 'salary.pay');
   const idempotencyKey = input.idempotencyKey?.trim() || null;
 
   const payable = await prisma.salaryPayable.findFirst({
@@ -696,7 +707,7 @@ export async function recordSalaryPayment(
           expenseId: expense.id,
         },
       });
-    });
+    }, { timeout: 20000, maxWait: 10000 });
   } catch (error) {
     if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const winner = await prisma.salaryPayment.findFirst({ where: { coachingCenterId, salaryPayableId: payableId, idempotencyKey } });

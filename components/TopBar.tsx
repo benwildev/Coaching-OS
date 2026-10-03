@@ -10,7 +10,7 @@ import { DICTIONARY, formatDhakaDate, toBanglaNumeral } from '@/lib/i18n';
 export default function TopBar() {
   const router = useRouter();
   const pathname = usePathname();
-  const { lang, setLang, setMobileNav, currentUser, currentCenter } = useApp();
+  const { lang, setLang, currentUser, currentCenter } = useApp();
   const [profileMenu, setProfileMenu] = useState(false);
   const [timeStr, setTimeStr] = useState('');
 
@@ -52,20 +52,11 @@ export default function TopBar() {
   const userDisplayName =
     (lang === 'bn' && currentUser?.banglaName) ||
     currentUser?.name ||
-    'Guest Administrator';
+    '';
 
   return (
     <header className="sticky top-0 z-30 bg-[#f5f8fc]/95 backdrop-blur border-b border-[#dce5f0]">
       <div className="flex items-center gap-2 px-4 md:px-6 h-16">
-        {/* Mobile Menu Trigger */}
-        <button
-          type="button"
-          className="md:hidden ibtn"
-          aria-label="Open menu"
-          onClick={() => setMobileNav(true)}
-        >
-          <Icon name="menu" size={20} />
-        </button>
 
         {/* Page Title & Dhaka Time */}
         <div className="min-w-0 mr-2">
@@ -141,7 +132,7 @@ export default function TopBar() {
                     {userDisplayName}
                   </div>
                   <div className="text-[11px] font-bold text-[#16a34a]">
-                    {currentUser?.role || 'OWNER'} · {currentCenter?.code || 'ACC'}
+                    {currentUser?.role ?? ''} · {currentCenter?.code ?? ''}
                   </div>
                   {currentUser?.email && (
                     <div className="text-[11px] text-[#64748b] truncate mt-0.5">

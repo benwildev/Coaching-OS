@@ -16,9 +16,9 @@ interface LowAttendanceItem {
 }
 
 export default function AttendanceAlertsPage() {
-  const { lang, showToast, currentUser } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
-  const canEditThreshold = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canEditThreshold = can('attendance.threshold.update');
 
   const [students, setStudents] = useState<LowAttendanceItem[]>([]);
   const [loading, setLoading] = useState(true);

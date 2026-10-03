@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { bulkUpdateStudentStatus } from '@/lib/services/student.service';
 import { bulkStatusChangeSchema } from '@/lib/validations/bulk-student';
 
 export const dynamic = 'force-dynamic';
 
-// Bulk status change is OWNER/ADMIN/STAFF only (matches WRITE_ROLES on the
+// Bulk status change is OWNER/ADMIN/STAFF only (students.archive; same default holders as the
 // existing /api/students routes). Authorization (tenant + branch) is
 // re-verified per student inside bulkUpdateStudentStatus — an unauthorized
 // id in the selection is reported as a failure for that id only, never
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('students.archive');
     const body = await request.json().catch(() => null);
     const parsed = bulkStatusChangeSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

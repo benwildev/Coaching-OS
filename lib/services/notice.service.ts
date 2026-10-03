@@ -1,6 +1,7 @@
 import prisma from '@/lib/db';
 import type { Prisma } from '@prisma/client';
-import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import { assertBranchAccess, isBranchScoped, type SessionUser } from '@/lib/auth/session';
+import { assertTeacherCanAccessNoticeTarget } from '@/lib/auth/teacher-scope';
 import { recordAuditLog } from './audit.service';
 import { notifyUsers } from './notification.service';
 import { dispatchToGuardian } from './communication.service';
@@ -17,10 +18,6 @@ export interface NoticeScope {
 
 export function resolveNoticeScope(coachingCenterId: string, user: SessionUser): NoticeScope {
   return { coachingCenterId, user };
-}
-
-function isBranchScoped(user: SessionUser) {
-  return user.role !== 'OWNER' && user.role !== 'ADMIN' && !!user.branchId;
 }
 
 // A TEACHER may only ever target a specific academic scope, never a
@@ -178,6 +175,8 @@ export async function createNotice(scope: NoticeScope, input: CreateNoticeInput)
   assertAudienceAllowed(user, input.targetAudience);
   const scopeErr = checkNoticeAudienceScope(input);
   if (scopeErr) throw new Error(scopeErr);
+
+  await assertTeacherCanAccessNoticeTarget(user, input);
 
   const branchId = input.branchId || (isBranchScoped(user) ? user.branchId! : null);
   assertBranchAccess(user, branchId);

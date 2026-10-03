@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { retryCommunication } from '@/lib/services/communication-retry.service';
 
@@ -13,7 +13,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function POST(_request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('communication.retry');
     const { id } = await params;
     const log = await retryCommunication(coachingCenterId, user, id);
     return NextResponse.json({ success: true, log });

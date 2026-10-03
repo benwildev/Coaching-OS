@@ -32,7 +32,7 @@ interface PaymentDetail {
 export default function PaymentReceiptPage() {
   const params = useParams();
   const paymentId = params?.paymentId as string;
-  const { lang, currentUser } = useApp();
+  const { lang, can } = useApp();
   const dict = DICT2[lang];
 
   const [payment, setPayment] = useState<PaymentDetail | null>(null);
@@ -68,7 +68,7 @@ export default function PaymentReceiptPage() {
 
   const totalRefunded = payment.refunds.reduce((s, r) => s + Number(r.amount), 0);
   const refundable = Number(payment.amount) - totalRefunded;
-  const canRefund = (currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN') && payment.status !== 'REFUNDED' && refundable > 0;
+  const canRefund = can('fees.refund') && payment.status !== 'REFUNDED' && refundable > 0;
 
   return (
     <div className="max-w-[700px] mx-auto flex flex-col gap-6">

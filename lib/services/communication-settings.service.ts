@@ -1,6 +1,7 @@
 import prisma from '@/lib/db';
 import type { CommunicationChannel } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
 import { getSystemSettings, updateSystemSetting } from './settings.service';
 import { getCommunicationProvider, type ProviderCredentials, type ProviderBalanceResult, type ProviderReportResult } from './communication/providers';
@@ -53,7 +54,7 @@ export interface CommunicationChannelStatus {
 }
 
 function assertCommunicationSettingsManageable(user: SessionUser) {
-  if (user.role !== 'OWNER' && user.role !== 'ADMIN') {
+  if (!can(user, 'settings.communication.update')) {
     throw new Error('COMMUNICATION_SETTINGS_ACCESS_DENIED: only Owner or Admin can manage communication provider settings');
   }
 }

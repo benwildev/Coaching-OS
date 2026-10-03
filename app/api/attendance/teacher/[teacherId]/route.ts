@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess, assertTeacherSelfAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess, assertTeacherSelfAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getTeacherAttendanceHistory, recordTeacherAttendance } from '@/lib/services/attendance.service';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request, props: { params: Promise<{ teacherId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
+    await requirePermission('teacher_attendance.read');
     const { teacherId } = await props.params;
 
     const teacher = await prisma.teacher.findFirst({
@@ -49,7 +49,7 @@ export async function GET(request: Request, props: { params: Promise<{ teacherId
 export async function POST(request: Request, props: { params: Promise<{ teacherId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('teacher_attendance.create');
 
     const { teacherId } = await props.params;
 

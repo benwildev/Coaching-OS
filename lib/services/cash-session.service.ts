@@ -1,6 +1,7 @@
 import prisma from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
 import { todayDhaka, dhakaDayStart, addDays } from '@/lib/reports/dates';
 import { toDateOnly } from '@/lib/schedule';
@@ -16,10 +17,8 @@ function n(value: Prisma.Decimal | number | null | undefined): number {
   return value == null ? 0 : Number(value);
 }
 
-const COLLECTION_ROLES = new Set(['OWNER', 'ADMIN', 'STAFF']);
-
 function assertCollectionRole(user: SessionUser) {
-  if (!COLLECTION_ROLES.has(user.role)) {
+  if (!can(user, 'fees.cash_session.manage')) {
     throw new Error('CASH_SESSION_ACCESS_DENIED: only Owner, Admin, or Staff can manage cash sessions');
   }
 }
@@ -36,13 +35,13 @@ function isDuplicateError(error: unknown): boolean {
  */
 export async function getCashExpensesForDate(coachingCenterId: string, branchId: string, businessDate: Date): Promise<number> {
   const agg = await prisma.expense.aggregate({
-    where: { coachingCenterId, branchId, paymentMethod: 'CASH', date: businessDate },
+    where: { coachingCenterId, branchId, paymentMethod: 'CASH', status: 'ACTIVE', date: businessDate }, // Phase 15.2: cancelled expenses never leave the drawer
     _sum: { amount: true },
   });
   return n(agg._sum.amount);
 }
 
-async function computeExpectedCash(coachingCenterId: string, branchId: string, businessDate: Date, openingCash: Prisma.Decimal | number): Promise<number> {
+export async function computeExpectedCash(coachingCenterId: string, branchId: string, businessDate: Date, openingCash: Prisma.Decimal | number): Promise<number> {
   const ymd = businessDate.toISOString().slice(0, 10);
   const dayStart = dhakaDayStart(ymd);
   const dayEnd = dhakaDayStart(addDays(ymd, 1));

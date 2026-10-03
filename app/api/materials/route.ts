@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import {
   createMaterial,
@@ -14,6 +14,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('materials.read');
     const scope = await resolveMaterialScope(coachingCenterId, user);
     const sp = new URL(request.url).searchParams;
     const [result, stats] = await Promise.all([
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('materials.create');
     const body = await request.json().catch(() => null);
     const parsed = createMaterialSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

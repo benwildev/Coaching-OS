@@ -1,6 +1,6 @@
 import prisma from '@/lib/db';
 import type { Prisma } from '@prisma/client';
-import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import { assertBranchAccess, isBranchScoped, type SessionUser } from '@/lib/auth/session';
 import { recordAuditLog } from './audit.service';
 import { resolveAcademicContext } from './academic.service';
 import { assertTeacherSubjectAccess, getTeacherAuthorizedBatchSubjectPairs, getTeacherClassWideSubjectIds } from './exam-result.service';
@@ -69,10 +69,6 @@ export async function resolveMaterialScope(coachingCenterId: string, user: Sessi
     getTeacherClassWideSubjectIds(coachingCenterId, user),
   ]);
   return { coachingCenterId, user, teacherBatchSubjectPairs, teacherClassWideSubjectIds };
-}
-
-function isBranchScoped(user: SessionUser) {
-  return user.role !== 'OWNER' && user.role !== 'ADMIN' && !!user.branchId;
 }
 
 function materialVisibilityWhere(scope: MaterialScope): Prisma.StudyMaterialWhereInput {

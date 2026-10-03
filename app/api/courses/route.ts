@@ -1,15 +1,24 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getCoursesList, createCourse } from '@/lib/services/course.service';
 import { courseSchema } from '@/lib/validations/course';
+import { getTeacherByUserId } from '@/lib/services/teacher.service';
+import { getTeacherAuthorizedCourseIds } from '@/lib/auth/teacher-scope';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    const { coachingCenterId } = await requireTenant();
+    const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('courses.read');
     const { searchParams } = new URL(request.url);
+
+    let courseIds: string[] | undefined;
+    if (user.role === 'TEACHER') {
+      const teacher = await getTeacherByUserId(coachingCenterId, user.userId);
+      courseIds = teacher ? await getTeacherAuthorizedCourseIds(coachingCenterId, teacher.id) : [];
+    }
 
     const result = await getCoursesList(coachingCenterId, {
       search: searchParams.get('search') || undefined,
@@ -17,6 +26,7 @@ export async function GET(request: Request) {
       classId: searchParams.get('class') || undefined,
       groupId: searchParams.get('group') || undefined,
       status: searchParams.get('status') || undefined,
+      courseIds,
       page: parseInt(searchParams.get('page') || '1', 10),
       pageSize: parseInt(searchParams.get('pageSize') || '20', 10),
     });
@@ -30,7 +40,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('courses.create');
 
     const body = await request.json();
     const validated = courseSchema.safeParse(body);

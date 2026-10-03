@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getFeeStructureById, updateFeeStructure } from '@/lib/services/fee.service';
 import { feeStructureUpdateSchema } from '@/lib/validations/fee';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request, props: { params: Promise<{ feeStructureId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.structures.read');
     const { feeStructureId } = await props.params;
     const structure = await getFeeStructureById(coachingCenterId, feeStructureId);
     if (!structure) return NextResponse.json({ success: false, error: 'Fee structure not found' }, { status: 404 });
@@ -23,7 +23,7 @@ export async function GET(request: Request, props: { params: Promise<{ feeStruct
 export async function PUT(request: Request, props: { params: Promise<{ feeStructureId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('fees.structures.update');
 
     const { feeStructureId } = await props.params;
     const body = await request.json();

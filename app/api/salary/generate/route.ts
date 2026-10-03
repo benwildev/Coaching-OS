@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { generateSalary } from '@/lib/services/salary.service';
 import { salaryGenerateSchema } from '@/lib/validations/salary';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('salary.generate');
     const body = await request.json().catch(() => null);
     const parsed = salaryGenerateSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

@@ -2,6 +2,13 @@ import prisma from '@/lib/db';
 import { hashPassword } from '@/lib/auth/password';
 import { recordAuditLog } from './audit.service';
 import { checkStaffLimit } from './subscription.service';
+import { seedRoleIfConfigurable } from './permission.service';
+import {
+  ALL_PERMISSION_CODES,
+  isOwnerLockedPermission,
+  isPermissionCode,
+  type PermissionCode,
+} from '@/lib/auth/permissions';
 import type { Prisma, RoleCode, UserStatus } from '@prisma/client';
 
 export async function getUsersByTenant(coachingCenterId: string) {
@@ -85,6 +92,8 @@ export async function createUser(
         isSystem: true,
       },
     });
+    // Phase 14.1: a lazily created role must not exist without its default permissions.
+    await seedRoleIfConfigurable(prisma, coachingCenterId, role.code);
   }
 
   const passwordHash = hashPassword(data.password);
@@ -178,6 +187,7 @@ export async function createTeacherUserInTx(
         isSystem: true,
       },
     });
+    await seedRoleIfConfigurable(tx, coachingCenterId, 'TEACHER');
   }
 
   const passwordHash = hashPassword(params.password);
@@ -316,7 +326,16 @@ export async function bumpUserSessionVersion(userId: string): Promise<void> {
 
 /** Include needed to turn a User row into a staff session identity. Role order is deterministic. */
 export const staffIdentityInclude = {
-  roleAssignments: { include: { role: true }, orderBy: { createdAt: 'asc' } },
+  // Phase 14.1: the role's granted permission codes ride along in the same
+  // user read (no extra round trip per request, nothing cached or put in the JWT).
+  roleAssignments: {
+    include: {
+      role: {
+        include: { rolePermissions: { select: { permission: { select: { code: true } } } } },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  },
   // Phase 11.4: a suspended tenant's staff sessions are invalid immediately.
   coachingCenter: { select: { status: true } },
 } satisfies Prisma.UserInclude;
@@ -332,6 +351,14 @@ export interface StaffIdentity {
   role: RoleCode;
   coachingCenterId: string;
   branchId: string | null;
+  /**
+   * Phase 14.1: permission codes of the effective role (roleAssignments[0]).
+   * OWNER gets the full catalog; everyone else only what is granted, with
+   * OWNER-locked codes removed. Always set by `toStaffIdentity`; it is only
+   * optional so hand-built test fixtures still compile — a missing list
+   * means "no permissions" (`can()` fails closed).
+   */
+  permissions?: PermissionCode[];
   /** Phase 10.4: must match User.sessionVersion for the session to remain valid. */
   sessionVersion: number;
 }
@@ -346,7 +373,8 @@ export interface StaffIdentity {
 export function toStaffIdentity(user: UserWithRoles): StaffIdentity | null {
   if (user.status !== 'ACTIVE') return null;
   if (user.coachingCenter.status === 'SUSPENDED') return null;
-  const role = user.roleAssignments[0]?.role.code;
+  const assignment = user.roleAssignments[0];
+  const role = assignment?.role.code;
   if (!role) return null;
   return {
     userId: user.id,
@@ -357,6 +385,21 @@ export function toStaffIdentity(user: UserWithRoles): StaffIdentity | null {
     role,
     coachingCenterId: user.coachingCenterId,
     branchId: user.branchId,
+    permissions: resolvePermissionCodes(role, assignment.role.rolePermissions),
     sessionVersion: user.sessionVersion,
   };
+}
+
+/** Pure: catalogued, non-owner-locked codes granted to the role (OWNER: whole catalog, no lookup). */
+export function resolvePermissionCodes(
+  role: RoleCode,
+  rolePermissions: { permission: { code: string } }[] | undefined
+): PermissionCode[] {
+  if (role === 'OWNER') return [...ALL_PERMISSION_CODES];
+  const granted = new Set<PermissionCode>();
+  for (const rp of rolePermissions ?? []) {
+    const code = rp.permission.code;
+    if (isPermissionCode(code) && !isOwnerLockedPermission(code)) granted.add(code);
+  }
+  return [...granted];
 }

@@ -5,27 +5,31 @@ import { usePathname } from 'next/navigation';
 import Icon from '@/components/Icon';
 import { useApp } from '@/lib/store';
 import { DICTIONARY } from '@/lib/i18n';
+import { canAny, type PermissionCode } from '@/lib/auth/permissions';
 
 interface TabItem {
   id: 'tabOverview' | 'tabCollectPayment' | 'tabInvoices' | 'tabPayments' | 'tabDue' | 'tabDiscounts' | 'tabCollection';
   href: string;
   icon: string;
+  /** Shown when the user holds any of these. */
+  permission: readonly PermissionCode[];
 }
 
 const TABS: readonly TabItem[] = [
-  { id: 'tabOverview', href: '/fees', icon: 'dashboard' },
-  { id: 'tabCollectPayment', href: '/fees/collect', icon: 'wallet' },
-  { id: 'tabInvoices', href: '/fees/invoices', icon: 'file' },
-  { id: 'tabPayments', href: '/fees/payments', icon: 'banknote' },
-  { id: 'tabDue', href: '/fees/reports/due', icon: 'alert' },
-  { id: 'tabDiscounts', href: '/fees/discounts', icon: 'badge-percent' },
-  { id: 'tabCollection', href: '/fees/reports/collection', icon: 'chart' },
+  { id: 'tabOverview', href: '/fees', icon: 'dashboard', permission: ['fees.read'] },
+  { id: 'tabCollectPayment', href: '/fees/collect', icon: 'wallet', permission: ['fees.collect'] },
+  { id: 'tabInvoices', href: '/fees/invoices', icon: 'file', permission: ['fees.read'] },
+  { id: 'tabPayments', href: '/fees/payments', icon: 'banknote', permission: ['fees.read'] },
+  { id: 'tabDue', href: '/fees/reports/due', icon: 'alert', permission: ['fees.reports.read'] },
+  { id: 'tabDiscounts', href: '/fees/discounts', icon: 'badge-percent', permission: ['fees.discount.request', 'fees.discount.approve'] },
+  { id: 'tabCollection', href: '/fees/reports/collection', icon: 'chart', permission: ['fees.reports.read'] },
 ] as const;
 
 export default function FeesSubNav() {
   const pathname = usePathname();
-  const { lang } = useApp();
+  const { lang, currentUser } = useApp();
   const dict = DICTIONARY[lang].fees;
+  const tabs = TABS.filter((t) => canAny(currentUser, t.permission));
 
   return (
     <div className="w-full overflow-x-auto hs py-1">
@@ -33,7 +37,7 @@ export default function FeesSubNav() {
         aria-label="Fees Navigation"
         className="bg-[#edf2f9]/90 backdrop-blur-md p-1.5 rounded-2xl border border-[#d8e2ee] inline-flex items-center gap-1.5 shadow-2xs max-w-full"
       >
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const active = tab.href === '/fees' ? pathname === '/fees' : pathname.startsWith(tab.href);
           return (
             <Link

@@ -93,12 +93,13 @@ export default function StudentDetailPage() {
   const params = useParams();
   const router = useRouter();
   const studentId = params?.studentId as string;
-  const { lang } = useApp();
+  const { lang, can } = useApp();
   const dict = DICTIONARY[lang];
 
   const [student, setStudent] = useState<StudentProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     async function loadStudent() {
@@ -106,6 +107,10 @@ export default function StudentDetailPage() {
       setLoading(true);
       try {
         const res = await fetch(`/api/students/${studentId}`);
+        if (res.status === 403) {
+          setForbidden(true);
+          return;
+        }
         if (!res.ok) {
           throw new Error('Student not found');
         }
@@ -127,6 +132,31 @@ export default function StudentDetailPage() {
         <p className="mt-3 text-[14px] font-medium">
           {lang === 'bn' ? 'শিক্ষার্থীর প্রোফাইল লোড হচ্ছে…' : 'Loading student profile…'}
         </p>
+      </div>
+    );
+  }
+
+  if (forbidden) {
+    return (
+      <div className="max-w-[800px] mx-auto py-12 text-center">
+        <div className="p-8 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs flex flex-col items-center">
+          <Icon name="shield" size={32} className="text-rose-500 mb-3" />
+          <h2 className="text-xl font-bold text-[#092f63]">
+            {lang === 'bn' ? 'অনুমতি নেই (Forbidden)' : 'Access Forbidden'}
+          </h2>
+          <p className="text-[13.5px] text-[#64748b] mt-1 mb-5">
+            {lang === 'bn'
+              ? 'এই শিক্ষার্থীর তথ্য দেখার আপনার কোনো অনুমতি নেই।'
+              : 'You do not have authorization to view this student profile.'}
+          </p>
+          <Link
+            href="/students"
+            className="inline-flex items-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[13.5px] font-semibold text-white"
+          >
+            <Icon name="chevronleft" size={15} />
+            <span>{dict.profile.back}</span>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -171,27 +201,33 @@ export default function StudentDetailPage() {
           <span>{dict.profile.back}</span>
         </Link>
         <div className="flex items-center gap-2">
-          <Link
-            href={`/students/${student.id}/id-card`}
-            className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
-          >
-            <Icon name="shield" size={15} />
-            <span>{dict.students.idCardLink}</span>
-          </Link>
-          <Link
-            href={`/students/${student.id}/certificates`}
-            className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
-          >
-            <Icon name="award" size={15} />
-            <span>{dict.students.certificatesLink}</span>
-          </Link>
-          <Link
-            href={`/students/${student.id}/edit`}
-            className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
-          >
-            <Icon name="sliders" size={15} />
-            <span>{dict.profile.edit}</span>
-          </Link>
+          {can('students.id_card') && (
+            <Link
+              href={`/students/${student.id}/id-card`}
+              className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
+            >
+              <Icon name="shield" size={15} />
+              <span>{dict.students.idCardLink}</span>
+            </Link>
+          )}
+          {can('students.certificates') && (
+            <Link
+              href={`/students/${student.id}/certificates`}
+              className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
+            >
+              <Icon name="award" size={15} />
+              <span>{dict.students.certificatesLink}</span>
+            </Link>
+          )}
+          {can('students.update') && (
+            <Link
+              href={`/students/${student.id}/edit`}
+              className="inline-flex items-center gap-2 rounded-xl border border-[#dce5f0] bg-white px-4 py-2 text-[13px] font-bold text-[#063b78] shadow-xs hover:bg-[#f8fafc] transition-colors"
+            >
+              <Icon name="sliders" size={15} />
+              <span>{dict.profile.edit}</span>
+            </Link>
+          )}
         </div>
       </div>
 

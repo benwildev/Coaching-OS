@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { transitionExamStatus } from '@/lib/services/exam.service';
 import { EXAM_STATUS } from '@/lib/validations/exam';
@@ -13,7 +13,7 @@ export async function POST(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('exams.update');
     const { examId } = await params;
 
     // Phase 10.5: previously no branch check.
@@ -26,7 +26,7 @@ export async function POST(
       examId,
       EXAM_STATUS.COMPLETED,
       user.userId,
-      user.role
+      user
     );
 
     return NextResponse.json({ success: true, exam, status: exam.status });

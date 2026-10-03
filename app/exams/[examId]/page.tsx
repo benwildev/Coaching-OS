@@ -74,7 +74,7 @@ export default function ExamDetailPage() {
   const params = useParams();
   const router = useRouter();
   const examId = params?.examId as string;
-  const { lang, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
 
   const [exam, setExam] = useState<ExamDetail | null>(null);
@@ -259,7 +259,7 @@ export default function ExamDetailPage() {
 
         {/* Action Buttons Based on Status */}
         <div className="flex flex-wrap items-center gap-2">
-          {exam.status === 'DRAFT' && (
+          {exam.status === 'DRAFT' && can('exams.update') && (
             <>
               <button
                 type="button"
@@ -282,7 +282,7 @@ export default function ExamDetailPage() {
             </>
           )}
 
-          {exam.status === 'SCHEDULED' && (
+          {exam.status === 'SCHEDULED' && can('exams.update') && (
             <>
               <button
                 type="button"
@@ -305,7 +305,7 @@ export default function ExamDetailPage() {
             </>
           )}
 
-          {exam.status === 'ONGOING' && (
+          {exam.status === 'ONGOING' && can('exams.update') && (
             <button
               type="button"
               onClick={() => handleTransition('complete')}
@@ -317,7 +317,7 @@ export default function ExamDetailPage() {
             </button>
           )}
 
-          {exam.status === 'COMPLETED' && (
+          {exam.status === 'COMPLETED' && can('exams.publish') && (
             <>
               <Link
                 href={`/exams/${examId}/publish`}
@@ -338,14 +338,16 @@ export default function ExamDetailPage() {
                 <Icon name="doc" size={15} />
                 <span>{lang === 'bn' ? 'ফলাফল ও টেবুলেশন শিট' : 'Tabulation Sheet'}</span>
               </Link>
-              <button
-                type="button"
-                onClick={() => setReopenModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2 text-[12.5px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
-              >
-                <Icon name="edit" size={14} />
-                <span>{lang === 'bn' ? 'নম্বর সংশোধন (Reopen)' : 'Reopen Marks Entry'}</span>
-              </button>
+              {can('exams.reopen') && (
+                <button
+                  type="button"
+                  onClick={() => setReopenModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2 text-[12.5px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+                >
+                  <Icon name="edit" size={14} />
+                  <span>{lang === 'bn' ? 'নম্বর সংশোধন (Reopen)' : 'Reopen Marks Entry'}</span>
+                </button>
+              )}
             </>
           )}
         </div>
@@ -560,13 +562,15 @@ export default function ExamDetailPage() {
                         )}
                       </td>
                       <td className="px-5 py-3 text-right">
-                        <Link
-                          href={`/exams/${examId}/subjects/${sub.id}/marks`}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-[#063b78] px-3.5 py-1.5 text-[12px] font-bold text-white hover:bg-[#084b96] transition-colors"
-                        >
-                          <Icon name="edit" size={13} />
-                          <span>{lang === 'bn' ? 'নম্বর এন্ট্রি' : 'Enter Marks'}</span>
-                        </Link>
+                        {can('exams.marks.enter') && (
+                          <Link
+                            href={`/exams/${examId}/subjects/${sub.id}/marks`}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#063b78] px-3.5 py-1.5 text-[12px] font-bold text-white hover:bg-[#084b96] transition-colors"
+                          >
+                            <Icon name="edit" size={13} />
+                            <span>{lang === 'bn' ? 'নম্বর এন্ট্রি' : 'Enter Marks'}</span>
+                          </Link>
+                        )}
                       </td>
                     </tr>
                   );

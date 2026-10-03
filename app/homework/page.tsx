@@ -30,7 +30,7 @@ interface AssignmentOption {
 }
 
 export default function HomeworkPage() {
-  const { lang } = useApp();
+  const { lang, can } = useApp();
   const t = DICTIONARY[lang];
   const h = t.homework;
   const c = t.common;
@@ -109,10 +109,12 @@ export default function HomeworkPage() {
   return (
     <div className="max-w-[1400px] mx-auto flex flex-col gap-5">
       <PageHeader eyebrow={t.nav.homework} title={h.title} subtitle={h.subtitle}>
-        <Link href="/homework/new" className="primary">
-          <Icon name="plus" size={16} />
-          {h.newHomework}
-        </Link>
+        {can('homework.create') && (
+          <Link href="/homework/new" className="primary">
+            <Icon name="plus" size={16} />
+            {h.newHomework}
+          </Link>
+        )}
       </PageHeader>
 
       {stats && stats.total > 0 && (
@@ -149,7 +151,12 @@ export default function HomeworkPage() {
           hasFilters ? (
             <EmptyState message={h.noMatch} icon="search" />
           ) : (
-            <EmptyState message={h.empty} actionHref="/homework/new" actionLabel={h.newHomework} icon="calcheck" />
+            <EmptyState
+              message={h.empty}
+              actionHref={can('homework.create') ? '/homework/new' : undefined}
+              actionLabel={h.newHomework}
+              icon="calcheck"
+            />
           )
         ) : (
           <>

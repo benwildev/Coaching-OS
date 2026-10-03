@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { recordSalaryPayment } from '@/lib/services/salary.service';
 import { salaryPaymentSchema } from '@/lib/validations/salary';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, props: { params: Promise<{ salaryPayableId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('salary.pay');
     const { salaryPayableId } = await props.params;
     const body = await request.json().catch(() => null);
     const parsed = salaryPaymentSchema.safeParse(body);

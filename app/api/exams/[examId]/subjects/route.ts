@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { addExamSubject } from '@/lib/services/exam.service';
 import { addExamSubjectSchema } from '@/lib/validations/exam';
@@ -15,7 +15,7 @@ export async function GET(
     const { coachingCenterId, user } = await requireTenant();
     // Phase 10.5: previously no role check and no branch check — any
     // authenticated tenant user could read any branch's exam structure.
-    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
+    await requirePermission('exams.read');
     const { examId } = await params;
 
     const exam = await prisma.exam.findFirst({ where: { id: examId, coachingCenterId }, select: { branchId: true } });
@@ -52,7 +52,7 @@ export async function POST(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('exams.update');
     const { examId } = await params;
 
     // Phase 10.5: previously no branch check.

@@ -660,12 +660,41 @@ export async function getTeacherDashboardData(
   const teacher = await prisma.teacher.findFirst({ where: { coachingCenterId, userId } });
   if (!teacher) return { linked: false };
 
+  const refDate = getCurrentDhakaDateOnly();
+  const nextDay = new Date(refDate.getTime() + 24 * 60 * 60 * 1000);
+
   const [todaysClasses, assignments, recentNotices] = await Promise.all([
     getTodaysClasses(coachingCenterId, { teacherId: teacher.id }),
     prisma.batchTeacherAssignment.findMany({
-      where: { coachingCenterId, teacherId: teacher.id, status: 'ACTIVE' },
+      where: {
+        coachingCenterId,
+        teacherId: teacher.id,
+        status: 'ACTIVE',
+        startDate: { lt: nextDay },
+        OR: [
+          { endDate: null },
+          { endDate: { gte: refDate } },
+        ],
+      },
       include: {
-        batch: { select: { id: true, name: true, banglaName: true, studentBatches: { where: { status: 'ACTIVE' }, select: { studentId: true } } } },
+        batch: {
+          select: {
+            id: true,
+            name: true,
+            banglaName: true,
+            studentBatches: {
+              where: {
+                status: 'ACTIVE',
+                joinedAt: { lt: nextDay },
+                OR: [
+                  { endDate: null },
+                  { endDate: { gte: refDate } },
+                ],
+              },
+              select: { studentId: true },
+            },
+          },
+        },
         subject: { select: { id: true, name: true, banglaName: true } },
       },
     }),

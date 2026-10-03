@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { toggleGatewayConfig } from '@/lib/services/payment-gateway.service';
 import { PaymentGatewayProviderType } from '@prisma/client';
@@ -17,7 +17,7 @@ export async function POST(
 ) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.payment_gateways.update');
 
     const { provider } = await params;
     const providerUpper = provider.toUpperCase() as PaymentGatewayProviderType;

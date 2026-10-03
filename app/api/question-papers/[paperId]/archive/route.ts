@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { resolveQuestionScope } from '@/lib/services/question.service';
 import { archiveQuestionPaper } from '@/lib/services/question-paper.service';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(_request: Request, { params }: { params: Promise<{ paperId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('question_papers.update');
     const { paperId } = await params;
     const scope = await resolveQuestionScope(coachingCenterId, user);
     const paper = await archiveQuestionPaper(scope, paperId);

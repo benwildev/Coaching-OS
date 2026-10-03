@@ -37,10 +37,11 @@ const selectCls = 'rounded-xl border border-[#dce5f0] bg-white px-3 py-2 text-[1
 const pick = (lang: string, o?: Named | null) => (o ? (lang === 'bn' && o.banglaName ? o.banglaName : o.name) : '—');
 
 export default function SalaryPage() {
-  const { lang, currentUser, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
   const s = dict.salary;
-  const isManager = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canGenerate = can('salary.generate');
+  const canFinalize = can('salary.finalize');
   const money = (v: number) => formatBDTExact(v, lang);
 
   const nowYm = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' });
@@ -178,7 +179,7 @@ export default function SalaryPage() {
   const periodText = { OPEN: s.periodOpen, FINALIZED: s.periodFinalized, PAID: s.periodPaid };
 
   const canPay = (p: Overview['payables'][number]) => p.status === 'UNPAID' || p.status === 'PARTIAL';
-  const canCancel = (p: Overview['payables'][number]) => isManager && p.status === 'UNPAID' && p.paidAmount === 0;
+  const canCancel = (p: Overview['payables'][number]) => can('salary.cancel') && p.status === 'UNPAID' && p.paidAmount === 0;
 
   const Actions = ({ p }: { p: Overview['payables'][number] }) => (
     <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -210,13 +211,15 @@ export default function SalaryPage() {
           </div>
           <p className="text-[13.5px] text-[#55637a] mt-1.5 font-medium">{s.subtitle}</p>
         </div>
-        {isManager && (
+        {(canGenerate || canFinalize) && (
           <div className="flex items-center gap-2.5 flex-wrap">
-            <button className="primary px-4 py-2.5" disabled={busy || !data} onClick={generate}>
-              <Icon name="plus" size={16} />
-              <span>{busy ? s.generating : s.generate}</span>
-            </button>
-            {data?.period?.status === 'OPEN' && data.payables.length > 0 && (
+            {canGenerate && (
+              <button className="primary px-4 py-2.5" disabled={busy || !data} onClick={generate}>
+                <Icon name="plus" size={16} />
+                <span>{busy ? s.generating : s.generate}</span>
+              </button>
+            )}
+            {canFinalize && data?.period?.status === 'OPEN' && data.payables.length > 0 && (
               <button className="tb px-4 py-2.5" disabled={busy} onClick={finalize}>
                 {s.finalize}
               </button>

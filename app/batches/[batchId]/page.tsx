@@ -20,11 +20,17 @@ type Tab = 'overview' | 'students' | 'subjects' | 'teachers' | 'routine' | 'room
 export default function BatchDetailPage() {
   const params = useParams();
   const batchId = params.batchId as string;
-  const { lang, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
+
+  const canUpdate = can('batches.update');
+  const canAssignTeacher = can('batches.assign_teacher');
+  const canViewFinancial = can('fees.read');
+  const canManageRoutine = can('routine.manage');
 
   const [batch, setBatch] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
   const [tab, setTab] = useState<Tab>('overview');
   const [saving, setSaving] = useState(false);
   const [availableSubjects, setAvailableSubjects] = useState<Array<{ id: string; name: string; banglaName?: string | null }>>([]);
@@ -52,6 +58,10 @@ export default function BatchDetailPage() {
         fetch(`/api/batches/${batchId}`),
         fetch('/api/batches/options'),
       ]);
+      if (batchRes.status === 403) {
+        setForbidden(true);
+        return;
+      }
       if (batchRes.ok) {
         const data = await batchRes.json();
         if (data.success) {
@@ -245,10 +255,46 @@ export default function BatchDetailPage() {
     }
   };
 
-  if (loading || !batch) {
+  if (loading) {
     return (
       <div className="max-w-[1100px] mx-auto flex items-center justify-center min-h-[300px]">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#063b78] border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (forbidden) {
+    return (
+      <div className="max-w-[800px] mx-auto py-12 text-center">
+        <div className="p-8 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs flex flex-col items-center">
+          <Icon name="shield" size={32} className="text-rose-500 mb-3" />
+          <h2 className="text-xl font-bold text-[#092f63]">
+            {lang === 'bn' ? 'অনুমতি নেই (Forbidden)' : 'Access Forbidden'}
+          </h2>
+          <p className="text-[13.5px] text-[#64748b] mt-1 mb-5">
+            {lang === 'bn'
+              ? 'এই ব্যাচের তথ্য দেখার আপনার কোনো অনুমতি নেই।'
+              : 'You do not have authorization to view this batch.'}
+          </p>
+          <Link
+            href="/batches"
+            className="inline-flex items-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[13.5px] font-semibold text-white"
+          >
+            <Icon name="chevleft" size={15} />
+            <span>{dict.batches.back}</span>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!batch) {
+    return (
+      <div className="max-w-[1100px] mx-auto text-center py-16">
+        <p className="text-[#64748b]">{lang === 'bn' ? 'ব্যাচ পাওয়া যায়নি' : 'Batch not found.'}</p>
+        <Link href="/batches" className="text-[#063b78] font-semibold hover:underline">
+          {dict.batches.back}
+        </Link>
       </div>
     );
   }
@@ -269,7 +315,7 @@ export default function BatchDetailPage() {
     { id: 'routine', label: dict.batches.tabRoutine },
     { id: 'room', label: dict.rooms.title },
     { id: 'attendance', label: dict.attendance.title },
-    { id: 'financial', label: dict.fees.batchFinancial },
+    ...(canViewFinancial ? [{ id: 'financial' as Tab, label: dict.fees.batchFinancial }] : []),
     { id: 'performance', label: lang === 'bn' ? 'একাডেমিক পারফরম্যান্স' : 'Performance' },
     { id: 'history', label: dict.batches.tabHistory },
   ];
@@ -342,31 +388,31 @@ export default function BatchDetailPage() {
           <div className="grid md:grid-cols-2 gap-4">
             <div className="fld">
               <label>{dict.batches.name}</label>
-              <EnglishInput value={overviewForm.name} onChange={(val) => setOverviewForm({ ...overviewForm, name: val })} />
+              <EnglishInput disabled={!canUpdate} value={overviewForm.name} onChange={(val) => setOverviewForm({ ...overviewForm, name: val })} />
             </div>
             <div className="fld">
               <label>{dict.batches.banglaName}</label>
-              <BanglaInput value={overviewForm.banglaName || ''} onChange={(val) => setOverviewForm({ ...overviewForm, banglaName: val })} />
+              <BanglaInput disabled={!canUpdate} value={overviewForm.banglaName || ''} onChange={(val) => setOverviewForm({ ...overviewForm, banglaName: val })} />
             </div>
             <div className="fld">
               <label>{dict.batches.code}</label>
-              <input value={overviewForm.code} onChange={(e) => setOverviewForm({ ...overviewForm, code: e.target.value.toUpperCase() })} />
+              <input disabled={!canUpdate} value={overviewForm.code} onChange={(e) => setOverviewForm({ ...overviewForm, code: e.target.value.toUpperCase() })} />
             </div>
             <div className="fld">
               <label>{dict.batches.capacity}</label>
-              <input type="number" min={1} value={overviewForm.capacity} onChange={(e) => setOverviewForm({ ...overviewForm, capacity: e.target.value })} />
+              <input disabled={!canUpdate} type="number" min={1} value={overviewForm.capacity} onChange={(e) => setOverviewForm({ ...overviewForm, capacity: e.target.value })} />
             </div>
             <div className="fld">
               <label>{dict.batches.startDate}</label>
-              <input type="date" value={overviewForm.startDate} onChange={(e) => setOverviewForm({ ...overviewForm, startDate: e.target.value })} />
+              <input disabled={!canUpdate} type="date" value={overviewForm.startDate} onChange={(e) => setOverviewForm({ ...overviewForm, startDate: e.target.value })} />
             </div>
             <div className="fld">
               <label>{dict.batches.endDate}</label>
-              <input type="date" value={overviewForm.endDate} onChange={(e) => setOverviewForm({ ...overviewForm, endDate: e.target.value })} />
+              <input disabled={!canUpdate} type="date" value={overviewForm.endDate} onChange={(e) => setOverviewForm({ ...overviewForm, endDate: e.target.value })} />
             </div>
             <div className="fld">
               <label>{dict.batches.status}</label>
-              <select value={overviewForm.status} onChange={(e) => setOverviewForm({ ...overviewForm, status: e.target.value })}>
+              <select disabled={!canUpdate} value={overviewForm.status} onChange={(e) => setOverviewForm({ ...overviewForm, status: e.target.value })}>
                 {BATCH_STATUSES.map((s) => (
                   <option key={s} value={s}>{(dict.batchStatus as any)[s]}</option>
                 ))}
@@ -374,14 +420,16 @@ export default function BatchDetailPage() {
             </div>
             <div className="fld md:col-span-2">
               <label>{dict.batches.description}</label>
-              <textarea rows={2} value={overviewForm.description} onChange={(e) => setOverviewForm({ ...overviewForm, description: e.target.value })} />
+              <textarea disabled={!canUpdate} rows={2} value={overviewForm.description} onChange={(e) => setOverviewForm({ ...overviewForm, description: e.target.value })} />
             </div>
           </div>
-          <div className="pt-4">
-            <button type="button" onClick={saveOverview} disabled={saving} className="primary">
-              {saving ? '…' : dict.batches.save}
-            </button>
-          </div>
+          {canUpdate && (
+            <div className="pt-4">
+              <button type="button" onClick={saveOverview} disabled={saving} className="primary">
+                {saving ? '…' : dict.batches.save}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -390,9 +438,11 @@ export default function BatchDetailPage() {
         <div className="card p-5 md:p-6 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-[#063b78]">{dict.batches.tabStudents}</h2>
-            <button type="button" onClick={() => setAssignModalOpen(true)} className="primary text-xs h-9 px-3">
-              + {dict.batches.assignStudent}
-            </button>
+            {canUpdate && (
+              <button type="button" onClick={() => setAssignModalOpen(true)} className="primary text-xs h-9 px-3">
+                + {dict.batches.assignStudent}
+              </button>
+            )}
           </div>
           {batch.studentBatches.length === 0 ? (
             <p className="text-[13px] text-[#94a3b8] italic">{dict.batches.noStudents}</p>
@@ -420,9 +470,11 @@ export default function BatchDetailPage() {
                       <td className="text-left text-xs text-[#64748b]">{formatDhakaDate(sb.joinedAt)}</td>
                       <td className="text-left text-xs text-[#64748b]">{sb.rollCode || '—'}</td>
                       <td className="text-right">
-                        <button onClick={() => removeStudent(sb.id)} className="text-xs text-rose-600 hover:underline font-semibold">
-                          {dict.batches.removeStudent}
-                        </button>
+                        {canUpdate && (
+                          <button onClick={() => removeStudent(sb.id)} className="text-xs text-rose-600 hover:underline font-semibold">
+                            {dict.batches.removeStudent}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -445,6 +497,7 @@ export default function BatchDetailPage() {
                 <label key={s.id} className="flex items-center gap-2 text-[13px] text-[#092f63] p-2 rounded-lg border border-[#edf1f7]">
                   <input
                     type="checkbox"
+                    disabled={!canUpdate}
                     checked={subjectSelection.includes(s.id)}
                     onChange={() =>
                       setSubjectSelection((prev) => (prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]))
@@ -455,11 +508,13 @@ export default function BatchDetailPage() {
               ))}
             </div>
           )}
-          <div className="pt-4">
-            <button type="button" onClick={saveSubjects} disabled={saving} className="primary">
-              {saving ? '…' : dict.courses.saveSubjects}
-            </button>
-          </div>
+          {canUpdate && (
+            <div className="pt-4">
+              <button type="button" onClick={saveSubjects} disabled={saving} className="primary">
+                {saving ? '…' : dict.courses.saveSubjects}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -468,9 +523,11 @@ export default function BatchDetailPage() {
         <div className="card p-5 md:p-6 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-[#063b78]">{dict.batches.tabTeachers}</h2>
-            <button type="button" onClick={() => setTeacherModalOpen(true)} className="primary text-xs h-9 px-3">
-              + {dict.batches.assignTeacher}
-            </button>
+            {canAssignTeacher && (
+              <button type="button" onClick={() => setTeacherModalOpen(true)} className="primary text-xs h-9 px-3">
+                + {dict.batches.assignTeacher}
+              </button>
+            )}
           </div>
           {batch.batchTeacherAssignments.filter((a: any) => a.status === 'ACTIVE').length === 0 ? (
             <p className="text-[13px] text-[#94a3b8] italic">{dict.batches.noTeachers}</p>
@@ -488,9 +545,11 @@ export default function BatchDetailPage() {
                         {lang === 'bn' && a.subject.banglaName ? a.subject.banglaName : a.subject.name}
                       </div>
                     </div>
-                    <button onClick={() => removeTeacher(a.id)} className="text-xs text-rose-600 hover:underline font-semibold">
-                      {dict.batches.removeTeacher}
-                    </button>
+                    {canAssignTeacher && (
+                      <button onClick={() => removeTeacher(a.id)} className="text-xs text-rose-600 hover:underline font-semibold">
+                        {dict.batches.removeTeacher}
+                      </button>
+                    )}
                   </div>
                 ))}
             </div>
@@ -503,9 +562,11 @@ export default function BatchDetailPage() {
         <div className="card p-5 md:p-6 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-[#063b78]">{dict.batches.tabRoutine}</h2>
-            <Link href={`/routine?batch=${batchId}`} className="text-xs font-semibold text-[#063b78] hover:underline">
-              {dict.routine.addBtn} →
-            </Link>
+            {canManageRoutine && (
+              <Link href={`/routine?batch=${batchId}`} className="text-xs font-semibold text-[#063b78] hover:underline">
+                {dict.routine.addBtn} →
+              </Link>
+            )}
           </div>
           {batch.classSchedules.length === 0 ? (
             <p className="text-[13px] text-[#94a3b8] italic">{dict.batches.noRoutine}</p>

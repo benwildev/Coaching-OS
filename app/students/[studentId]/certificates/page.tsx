@@ -20,10 +20,10 @@ interface CertificateRow {
 export default function StudentCertificatesPage() {
   const params = useParams();
   const studentId = params?.studentId as string;
-  const { lang, currentUser, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
   const cert = dict.certificates;
-  const canIssue = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN' || currentUser?.role === 'STAFF';
+  const canIssue = can('students.certificates');
 
   const [certificates, setCertificates] = useState<CertificateRow[] | null>(null);
   const [issuing, setIssuing] = useState(false);

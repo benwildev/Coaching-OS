@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from 'jose';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import prisma from '@/lib/db';
 import { getPortalSecretKey } from './secret';
 import { portalIdentityInclude, toPortalSessionUser } from '@/lib/services/portal-auth.service';
@@ -82,8 +82,23 @@ export async function verifyPortalSessionToken(token: string): Promise<PortalSes
   }
 }
 
+/**
+ * The native mobile app (mobile/) can't rely on cookies, so it sends the same
+ * portal JWT as `Authorization: Bearer <token>`. A Bearer header takes
+ * precedence over the cookie; verification is identical either way.
+ */
+async function getBearerToken(): Promise<string | null> {
+  const authorization = (await headers()).get('authorization');
+  if (!authorization) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(authorization.trim());
+  return match ? match[1] : null;
+}
+
 export async function getPortalSession(): Promise<PortalSessionUser | null> {
   try {
+    const bearer = await getBearerToken();
+    if (bearer) return await verifyPortalSessionToken(bearer);
+
     const cookieStore = await cookies();
     const token = cookieStore.get(PORTAL_SESSION_COOKIE_NAME)?.value;
     if (!token) return null;

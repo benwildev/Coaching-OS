@@ -17,11 +17,11 @@ interface TemplateRow {
 }
 
 export default function CommunicationTemplatesPage() {
-  const { lang, currentUser } = useApp();
+  const { lang, can } = useApp();
   const t = DICTIONARY[lang];
   const comm = t.communication;
   const c = t.common;
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canManage = can('communication.templates.manage');
 
   const [rows, setRows] = useState<TemplateRow[]>([]);
   const [loading, setLoading] = useState(true);

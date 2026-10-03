@@ -21,6 +21,7 @@ export interface BatchFilterParams {
   groupId?: string;
   courseId?: string;
   status?: string;
+  batchIds?: string[];
   page?: number;
   pageSize?: number;
 }
@@ -35,6 +36,13 @@ export async function getBatchesList(coachingCenterId: string, params: BatchFilt
   const skip = (page - 1) * pageSize;
 
   const where: Prisma.BatchWhereInput = { coachingCenterId };
+  if (params.batchIds !== undefined) {
+    if (params.batchIds.length === 0) {
+      where.id = '00000000-0000-0000-0000-000000000000';
+    } else {
+      where.id = { in: params.batchIds };
+    }
+  }
   if (params.branchId && params.branchId !== 'all') where.branchId = params.branchId;
   if (params.sessionId && params.sessionId !== 'all') where.academicSessionId = params.sessionId;
   if (params.programId && params.programId !== 'all') where.academicProgramId = params.programId;

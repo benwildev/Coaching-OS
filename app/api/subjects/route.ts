@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import prisma from '@/lib/db';
 
@@ -17,6 +17,7 @@ const createSubjectSchema = z.object({
 export async function GET(request: Request) {
   try {
     const { coachingCenterId } = await requireTenant();
+    await requirePermission('courses.read');
     const { searchParams } = new URL(request.url);
 
     const classId = searchParams.get('classId');
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
     const { coachingCenterId, user } = await requireTenant();
     // Phase 10.5: previously any authenticated tenant user (incl. TEACHER)
     // could create subjects; academic setup is an office-staff action.
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('batches.update');
     const body = await request.json().catch(() => null);
     const parsed = createSubjectSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

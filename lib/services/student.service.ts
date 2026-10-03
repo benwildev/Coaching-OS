@@ -29,6 +29,7 @@ export interface StudentFilterParams {
   batchId?: string;
   branchId?: string;
   status?: string;
+  allowedBatchIds?: string[];
   page?: number;
   pageSize?: number;
   sortBy?: 'name' | 'studentIdCode' | 'admissionDate' | 'createdAt';
@@ -1016,8 +1017,30 @@ export async function getStudentsList(
     };
   }
 
-  // Batch Filter
-  if (params.batchId && params.batchId !== 'all') {
+  // Batch Filter & Academic Scope
+  if (params.allowedBatchIds !== undefined) {
+    if (params.allowedBatchIds.length === 0) {
+      where.id = '00000000-0000-0000-0000-000000000000';
+    } else if (params.batchId && params.batchId !== 'all') {
+      if (!params.allowedBatchIds.includes(params.batchId)) {
+        where.id = '00000000-0000-0000-0000-000000000000';
+      } else {
+        where.studentBatches = {
+          some: {
+            batchId: params.batchId,
+            status: 'ACTIVE',
+          },
+        };
+      }
+    } else {
+      where.studentBatches = {
+        some: {
+          batchId: { in: params.allowedBatchIds },
+          status: 'ACTIVE',
+        },
+      };
+    }
+  } else if (params.batchId && params.batchId !== 'all') {
     where.studentBatches = {
       some: {
         batchId: params.batchId,
@@ -1070,6 +1093,22 @@ export async function getStudentsList(
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+  const scopeWhere: Prisma.StudentWhereInput = { coachingCenterId };
+  if (params.allowedBatchIds !== undefined) {
+    if (params.allowedBatchIds.length === 0) {
+      scopeWhere.id = '00000000-0000-0000-0000-000000000000';
+    } else {
+      scopeWhere.studentBatches = {
+        some: {
+          batchId: { in: params.allowedBatchIds },
+          status: 'ACTIVE',
+        },
+      };
+    }
+  } else if (params.branchId && params.branchId !== 'all') {
+    scopeWhere.branchId = params.branchId;
+  }
+
   const [
     totalCount,
     activeCount,
@@ -1078,11 +1117,11 @@ export async function getStudentsList(
     filteredCount,
     students,
   ] = await Promise.all([
-    prisma.student.count({ where: { coachingCenterId } }),
-    prisma.student.count({ where: { coachingCenterId, status: 'ACTIVE' } }),
-    prisma.student.count({ where: { coachingCenterId, status: 'INACTIVE' } }),
+    prisma.student.count({ where: scopeWhere }),
+    prisma.student.count({ where: { ...scopeWhere, status: 'ACTIVE' } }),
+    prisma.student.count({ where: { ...scopeWhere, status: 'INACTIVE' } }),
     prisma.student.count({
-      where: { coachingCenterId, createdAt: { gte: thirtyDaysAgo } },
+      where: { ...scopeWhere, createdAt: { gte: thirtyDaysAgo } },
     }),
     prisma.student.count({ where }),
     prisma.student.findMany({

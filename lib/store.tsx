@@ -3,6 +3,13 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import type { SessionUser } from '@/lib/auth/session';
+import { can as canPermission, type PermissionCode } from '@/lib/auth/permissions';
+
+/** 'loading' until the first /api/auth/me answer; never treated as any role. */
+export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
+
+/** Minimum gap between automatic /api/auth/me refreshes (navigation / focus). */
+const AUTH_REFRESH_MIN_INTERVAL_MS = 5000;
 
 export const RANGES = [
   { id: 'month', label: 'This month', sub: '1–21 Sep 2026', n: 1 },
@@ -49,6 +56,9 @@ type Ctx = {
   setLang: (v: 'en' | 'bn') => void;
   currentUser: SessionUser | null;
   currentCenter: CenterInfo | null;
+  authStatus: AuthStatus;
+  /** Does the current user hold this permission? Always false while loading / logged out. */
+  can: (code: PermissionCode) => boolean;
   refreshAuth: () => Promise<void>;
 };
 
@@ -65,6 +75,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLang] = useState<'en' | 'bn'>('bn'); // Default to Bangla as required
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [currentCenter, setCurrentCenter] = useState<CenterInfo | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
+  const lastAuthFetch = useRef(0);
   const tt = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
   const pathname = usePathname();
@@ -72,18 +84,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const isPortalRoute = !!pathname?.startsWith('/portal') || !!pathname?.startsWith('/super-admin');
 
   const fetchAuthInfo = useCallback(async () => {
+    lastAuthFetch.current = Date.now();
     try {
-      const res = await fetch('/api/auth/me');
+      const res = await fetch('/api/auth/me', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.authenticated) {
           setCurrentUser(data.user);
           setCurrentCenter(data.center);
+          setAuthStatus('authenticated');
         } else {
           setCurrentUser(null);
           setCurrentCenter(null);
+          setAuthStatus('unauthenticated');
         }
       }
+      // A failed/non-OK answer leaves the previous state untouched: the user
+      // stays 'loading' (no navigation, no page) rather than becoming anyone.
     } catch {
       // Ignore network errors in offline/dev
     }
@@ -95,6 +112,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (isPortalRoute) return;
     fetchAuthInfo();
   }, [fetchAuthInfo, isPortalRoute]);
+
+  // Phase 14.2: the Owner can change permissions at any time and the server
+  // reads them fresh on every request, so re-read the current user after
+  // navigation and when the tab regains focus (throttled).
+  useEffect(() => {
+    if (isPortalRoute) return;
+    if (Date.now() - lastAuthFetch.current > AUTH_REFRESH_MIN_INTERVAL_MS) fetchAuthInfo();
+  }, [pathname, isPortalRoute, fetchAuthInfo]);
+
+  useEffect(() => {
+    if (isPortalRoute) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastAuthFetch.current > AUTH_REFRESH_MIN_INTERVAL_MS) {
+        fetchAuthInfo();
+      }
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isPortalRoute, fetchAuthInfo]);
+
+  const can = useCallback((code: PermissionCode) => canPermission(currentUser, code), [currentUser]);
 
   useEffect(() => {
     try {
@@ -143,6 +185,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setLang,
         currentUser,
         currentCenter,
+        authStatus,
+        can,
         refreshAuth: fetchAuthInfo,
       }}
     >

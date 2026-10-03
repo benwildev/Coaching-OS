@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { setPortalAccountStatus } from '@/lib/services/portal-auth.service';
 import { apiErrorResponse } from '@/lib/api-error';
 
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function PATCH(request: Request, { params }: { params: Promise<{ portalAccountId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('portal_accounts.manage');
     const { portalAccountId } = await params;
     const body = await request.json().catch(() => null);
     if (body?.status !== 'ACTIVE' && body?.status !== 'DISABLED') {

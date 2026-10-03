@@ -69,9 +69,9 @@ export async function getReportOptions(user: SessionUser) {
     branchLocked,
     lockedBranchId: branchLocked ? user.branchId : null,
     permissions: {
-      categories: REPORT_CATEGORIES.filter((c) => canAccessCategory(user.role, c)),
+      categories: REPORT_CATEGORIES.filter((c) => canAccessCategory(user, c)),
       compareBranches: canCompareBranches(user.role),
-      finance: canViewFinance(user.role),
+      finance: canViewFinance(user),
       internalResults: canViewInternalResults(user.role),
     },
     branches,

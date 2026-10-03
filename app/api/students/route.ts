@@ -1,29 +1,24 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, resolveEffectiveBranchId, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, resolveEffectiveBranchId, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import {
   getStudentsList,
   createStudentAdmission,
 } from '@/lib/services/student.service';
 import { admissionSchema } from '@/lib/validations/student';
+import { getTeacherByUserId } from '@/lib/services/teacher.service';
+import { getTeacherAuthorizedBatchIds } from '@/lib/auth/teacher-scope';
 
 export const dynamic = 'force-dynamic';
 
-// Phase 10.4: this route previously only checked `getSession()` — any
-// authenticated staff user, any role, any branch, could list or admit
-// students anywhere in the tenant. Reading is kept available to TEACHER
-// (existing business behavior — a teacher looking up a student's profile
-// is legitimate), but every read is now branch-scoped like every other
-// module, and admitting/editing a student master record is restricted to
-// office-staff roles (OWNER/ADMIN/STAFF), matching how the business itself
-// describes these responsibilities.
-const READ_ROLES = ['OWNER', 'ADMIN', 'STAFF', 'TEACHER'] as const;
-const WRITE_ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
+// Phase 10.4 / 14.3: reads stay open to TEACHER, but strictly scoped to the teacher's
+// active assigned batches and active enrolled students. Management roles (OWNER/ADMIN/STAFF)
+// retain full branch/tenant management reads.
 
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole([...READ_ROLES]);
+    await requirePermission('students.read');
 
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search') || searchParams.get('q') || undefined;
@@ -45,6 +40,12 @@ export async function GET(request: Request) {
     // center-wide OWNER/ADMIN (or a branch-unscoped STAFF/TEACHER).
     const branchId = resolveEffectiveBranchId(user, requestedBranchId);
 
+    let allowedBatchIds: string[] | undefined;
+    if (user.role === 'TEACHER') {
+      const teacher = await getTeacherByUserId(coachingCenterId, user.userId);
+      allowedBatchIds = teacher ? await getTeacherAuthorizedBatchIds(coachingCenterId, teacher.id) : [];
+    }
+
     const result = await getStudentsList(coachingCenterId, {
       search,
       sessionId,
@@ -55,6 +56,7 @@ export async function GET(request: Request) {
       batchId,
       branchId,
       status,
+      allowedBatchIds,
       page,
       pageSize,
       sortBy,
@@ -70,7 +72,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole([...WRITE_ROLES]);
+    await requirePermission('students.create');
 
     const body = await request.json();
     const validated = admissionSchema.safeParse(body);

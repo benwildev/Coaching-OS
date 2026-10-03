@@ -74,7 +74,7 @@ export const batchList: ViewHandler = async ({ scope, filters, forExport }) => {
     },
   });
   const ids = batches.map((b) => b.id);
-  const showFees = canViewFinance(scope.role);
+  const showFees = canViewFinance(scope.user);
   const [members, attendance, fees] = await Promise.all([
     batchMembershipCounts(scope.coachingCenterId, ids, range),
     // One grouped query for the listed batches, same Phase 4 rules as the attendance report.
@@ -166,7 +166,7 @@ export const batchDetail: ViewHandler = async ({ scope, filters }) => {
   if (!batch) throw new Error('BATCH_NOT_FOUND');
   return {
     data: {
-      showFees: canViewFinance(scope.role),
+      showFees: canViewFinance(scope.user),
       batch: {
         ...batch,
         startDate: batch.startDate?.toISOString() ?? null,
@@ -179,7 +179,7 @@ export const batchDetail: ViewHandler = async ({ scope, filters }) => {
 
 /** Drill-down fees: the existing Phase 5 service, unchanged. */
 export const batchFees: ViewHandler = async ({ scope, filters }) => {
-  if (!canViewFinance(scope.role)) throw new Error('FORBIDDEN_REPORT');
+  if (!canViewFinance(scope.user)) throw new Error('FORBIDDEN_REPORT');
   if (!filters.batchId) throw new Error('INVALID_FILTER: batchId is required');
   const visible = await prisma.batch.count({ where: batchWhere(scope, { ...filters, status: undefined, search: undefined }) });
   if (!visible) throw new Error('BATCH_NOT_FOUND');

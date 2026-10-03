@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getProviderBalance } from '@/lib/services/communication-settings.service';
 import { COMMUNICATION_CHANNELS } from '@/lib/validations/communication-template';
@@ -14,7 +14,7 @@ const balanceSchema = z.object({
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.communication.update');
     const { searchParams } = new URL(request.url);
     const parsed = balanceSchema.safeParse({ channel: searchParams.get('channel') });
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

@@ -1,6 +1,7 @@
 import prisma from '@/lib/db';
 import type { Prisma } from '@prisma/client';
-import type { SessionUser } from '@/lib/auth/session';
+import { isBranchScoped, type SessionUser } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
 import { resolveAcademicContext } from './academic.service';
 import { getTeacherAuthorizedSubjectIds } from './exam-result.service';
@@ -12,8 +13,6 @@ import {
   type QuestionType,
   type UpdateQuestionInput,
 } from '@/lib/validations/question';
-
-const MANAGER_ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
 
 /** Types whose answer key must be present before publication. */
 const ANSWER_REQUIRED_TYPES: readonly string[] = ['SHORT', 'FILL_BLANK'];
@@ -35,10 +34,6 @@ export async function resolveQuestionScope(coachingCenterId: string, user: Sessi
     user,
     teacherSubjectIds: await getTeacherAuthorizedSubjectIds(coachingCenterId, user),
   };
-}
-
-function isBranchScoped(user: SessionUser) {
-  return user.role !== 'OWNER' && user.role !== 'ADMIN' && !!user.branchId;
 }
 
 /**
@@ -84,7 +79,7 @@ function assertCanModify(
 }
 
 export function canManageQuestions(user: SessionUser) {
-  return (MANAGER_ROLES as readonly string[]).includes(user.role) || user.role === 'TEACHER';
+  return can(user, 'questions.create');
 }
 
 // ------------------------------------------------------------------

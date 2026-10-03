@@ -53,7 +53,7 @@ const emptyNewCourse = {
 };
 
 export default function CoursesPage() {
-  const { lang, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
 
   const [search, setSearch] = useState('');
@@ -175,14 +175,16 @@ export default function CoursesPage() {
           <h1 className="text-2xl md:text-3xl font-extrabold text-[#063b78] tracking-tight">{dict.courses.title}</h1>
           <p className="text-[13.5px] text-[#64748b] mt-0.5 font-medium">{dict.courses.subtitle}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setModalOpen(true)}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
-        >
-          <Icon name="plus" size={17} />
-          <span>{dict.courses.createBtn}</span>
-        </button>
+        {can('courses.create') && (
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
+          >
+            <Icon name="plus" size={17} />
+            <span>{dict.courses.createBtn}</span>
+          </button>
+        )}
       </div>
 
       {/* Filters */}

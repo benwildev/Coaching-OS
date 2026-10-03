@@ -61,13 +61,18 @@ export default function TeacherDetailPage() {
   const params = useParams();
   const router = useRouter();
   const teacherId = params.teacherId as string;
-  const { lang, showToast, currentUser } = useApp();
+  const { lang, showToast, currentUser, can } = useApp();
   const dict = DICTIONARY[lang];
-  const canManage = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
-  const canManageAttendance = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN' || currentUser?.role === 'STAFF';
+  const isTeacherRole = currentUser?.role === 'TEACHER';
+  const canEdit = can('teachers.update') && !isTeacherRole;
+  const canDelete = can('teachers.delete') && !isTeacherRole;
+  const canAssign = can('teachers.assignments') && !isTeacherRole;
+  const canManageCompensation = can('compensation.manage') && !isTeacherRole;
+  const canManageAttendance = can('teacher_attendance.create') && !isTeacherRole;
 
   const [teacher, setTeacher] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
   const [redacted, setRedacted] = useState(false);
   const [tab, setTab] = useState<Tab>('overview');
 
@@ -111,7 +116,7 @@ export default function TeacherDetailPage() {
   });
 
   // Teacher <-> login account linking
-  const canManageAccount = currentUser?.role === 'OWNER' || currentUser?.role === 'ADMIN';
+  const canManageAccount = can('teachers.account') && !isTeacherRole;
   const [account, setAccount] = useState<{ linked: boolean; account: { email: string; name: string; status: string } | null; eligibleAccounts: Array<{ id: string; email: string; name: string; status: string }> } | null>(null);
   const [accountMode, setAccountMode] = useState<'create' | 'link' | null>(null);
   const [accountForm, setAccountForm] = useState({ name: '', email: '', phone: '', password: '', userId: '' });
@@ -136,6 +141,10 @@ export default function TeacherDetailPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/teachers/${teacherId}`);
+      if (res.status === 403) {
+        setForbidden(true);
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -478,10 +487,46 @@ export default function TeacherDetailPage() {
     }
   };
 
-  if (loading || !teacher) {
+  if (loading) {
     return (
       <div className="max-w-[1000px] mx-auto flex items-center justify-center min-h-[300px]">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#063b78] border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (forbidden) {
+    return (
+      <div className="max-w-[800px] mx-auto py-12 text-center">
+        <div className="p-8 rounded-2xl bg-white border border-[#dce5f0] shadow-2xs flex flex-col items-center">
+          <Icon name="shield" size={32} className="text-rose-500 mb-3" />
+          <h2 className="text-xl font-bold text-[#092f63]">
+            {lang === 'bn' ? 'অনুমতি নেই (Forbidden)' : 'Access Forbidden'}
+          </h2>
+          <p className="text-[13.5px] text-[#64748b] mt-1 mb-5">
+            {lang === 'bn'
+              ? 'এই শিক্ষকের তথ্য দেখার আপনার কোনো অনুমতি নেই।'
+              : 'You do not have authorization to view this teacher profile.'}
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[13.5px] font-semibold text-white"
+          >
+            <Icon name="chevleft" size={15} />
+            <span>{lang === 'bn' ? 'ড্যাশবোর্ডে ফিরুন' : 'Back to Dashboard'}</span>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!teacher) {
+    return (
+      <div className="max-w-[1000px] mx-auto text-center py-16">
+        <p className="text-[#64748b]">{lang === 'bn' ? 'শিক্ষক পাওয়া যায়নি' : 'Teacher not found.'}</p>
+        <Link href={can('teachers.read') ? '/teachers' : '/dashboard'} className="text-[#063b78] font-semibold hover:underline">
+          {can('teachers.read') ? dict.teachers.back : (lang === 'bn' ? 'ড্যাশবোর্ডে ফিরুন' : 'Back to Dashboard')}
+        </Link>
       </div>
     );
   }
@@ -494,7 +539,7 @@ export default function TeacherDetailPage() {
     { id: 'today', label: dict.teachers.tabToday },
     ...(redacted ? [] : ([{ id: 'attendance', label: dict.teachers.tabAttendance }, { id: 'employment', label: dict.teachers.tabEmployment }] as const)),
     // Owner/Admin manage it; a Teacher sees only their own profile (never redacted), read-only.
-    ...(!redacted && (canManage || currentUser?.role === 'TEACHER') ? ([{ id: 'compensation', label: dict.teachers.tabCompensation }] as const) : []),
+    ...(!redacted && (can('compensation.read') || currentUser?.role === 'TEACHER') ? ([{ id: 'compensation', label: dict.teachers.tabCompensation }] as const) : []),
   ];
 
   // Group teaching assignments by course -> batch
@@ -563,9 +608,9 @@ export default function TeacherDetailPage() {
   return (
     <div className="max-w-[1000px] mx-auto flex flex-col gap-5">
       <div>
-        <Link href="/teachers" className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#063b78] hover:underline mb-2">
+        <Link href={can('teachers.read') ? '/teachers' : '/dashboard'} className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#063b78] hover:underline mb-2">
           <Icon name="chevleft" size={16} />
-          <span>{dict.teachers.back}</span>
+          <span>{can('teachers.read') ? dict.teachers.back : (lang === 'bn' ? 'ড্যাশবোর্ডে ফিরুন' : 'Back to Dashboard')}</span>
         </Link>
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
@@ -582,7 +627,7 @@ export default function TeacherDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2.5">
-            {canManage && (
+            {canEdit && (
               <button
                 type="button"
                 onClick={openEditModal}
@@ -699,7 +744,7 @@ export default function TeacherDetailPage() {
               <h2 className="text-lg font-bold text-[#063b78]">{dict.teachers.teachingAssignments}</h2>
               <p className="text-[12px] text-[#64748b] mt-0.5">{dict.teachers.assignmentHelp}</p>
             </div>
-            {canManage && (
+            {canAssign && (
               <button
                 type="button"
                 onClick={openAddAssignmentModal}
@@ -714,7 +759,7 @@ export default function TeacherDetailPage() {
           {assignmentsByCourse.size === 0 ? (
             <div className="p-8 text-center bg-[#f8fafc] rounded-2xl border border-dashed border-[#cbd5e1]">
               <p className="text-[13.5px] text-[#64748b]">{dict.teachers.noAssignments}</p>
-              {canManage && (
+              {canAssign && (
                 <button
                   type="button"
                   onClick={openAddAssignmentModal}
@@ -784,7 +829,7 @@ export default function TeacherDetailPage() {
                                     {!isEnded ? dict.teachers.statusActive : dict.teachers.statusEnded}
                                   </span>
 
-                                  {canManage && !isEnded && (
+                                  {canAssign && !isEnded && (
                                     <button
                                       type="button"
                                       disabled={endingAssignId === a.id}
@@ -1029,7 +1074,7 @@ export default function TeacherDetailPage() {
           teacherId={teacherId}
           teacherBranchId={teacher.branchId || null}
           assignments={teacher.batchTeacherAssignments || []}
-          canManage={canManage}
+          canManage={canManageCompensation}
         />
       )}
 
@@ -1348,7 +1393,7 @@ export default function TeacherDetailPage() {
               </div>
 
               {/* Danger Zone */}
-              {canManage && (
+              {canDelete && (
                 <div className="pt-3 border-t border-red-100">
                   <div className="rounded-xl border border-red-200 bg-red-50/60 p-3.5">
                     <div className="flex items-start justify-between gap-3 flex-wrap">

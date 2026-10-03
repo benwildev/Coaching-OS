@@ -1,18 +1,25 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess, resolveEffectiveBranchId } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getBatchesList, createBatch } from '@/lib/services/batch.service';
 import { batchSchema } from '@/lib/validations/batch';
+import { getTeacherByUserId } from '@/lib/services/teacher.service';
+import { getTeacherAuthorizedBatchIds } from '@/lib/auth/teacher-scope';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('batches.read');
     const { searchParams } = new URL(request.url);
 
-    // Phase 10.5: a branch-locked STAFF/TEACHER could previously list any
-    // other branch's batches by editing ?branch=.
+    let batchIds: string[] | undefined;
+    if (user.role === 'TEACHER') {
+      const teacher = await getTeacherByUserId(coachingCenterId, user.userId);
+      batchIds = teacher ? await getTeacherAuthorizedBatchIds(coachingCenterId, teacher.id) : [];
+    }
+
     const result = await getBatchesList(coachingCenterId, {
       search: searchParams.get('search') || undefined,
       branchId: resolveEffectiveBranchId(user, searchParams.get('branch') || undefined),
@@ -22,21 +29,21 @@ export async function GET(request: Request) {
       groupId: searchParams.get('group') || undefined,
       courseId: searchParams.get('course') || undefined,
       status: searchParams.get('status') || undefined,
+      batchIds,
       page: parseInt(searchParams.get('page') || '1', 10),
       pageSize: parseInt(searchParams.get('pageSize') || '20', 10),
     });
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
-    console.error('[API /api/batches GET] Error:', error);
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    return apiErrorResponse(error, '/api/batches GET');
   }
 }
 
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('batches.create');
 
     const body = await request.json();
     const validated = batchSchema.safeParse(body);

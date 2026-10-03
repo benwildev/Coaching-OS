@@ -6,26 +6,21 @@ import Icon from './Icon';
 import { useApp } from '@/lib/store';
 import { SidebarContent } from './Sidebar';
 import { DICTIONARY } from '@/lib/i18n';
-
-const BOTTOM_ITEMS = [
-  { id: 'dashboard', icon: 'chart', href: '/dashboard' },
-  { id: 'students', icon: 'user', href: '/students' },
-  { id: 'fees', icon: 'wallet', href: '/fees' },
-  { id: 'attendance', icon: 'check', href: '/attendance' },
-];
+import { bottomNavigation, filterNavigation, isNavActive } from '@/lib/navigation';
 
 export default function MobileNav() {
   const pathname = usePathname();
-  const activeId = pathname === '/' || pathname === '/dashboard' ? 'dashboard' : pathname.replace('/', '');
-  const { mobileNav, setMobileNav, lang } = useApp();
+  const { mobileNav, setMobileNav, lang, currentUser, currentCenter } = useApp();
   const dict = DICTIONARY[lang].nav;
+  // Same configuration and permission filter as the desktop sidebar and the drawer below.
+  const bottomItems = bottomNavigation(filterNavigation(currentUser, currentCenter?.features));
 
   return (
     <>
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-[#dce5f0] flex items-stretch h-16 shadow-lg">
-        {BOTTOM_ITEMS.map((item) => {
-          const label = (dict as any)[item.id] || item.id;
-          const active = activeId === item.id;
+        {bottomItems.map((item) => {
+          const label = (dict as Record<string, string>)[item.id] || item.id;
+          const active = isNavActive(pathname, item.href);
           return (
             <Link
               key={item.id}

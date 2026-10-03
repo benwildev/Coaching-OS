@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { updateStudentFeeAssignment, getFeeAssignmentBranchId } from '@/lib/services/fee.service';
 import { studentFeeAssignmentUpdateSchema } from '@/lib/validations/fee';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function PUT(request: Request, props: { params: Promise<{ assignmentId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('fees.structures.update');
 
     const { assignmentId } = await props.params;
     const body = await request.json();

@@ -41,7 +41,7 @@ const emptyForm = {
 
 function RoutinePageContent() {
   const searchParams = useSearchParams();
-  const { lang, showToast } = useApp();
+  const { lang, showToast, can } = useApp();
   const dict = DICTIONARY[lang];
 
   const [view, setView] = useState<ViewMode>(searchParams.get('batch') ? 'batch' : 'weekly');
@@ -215,10 +215,14 @@ function RoutinePageContent() {
   };
 
   function ScheduleCard({ s }: { s: ScheduleItem }) {
+    const canManage = can('routine.manage');
     return (
       <button
-        onClick={() => openEditModal(s)}
+        onClick={() => canManage && openEditModal(s)}
+        disabled={!canManage}
         className={`w-full text-left p-2.5 rounded-xl border text-[12px] transition-colors ${
+          !canManage ? 'cursor-default' : ''
+        } ${
           s.status === 'CANCELLED' ? 'border-rose-200 bg-rose-50 opacity-70' : 'border-[#dce5f0] bg-white hover:border-[#063b78]'
         }`}
       >
@@ -241,14 +245,16 @@ function RoutinePageContent() {
           <h1 className="text-2xl md:text-3xl font-extrabold text-[#063b78] tracking-tight">{dict.routine.title}</h1>
           <p className="text-[13.5px] text-[#64748b] mt-0.5 font-medium">{dict.routine.subtitle}</p>
         </div>
-        <button
-          type="button"
-          onClick={openCreateModal}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
-        >
-          <Icon name="plus" size={17} />
-          <span>{dict.routine.addBtn}</span>
-        </button>
+        {can('routine.manage') && (
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#063b78] px-5 py-2.5 text-[14px] font-semibold text-white shadow-sm hover:bg-[#052e5e] transition-colors"
+          >
+            <Icon name="plus" size={17} />
+            <span>{dict.routine.addBtn}</span>
+          </button>
+        )}
       </div>
 
       {/* View Switcher */}

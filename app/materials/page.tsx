@@ -28,7 +28,7 @@ interface MaterialRow {
 }
 
 export default function MaterialsPage() {
-  const { lang } = useApp();
+  const { lang, can } = useApp();
   const t = DICTIONARY[lang];
   const m = t.materials;
   const c = t.common;
@@ -87,10 +87,12 @@ export default function MaterialsPage() {
   return (
     <div className="max-w-[1400px] mx-auto flex flex-col gap-5">
       <PageHeader eyebrow={t.nav.materials} title={m.title} subtitle={m.subtitle}>
-        <Link href="/materials/new" className="primary">
-          <Icon name="plus" size={16} />
-          {m.newMaterial}
-        </Link>
+        {can('materials.create') && (
+          <Link href="/materials/new" className="primary">
+            <Icon name="plus" size={16} />
+            {m.newMaterial}
+          </Link>
+        )}
       </PageHeader>
 
       {stats && stats.total > 0 && (
@@ -130,7 +132,12 @@ export default function MaterialsPage() {
           hasFilters ? (
             <EmptyState message={m.noMatch} icon="search" />
           ) : (
-            <EmptyState message={m.empty} actionHref="/materials/new" actionLabel={m.newMaterial} icon="book" />
+            <EmptyState
+              message={m.empty}
+              actionHref={can('materials.create') ? '/materials/new' : undefined}
+              actionLabel={m.newMaterial}
+              icon="book"
+            />
           )
         ) : (
           <>

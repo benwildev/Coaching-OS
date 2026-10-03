@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requirePermission, requireTenant } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { createNotice, listNotices, resolveNoticeScope } from '@/lib/services/notice.service';
 import { createNoticeSchema } from '@/lib/validations/notice';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('notices.read');
     const sp = new URL(request.url).searchParams;
     const scope = resolveNoticeScope(coachingCenterId, user);
     const result = await listNotices(scope, {
@@ -28,6 +29,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('notices.create');
     const body = await request.json().catch(() => null);
     const parsed = createNoticeSchema.safeParse(body);
     if (!parsed.success) return validationErrorResponse(parsed.error.flatten().fieldErrors);

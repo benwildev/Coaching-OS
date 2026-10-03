@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { replaceCourseSubjects } from '@/lib/services/course.service';
 import { courseSubjectsReplaceSchema } from '@/lib/validations/course';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function PUT(request: Request, props: { params: Promise<{ courseId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('courses.update');
 
     const { courseId } = await props.params;
     const body = await request.json();

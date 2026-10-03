@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
-import { requireTenant } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getTemplateById, resolveCommunicationScope, updateTemplate } from '@/lib/services/communication.service';
 import { communicationTemplateSchema } from '@/lib/validations/communication-template';
+
+import { assertTeacherCanAccessCommunicationTarget } from '@/lib/auth/teacher-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +13,8 @@ type Ctx = { params: Promise<{ templateId: string }> };
 export async function GET(_request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('communication.templates.read');
+    assertTeacherCanAccessCommunicationTarget(user);
     const { templateId } = await params;
     const scope = resolveCommunicationScope(coachingCenterId, user);
     const template = await getTemplateById(scope, templateId);
@@ -23,6 +27,8 @@ export async function GET(_request: Request, { params }: Ctx) {
 export async function PUT(request: Request, { params }: Ctx) {
   try {
     const { coachingCenterId, user } = await requireTenant();
+    await requirePermission('communication.templates.manage');
+    assertTeacherCanAccessCommunicationTarget(user);
     const { templateId } = await params;
     const body = await request.json().catch(() => null);
     const parsed = communicationTemplateSchema.safeParse(body);

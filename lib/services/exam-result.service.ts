@@ -4,6 +4,7 @@ import { notifyStudentGuardians } from './guardian-notify.service';
 import { EXAM_STATUS } from '@/lib/validations/exam';
 import type { ResultEntryInput, ResultFilterParams } from '@/lib/validations/result';
 import { assertBranchAccess, type SessionUser } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import type { Prisma } from '@prisma/client';
 import {
   getCoachingCenterGradingConfig,
@@ -437,9 +438,9 @@ export async function bulkSaveSubjectResults(
     throw new Error('CANNOT_ENTER_MARKS: Exam is in DRAFT. Please schedule or start the exam first.');
   }
 
-  // Editing published results requires OWNER or ADMIN
+  // Editing published results requires exams.publish (default: OWNER/ADMIN)
   const isPostPublication = examSubject.exam.status === EXAM_STATUS.PUBLISHED;
-  if (isPostPublication && user.role !== 'OWNER' && user.role !== 'ADMIN') {
+  if (isPostPublication && !can(user, 'exams.publish')) {
     throw new Error('FORBIDDEN: Modifying published exam results requires Center Owner or Admin privileges.');
   }
 

@@ -34,7 +34,7 @@ interface Kpis {
 
 export default function AttendancePage() {
   const router = useRouter();
-  const { lang, showToast } = useApp();
+  const { lang, showToast, can, currentUser } = useApp();
   const dict = DICTIONARY[lang];
 
   const [classes, setClasses] = useState<TodaysClassItem[]>([]);
@@ -91,14 +91,18 @@ export default function AttendancePage() {
           <p className="text-[13.5px] text-[#64748b] mt-0.5 font-medium">{dict.attendance.subtitle}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Link href="/attendance/teacher" className="inline-flex items-center gap-1.5 rounded-xl border border-[#063b78] bg-[#063b78] text-white px-3.5 py-2 text-[12.5px] font-semibold hover:bg-[#052e5e]">
-            <Icon name="check" size={15} />
-            {dict.teachers.teacherAttendanceTitle}
-          </Link>
-          <Link href="/attendance/alerts" className="inline-flex items-center gap-1.5 rounded-xl border border-[#dce5f0] bg-white px-3.5 py-2 text-[12.5px] font-semibold text-[#092f63] hover:bg-[#f8fafc]">
-            <Icon name="alert" size={15} />
-            {dict.attendance.lowAttendance}
-          </Link>
+          {currentUser?.role !== 'TEACHER' && can('teacher_attendance.read') && (
+            <Link href="/attendance/teacher" className="inline-flex items-center gap-1.5 rounded-xl border border-[#063b78] bg-[#063b78] text-white px-3.5 py-2 text-[12.5px] font-semibold hover:bg-[#052e5e]">
+              <Icon name="check" size={15} />
+              {dict.teachers.teacherAttendanceTitle}
+            </Link>
+          )}
+          {currentUser?.role !== 'TEACHER' && (
+            <Link href="/attendance/alerts" className="inline-flex items-center gap-1.5 rounded-xl border border-[#dce5f0] bg-white px-3.5 py-2 text-[12.5px] font-semibold text-[#092f63] hover:bg-[#f8fafc]">
+              <Icon name="alert" size={15} />
+              {dict.attendance.lowAttendance}
+            </Link>
+          )}
           <Link href="/attendance/history" className="inline-flex items-center gap-1.5 rounded-xl border border-[#dce5f0] bg-white px-3.5 py-2 text-[12.5px] font-semibold text-[#092f63] hover:bg-[#f8fafc]">
             <Icon name="clock" size={15} />
             {dict.attendance.history}
@@ -142,7 +146,11 @@ export default function AttendancePage() {
             <div className="h-14 w-14 rounded-2xl bg-blue-50 text-[#063b78] flex items-center justify-center mb-3">
               <Icon name="calendar" size={26} />
             </div>
-            <p className="text-[14px] text-[#64748b]">{dict.attendance.emptyToday}</p>
+            <p className="text-[14px] text-[#64748b]">
+              {currentUser?.role === 'TEACHER'
+                ? (lang === 'bn' ? 'আজ আপনার জন্য কোনো ক্লাস নির্ধারিত নেই।' : 'No classes are scheduled for you today.')
+                : dict.attendance.emptyToday}
+            </p>
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -173,14 +181,24 @@ export default function AttendancePage() {
                   <div className="text-[12px] text-[#64748b]">{dict.attendance.students}: {lang === 'bn' ? toBanglaNumeral(item.eligibleStudentCount) : item.eligibleStudentCount}</div>
 
                   {item.session ? (
-                    <Link
-                      href={`/attendance/${item.session.id}`}
-                      className={`mt-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12.5px] font-bold ${
-                        isCompleted ? 'bg-[#eef3fa] text-[#063b78]' : 'bg-[#063b78] text-white'
-                      }`}
-                    >
-                      {isCompleted ? dict.attendance.viewAttendance : dict.attendance.continueAttendance}
-                    </Link>
+                    <div className="flex gap-2 mt-1">
+                      <Link
+                        href={`/attendance/${item.session.id}`}
+                        className={`grow inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12.5px] font-bold ${
+                          isCompleted ? 'bg-[#eef3fa] text-[#063b78]' : 'bg-[#063b78] text-white'
+                        }`}
+                      >
+                        {isCompleted ? dict.attendance.viewAttendance : dict.attendance.continueAttendance}
+                      </Link>
+                      {isCompleted && can('attendance.update') && (
+                        <Link
+                          href={`/attendance/${item.session.id}?edit=true`}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#063b78] text-[#063b78] bg-white px-3 py-2 text-[12.5px] font-bold hover:bg-blue-50"
+                        >
+                          {dict.common.edit || 'Edit'}
+                        </Link>
+                      )}
+                    </div>
                   ) : (
                     <button
                       type="button"

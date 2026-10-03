@@ -1,17 +1,20 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole, assertTeacherSelfAccess, assertBranchAccess } from '@/lib/auth/session';
+import { requireTenant, requirePermission, assertTeacherSelfAccess, assertBranchAccess } from '@/lib/auth/session';
 import { apiErrorResponse } from '@/lib/api-error';
 import { getOrCreateAttendanceSession, getAttendanceSessionDetail } from '@/lib/services/attendance.service';
 import { getTeacherByUserId } from '@/lib/services/teacher.service';
 import { getOrCreateSessionSchema } from '@/lib/validations/attendance';
 import prisma from '@/lib/db';
 
+import { assertTeacherCanAccessSchedule } from '@/lib/auth/teacher-scope';
+import { toDateOnly } from '@/lib/schedule';
+
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF', 'TEACHER']);
+    await requirePermission('attendance.create');
 
     const body = await request.json();
     const validated = getOrCreateSessionSchema.safeParse(body);
@@ -24,15 +27,14 @@ export async function POST(request: Request) {
 
     const schedule = await prisma.classSchedule.findFirst({
       where: { id: validated.data.classScheduleId, coachingCenterId },
-      select: { teacherId: true, branchId: true },
+      select: { teacherId: true, branchId: true, batchId: true, subjectId: true },
     });
     if (!schedule) {
       return NextResponse.json({ success: false, error: 'Class schedule not found' }, { status: 404 });
     }
     assertBranchAccess(user, schedule.branchId);
     if (user.role === 'TEACHER') {
-      const own = await getTeacherByUserId(coachingCenterId, user.userId);
-      assertTeacherSelfAccess(user, schedule.teacherId, own?.id || null);
+      await assertTeacherCanAccessSchedule(user, schedule, toDateOnly(validated.data.date));
     }
 
     const session = await getOrCreateAttendanceSession(

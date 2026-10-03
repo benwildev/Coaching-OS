@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { userCreateSchema } from '@/lib/validations/auth';
 import { getUsersByTenant, createUser, updateUserStatus } from '@/lib/services/user.service';
 import { apiErrorResponse } from '@/lib/api-error';
@@ -7,19 +7,19 @@ import { apiErrorResponse } from '@/lib/api-error';
 export async function GET() {
   try {
     const { coachingCenterId } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.users.read');
 
     const users = await getUsersByTenant(coachingCenterId);
     return NextResponse.json({ success: true, users });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  } catch (error) {
+    return apiErrorResponse(error, '/api/settings/users GET');
   }
 }
 
 export async function POST(req: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.users.create');
 
     const body = await req.json();
     const parsed = userCreateSchema.safeParse(body);
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('settings.users.update');
 
     const body = await req.json();
     const { targetUserId, status } = body;

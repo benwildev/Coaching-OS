@@ -46,8 +46,8 @@ interface StudentInvoice {
 }
 
 export default function DiscountsAndWaiversPage() {
-  const { lang, currentUser, showToast } = useApp();
-  const isOwner = currentUser?.role === 'OWNER';
+  const { lang, currentUser, showToast, can } = useApp();
+  const isOwner = can('fees.discount.approve');
 
   const [loading, setLoading] = useState(true);
   const [discounts, setDiscounts] = useState<DiscountItem[]>([]);

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireTenant, requireRole } from '@/lib/auth/session';
+import { requireTenant, requirePermission } from '@/lib/auth/session';
 import { apiErrorResponse, validationErrorResponse } from '@/lib/api-error';
 import { getCoursePricing, updateCoursePricing } from '@/lib/services/course-pricing.service';
 import { coursePricingSchema } from '@/lib/validations/course';
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(_request: Request, props: { params: Promise<{ courseId: string }> }) {
   try {
     const { coachingCenterId } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN', 'STAFF']);
+    await requirePermission('fees.structures.read');
     const { courseId } = await props.params;
 
     const pricing = await getCoursePricing(coachingCenterId, courseId);
@@ -28,7 +28,7 @@ export async function GET(_request: Request, props: { params: Promise<{ courseId
 export async function PUT(request: Request, props: { params: Promise<{ courseId: string }> }) {
   try {
     const { coachingCenterId, user } = await requireTenant();
-    await requireRole(['OWNER', 'ADMIN']);
+    await requirePermission('courses.pricing.update');
     const { courseId } = await props.params;
 
     const validated = coursePricingSchema.safeParse(await request.json());
