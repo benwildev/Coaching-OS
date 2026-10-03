@@ -63,6 +63,10 @@ export const ROUTE_RULES: readonly { pattern: string; requirement: RouteRequirem
   { pattern: '/salary/**', requirement: P('salary.read') },
   { pattern: '/finance/expenses/**', requirement: P('expenses.read') },
   { pattern: '/finance/expenses', requirement: P('expenses.read') },
+  { pattern: '/finance/reports/**', requirement: P('reports.finance.read', 'finance.dashboard.read') },
+  { pattern: '/finance/reports', requirement: P('reports.finance.read', 'finance.dashboard.read') },
+  { pattern: '/finance/cash-box/**', requirement: P('fees.cash_session.manage', 'finance.dashboard.read') },
+  { pattern: '/finance/cash-box', requirement: P('fees.cash_session.manage', 'finance.dashboard.read') },
   { pattern: '/finance/**', requirement: P('finance.dashboard.read') },
 
   { pattern: '/homework/new', requirement: P('homework.create') },

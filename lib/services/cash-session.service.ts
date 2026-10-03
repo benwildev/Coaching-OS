@@ -1,9 +1,9 @@
 import prisma from '@/lib/db';
 import { Prisma } from '@prisma/client';
-import type { SessionUser } from '@/lib/auth/session';
+import { isBranchScoped, resolveEffectiveBranchId, type SessionUser } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { recordAuditLog } from './audit.service';
-import { todayDhaka, dhakaDayStart, addDays } from '@/lib/reports/dates';
+import { todayDhaka, dhakaDayStart, addDays, isIsoDate } from '@/lib/reports/dates';
 import { toDateOnly } from '@/lib/schedule';
 
 /**
@@ -198,3 +198,154 @@ export async function listCashSessions(coachingCenterId: string, params: CashSes
 
   return { sessions, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
 }
+
+export async function getCashBoxDashboard(
+  coachingCenterId: string,
+  user: SessionUser,
+  requestedBranchId?: string | null,
+  dateStr?: string | null
+) {
+  const requested = requestedBranchId && requestedBranchId !== 'all' ? requestedBranchId : undefined;
+  const effectiveBranchId = resolveEffectiveBranchId(user, requested);
+  const branchLocked = isBranchScoped(user);
+
+  const branches = await prisma.branch.findMany({
+    where: { coachingCenterId, ...(branchLocked ? { id: user.branchId! } : {}) },
+    select: { id: true, name: true, banglaName: true },
+    orderBy: [{ isMain: 'desc' }, { name: 'asc' }],
+  });
+
+  if (effectiveBranchId && !branches.some((b) => b.id === effectiveBranchId)) {
+    throw new Error('BRANCH_NOT_FOUND: branch does not belong to this centre');
+  }
+
+  const activeBranchId = effectiveBranchId || branches[0]?.id;
+  const businessDateStr = dateStr && isIsoDate(dateStr) ? dateStr : todayDhaka();
+  const businessDate = toDateOnly(businessDateStr);
+
+  let currentSession = null;
+  let cashCollections = 0;
+  let cashRefunds = 0;
+  let cashExpenses = 0;
+  let expectedCash: number | null = null;
+
+  if (activeBranchId) {
+    currentSession = await prisma.cashSession.findUnique({
+      where: {
+        coachingCenterId_branchId_businessDate: {
+          coachingCenterId,
+          branchId: activeBranchId,
+          businessDate,
+        },
+      },
+      include: {
+        openedBy: { select: { id: true, name: true } },
+        closedBy: { select: { id: true, name: true } },
+        branch: { select: { id: true, name: true, banglaName: true } },
+      },
+    });
+
+    const ymd = businessDate.toISOString().slice(0, 10);
+    const dayStart = dhakaDayStart(ymd);
+    const dayEnd = dhakaDayStart(addDays(ymd, 1));
+
+    const [collectedAgg, refundedAgg, expAgg] = await Promise.all([
+      prisma.payment.aggregate({
+        where: {
+          coachingCenterId,
+          branchId: activeBranchId,
+          paymentMethod: 'CASH',
+          status: { not: 'VOIDED' },
+          paymentDate: { gte: dayStart, lt: dayEnd },
+        },
+        _sum: { amount: true },
+      }),
+      prisma.paymentRefund.aggregate({
+        where: {
+          coachingCenterId,
+          refundDate: { gte: dayStart, lt: dayEnd },
+          payment: { branchId: activeBranchId, paymentMethod: 'CASH' },
+        },
+        _sum: { amount: true },
+      }),
+      getCashExpensesForDate(coachingCenterId, activeBranchId, businessDate),
+    ]);
+
+    cashCollections = n(collectedAgg._sum.amount);
+    cashRefunds = n(refundedAgg._sum.amount);
+    cashExpenses = expAgg;
+
+    if (currentSession) {
+      if (currentSession.status === 'OPEN') {
+        expectedCash = n(currentSession.openingCash) + cashCollections - cashRefunds - cashExpenses;
+      } else {
+        expectedCash = currentSession.expectedCash != null ? n(currentSession.expectedCash) : null;
+      }
+    }
+  }
+
+  const history = await prisma.cashSession.findMany({
+    where: {
+      coachingCenterId,
+      ...(activeBranchId ? { branchId: activeBranchId } : {}),
+    },
+    orderBy: { businessDate: 'desc' },
+    take: 30,
+    include: {
+      branch: { select: { id: true, name: true, banglaName: true } },
+      openedBy: { select: { id: true, name: true } },
+      closedBy: { select: { id: true, name: true } },
+    },
+  });
+
+  return {
+    branch: {
+      id: activeBranchId ?? null,
+      locked: branchLocked,
+      options: branches,
+    },
+    date: businessDateStr,
+    session: currentSession
+      ? {
+          id: currentSession.id,
+          businessDate: currentSession.businessDate.toISOString().slice(0, 10),
+          branchId: currentSession.branchId,
+          branchName: currentSession.branch.name,
+          branchBanglaName: currentSession.branch.banglaName,
+          status: currentSession.status as 'OPEN' | 'CLOSED',
+          openingCash: n(currentSession.openingCash),
+          expectedCash,
+          countedCash: currentSession.countedCash != null ? n(currentSession.countedCash) : null,
+          difference: currentSession.difference != null ? n(currentSession.difference) : null,
+          note: currentSession.note,
+          openedByName: currentSession.openedBy?.name || null,
+          closedByName: currentSession.closedBy?.name || null,
+          openedAt: currentSession.openedAt.toISOString(),
+          closedAt: currentSession.closedAt ? currentSession.closedAt.toISOString() : null,
+        }
+      : null,
+    movements: {
+      cashCollections,
+      cashRefunds,
+      cashExpenses,
+      netMovement: cashCollections - cashRefunds - cashExpenses,
+    },
+    history: history.map((h) => ({
+      id: h.id,
+      businessDate: h.businessDate.toISOString().slice(0, 10),
+      branchId: h.branchId,
+      branchName: h.branch.name,
+      branchBanglaName: h.branch.banglaName,
+      status: h.status as 'OPEN' | 'CLOSED',
+      openingCash: n(h.openingCash),
+      expectedCash: h.expectedCash != null ? n(h.expectedCash) : null,
+      countedCash: h.countedCash != null ? n(h.countedCash) : null,
+      difference: h.difference != null ? n(h.difference) : null,
+      note: h.note,
+      openedByName: h.openedBy?.name || null,
+      closedByName: h.closedBy?.name || null,
+      closedAt: h.closedAt ? h.closedAt.toISOString() : null,
+    })),
+  };
+}
+

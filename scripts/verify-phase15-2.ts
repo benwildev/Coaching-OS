@@ -3,8 +3,11 @@ import prisma from '../lib/db';
 import { completeInitialSetup } from '../lib/services/tenant.service';
 import { createCompensation } from '../lib/services/compensation.service';
 import { generateSalary, recordSalaryPayment, monthBounds } from '../lib/services/salary.service';
-import { openCashSession, computeExpectedCash } from '../lib/services/cash-session.service';
+import { openCashSession, computeExpectedCash, getCashBoxDashboard, closeCashSession } from '../lib/services/cash-session.service';
 import { getFinanceOverview, resolveFinanceScope } from '../lib/services/finance-overview.service';
+import { getFinanceReports } from '../lib/services/finance-reports.service';
+import { createPayment, refundPayment } from '../lib/services/payment.service';
+import { createExpense, cancelExpense } from '../lib/services/expense.service';
 import { getDashboardData } from '../lib/services/dashboard.service';
 import { getCurrentDhakaDateString, toDateOnly } from '../lib/schedule';
 import { can, defaultPermissionsFor } from '../lib/auth/permissions';
@@ -280,6 +283,130 @@ async function main() {
     console.log('--- DB integrity');
     await expectError(() => exp(b1.id, rent.id, 0, 'CASH', '2026-03-10'), 'expenses_amount_positive', 'Test: CHECK amount > 0');
     await expectError(() => exp(b1.id, rent.id, 10, 'CASH', '2026-03-10', 'VOIDED'), 'expenses_status_valid', 'Test: CHECK status in (ACTIVE, CANCELLED)');
+
+    console.log('--- Phase 15.2: Detailed Finance Reports');
+    const rep = await getFinanceReports(all, { from: '2026-03-10', to: '2026-03-12', comparison: true });
+    eq(rep.summary.grossCollection, 8450, 'Reports gross collection');
+    eq(rep.summary.refunds, 1200, 'Reports refunds');
+    eq(rep.summary.netCollection, 7250, 'Reports net collection');
+    eq(rep.summary.totalExpenses, 11800, 'Reports total expenses');
+    eq(rep.summary.netProfit, -4550, 'Reports net profit');
+    eq(rep.summary.salaryExpenses, 5500, 'Reports salary expenses counted once');
+    eq(rep.summary.salaryExpensesCount, 2, 'Reports 2 salary expense records');
+    ok('Test 23: Detailed Finance Reports headline summaries match hand-calculated expectations');
+
+    // Income breakdown checks
+    eq(rep.income.byDate.reduce((a, r) => a + r.net, 0), 7250, 'Income by date sum');
+    eq(rep.income.byBranch.reduce((a, r) => a + r.net, 0), 7250, 'Income by branch sum');
+    eq(rep.income.byMethod.reduce((a, r) => a + r.net, 0), 7250, 'Income by method sum');
+    ok('Test 24: Income breakdowns (date, branch, method) all reconcile to net collection');
+
+    // Expense breakdown checks
+    eq(rep.expenses.byCategory.reduce((a, r) => a + r.amount, 0), 11800, 'Expenses by category sum');
+    eq(rep.expenses.byBranch.reduce((a, r) => a + r.amount, 0), 11800, 'Expenses by branch sum');
+    eq(rep.expenses.byMethod.reduce((a, r) => a + r.amount, 0), 11800, 'Expenses by method sum');
+    ok('Test 25: Expense breakdowns (category, branch, method) all reconcile to total expenses');
+
+    // Reports filtering
+    const repCashOnly = await getFinanceReports(all, { from: '2026-03-10', to: '2026-03-12', paymentMethod: 'CASH' });
+    eq(repCashOnly.summary.netCollection, 1700, 'Reports payment method filter CASH');
+    const repRentOnly = await getFinanceReports(all, { from: '2026-03-10', to: '2026-03-12', categoryId: rent.id });
+    eq(repRentOnly.summary.totalExpenses, 5300, 'Reports category filter Rent');
+    ok('Test 26: Finance Reports server-side filtering by payment method and category');
+
+    console.log('--- Phase 15.2: Cash Box Dashboard');
+    const cashBoxOwner = await getCashBoxDashboard(tenantAId, owner, b1.id, today);
+    assert(cashBoxOwner.session !== null, 'Cash Box has today session for B1');
+    assert(cashBoxOwner.session?.status === 'OPEN', 'Cash Box today session is OPEN');
+    eq(cashBoxOwner.session?.expectedCash, 827, 'Cash Box expected cash is 827 (1000 open + 77 collected - 250 expense)');
+    assert(!cashBoxOwner.branch.locked, 'Owner is not branch locked');
+    ok('Test 27: Cash Box dashboard returns live expected cash and drawer status');
+
+    const cashBoxAdminLocked = await getCashBoxDashboard(tenantAId, admin1, b2.id, today);
+    assert(cashBoxAdminLocked.branch.locked, 'Admin is branch locked');
+    assert(cashBoxAdminLocked.branch.id === b1.id, 'Admin locked to b1 even when requesting b2');
+    ok('Test 28: Cash Box enforces branch scoping for branch-locked administrators');
+
+    console.log('--- Phase 15.2: Cash Session Closing & Discrepancy Reconciliation');
+    // Discrepancy without note must fail
+    await expectError(
+      () => closeCashSession(tenantAId, owner, sess.id, { countedCash: 700, note: '' }),
+      'CASH_SESSION_NOTE_REQUIRED',
+      'Test 29: Closing with discrepancy requires a non-empty note'
+    );
+    await expectError(
+      () => closeCashSession(tenantAId, owner, sess.id, { countedCash: 700, note: '   ' }),
+      'CASH_SESSION_NOTE_REQUIRED',
+      'Test 29b: Closing with discrepancy rejects whitespace-only note'
+    );
+
+    // Closing with valid note succeeds
+    const closed = await closeCashSession(tenantAId, owner, sess.id, { countedCash: 700, note: 'Shortage 127 tk in drawer' });
+    assert(closed.status === 'CLOSED', 'Session is now CLOSED');
+    eq(Number(closed.countedCash), 700, 'Counted cash is 700');
+    eq(Number(closed.expectedCash), 827, 'Expected cash is 827');
+    eq(Number(closed.difference), -127, 'Difference is -127 (Shortage)');
+    assert(closed.note === 'Shortage 127 tk in drawer', 'Discrepancy note saved');
+    ok('Test 30: Cash session closed with discrepancy and explanatory note');
+
+    // Duplicate close must fail
+    await expectError(
+      () => closeCashSession(tenantAId, owner, sess.id, { countedCash: 700, note: 'Again' }),
+      'CASH_SESSION_ALREADY_CLOSED',
+      'Test 31: Duplicate closure attempt is rejected'
+    );
+
+    console.log('--- Phase 15.2: Closed Session Immutability across Payments, Refunds & Expenses');
+    // 1. Payment creation with CASH on closed session date -> rejected
+    const invoiceForCash = await prisma.feeInvoice.create({
+      data: { coachingCenterId: tenantAId, branchId: b1.id, studentId: s1.id, invoiceNumber: `${TAG}-ICLOSED`, totalAmount: 1000, dueAmount: 1000, paidAmount: 0, status: 'ISSUED' },
+    });
+    await expectError(
+      () => createPayment(tenantAId, invoiceForCash.id, { amount: 100, paymentMethod: 'CASH', paymentDate: today }, owner.userId),
+      'CASH_SESSION_CLOSED',
+      'Test 32: CASH payment creation rejected when session is closed'
+    );
+
+    // 2. Payment creation with non-cash (BKASH) on the same date -> succeeds
+    const bkashPayment = await createPayment(tenantAId, invoiceForCash.id, { amount: 100, paymentMethod: 'BKASH', paymentDate: today }, owner.userId);
+    assert(bkashPayment.payment.id, 'BKASH payment created successfully');
+    ok('Test 33: Non-cash payment succeeds on a closed cash session date');
+
+    // 3. Cash refund on closed session date -> rejected
+    // Create a cash payment in B1 on a previous date where session wasn't closed
+    const oldCashPayment = await pay('b1', 'CASH', 200, dhaka('2026-03-01'));
+    await expectError(
+      () => refundPayment(tenantAId, oldCashPayment.id, { amount: 50, reason: 'Test refund on closed drawer' }, owner.userId),
+      'CASH_SESSION_CLOSED',
+      'Test 34: CASH refund rejected because today\'s drawer is closed'
+    );
+
+    // 4. Expense creation with CASH on closed session date -> rejected
+    await expectError(
+      () => createExpense(tenantAId, owner, { branchId: b1.id, categoryId: rent.id, amount: 100, paymentMethod: 'CASH', date: today, paidTo: 'Landlord' }),
+      'CASH_SESSION_CLOSED',
+      'Test 35: CASH expense creation rejected when session is closed'
+    );
+
+    // 5. Expense creation with BANK on the same date -> succeeds
+    const bankExp = await createExpense(tenantAId, owner, { branchId: b1.id, categoryId: rent.id, amount: 100, paymentMethod: 'BANK', date: today, paidTo: 'Landlord' });
+    assert(bankExp.expense.id, 'BANK expense created successfully');
+    ok('Test 36: Non-cash expense succeeds on a closed cash session date');
+
+    // 6. Expense cancellation for a CASH expense on that closed date -> rejected
+    const activeTodayCashExp = await prisma.expense.findFirstOrThrow({
+      where: { coachingCenterId: tenantAId, branchId: b1.id, paymentMethod: 'CASH', date: toDateOnly(today), status: 'ACTIVE' },
+    });
+    await expectError(
+      () => cancelExpense(tenantAId, owner, activeTodayCashExp.id, { reason: 'Try cancelling cash expense after session closed' }),
+      'CASH_SESSION_CLOSED',
+      'Test 37: CASH expense cancellation rejected when cash session is closed'
+    );
+
+    // 7. Cash operations for branch b2 (which has no closed session) -> succeeds
+    const b2CashExp = await createExpense(tenantAId, owner, { branchId: b2.id, categoryId: util.id, amount: 50, paymentMethod: 'CASH', date: today, paidTo: 'Electrician' });
+    assert(b2CashExp.expense.id, 'B2 CASH expense created');
+    ok('Test 38: Cash operations for other branches without closed sessions remain unaffected');
 
     console.log(`\n${passed} checks passed.`);
   } finally {

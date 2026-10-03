@@ -8,7 +8,7 @@ import { DICTIONARY } from '@/lib/i18n';
 import { canAny, type PermissionCode } from '@/lib/auth/permissions';
 
 interface TabItem {
-  id: 'tabOverview' | 'tabExpenses' | 'tabReports';
+  id: 'tabOverview' | 'tabExpenses' | 'tabReports' | 'tabCashBox';
   href: string;
   icon: string;
   permission: readonly PermissionCode[];
@@ -17,7 +17,8 @@ interface TabItem {
 const TABS: readonly TabItem[] = [
   { id: 'tabOverview', href: '/finance', icon: 'dashboard', permission: ['finance.dashboard.read'] },
   { id: 'tabExpenses', href: '/finance/expenses', icon: 'banknote', permission: ['expenses.read'] },
-  { id: 'tabReports', href: '/reports/finance', icon: 'chart', permission: ['reports.finance.read'] },
+  { id: 'tabReports', href: '/finance/reports', icon: 'chart', permission: ['reports.finance.read', 'finance.dashboard.read'] },
+  { id: 'tabCashBox', href: '/finance/cash-box', icon: 'wallet', permission: ['fees.cash_session.manage', 'finance.dashboard.read'] },
 ] as const;
 
 export default function FinanceSubNav() {

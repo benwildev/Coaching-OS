@@ -8,6 +8,8 @@ import { loadCoursePricing } from './course-pricing.service';
 import { checkStudentLimit } from './subscription.service';
 import { provisionStudentPortalAccount } from './portal-auth.service';
 import { allocateAdjustments, buildPricingLines, fromPaisa, toPaisa, type PricingLine } from '@/lib/course-pricing';
+import { todayDhaka } from '@/lib/reports/dates';
+import { toDateOnly } from '@/lib/schedule';
 import {
   type AdmissionInput,
   type StudentUpdateInput,
@@ -775,6 +777,25 @@ export async function createStudentAdmission(
         });
         if (dupTx) {
           throw new Error(`DUPLICATE_TRANSACTION: Transaction ID ${txId} has already been recorded for ${method}`);
+        }
+      }
+
+      // Phase 15.2: Closed session immutability — cannot accept cash on a closed session date
+      if (method === 'CASH' && input.branchId) {
+        const todayYmd = todayDhaka();
+        const businessDate = toDateOnly(todayYmd);
+        const session = await tx.cashSession.findUnique({
+          where: {
+            coachingCenterId_branchId_businessDate: {
+              coachingCenterId,
+              branchId: input.branchId,
+              businessDate,
+            },
+          },
+          select: { status: true },
+        });
+        if (session?.status === 'CLOSED') {
+          throw new Error('CASH_SESSION_CLOSED: The cash session for this date is already closed');
         }
       }
 

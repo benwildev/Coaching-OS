@@ -4,6 +4,9 @@ import { notifyStudentGuardians } from './guardian-notify.service';
 import type { PaymentCreateInput, PaymentRefundInput } from '@/lib/validations/payment';
 import type { Prisma } from '@prisma/client';
 
+import { todayDhaka } from '@/lib/reports/dates';
+import { toDateOnly } from '@/lib/schedule';
+
 function toDate(value?: string | null): Date | null {
   return value ? new Date(value) : null;
 }
@@ -71,6 +74,26 @@ export async function createPayment(
   if (invoice.status === 'PAID') throw new Error('Invoice is already fully paid');
   if (input.amount > n(invoice.dueAmount)) {
     throw new Error('Payment amount exceeds the outstanding due amount');
+  }
+
+  // Phase 15.2: Closed session immutability — cannot accept cash on a closed session date
+  if (input.paymentMethod === 'CASH' && invoice.branchId) {
+    const pDate = toDate(input.paymentDate) || new Date();
+    const ymd = pDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' });
+    const businessDate = toDateOnly(ymd);
+    const session = await prisma.cashSession.findUnique({
+      where: {
+        coachingCenterId_branchId_businessDate: {
+          coachingCenterId,
+          branchId: invoice.branchId,
+          businessDate,
+        },
+      },
+      select: { status: true },
+    });
+    if (session?.status === 'CLOSED') {
+      throw new Error('CASH_SESSION_CLOSED: The cash session for this date is already closed');
+    }
   }
 
   let result;
@@ -331,6 +354,25 @@ export async function refundPayment(
   const refundable = n(payment.amount) - alreadyRefunded;
   if (input.amount > refundable) {
     throw new Error('Refund amount exceeds the refundable balance for this payment');
+  }
+
+  // Phase 15.2: Closed session immutability — cash refunds take physical cash from the drawer
+  if (payment.paymentMethod === 'CASH' && payment.branchId) {
+    const todayYmd = todayDhaka();
+    const businessDate = toDateOnly(todayYmd);
+    const session = await prisma.cashSession.findUnique({
+      where: {
+        coachingCenterId_branchId_businessDate: {
+          coachingCenterId,
+          branchId: payment.branchId,
+          businessDate,
+        },
+      },
+      select: { status: true },
+    });
+    if (session?.status === 'CLOSED') {
+      throw new Error('CASH_SESSION_CLOSED: Cannot refund cash on a closed cash session date');
+    }
   }
 
   const result = await prisma.$transaction(async (tx) => {
