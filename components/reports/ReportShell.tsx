@@ -144,17 +144,31 @@ export default function ReportShell({
       </PageHeader>
 
       {options && (
-        <nav className="no-print flex items-center gap-1.5 overflow-x-auto hs pb-1" aria-label={R.title}>
-          {CATEGORY_META.filter((c) => (allowed as string[]).includes(c.id)).map((c) => {
-            const active = pathname === c.href || pathname.startsWith(`${c.href}/`);
-            return (
-              <Link key={c.id} href={c.href} className="chip shrink-0 inline-flex items-center gap-1.5" aria-pressed={active}>
-                <Icon name={c.icon} size={14} />
-                {(R.categories as Record<string, string>)[c.id]}
-              </Link>
-            );
-          })}
-        </nav>
+        <div className="no-print w-full overflow-x-auto hs py-0.5">
+          <nav
+            aria-label={R.title}
+            className="bg-[#edf2f9]/90 p-1.5 rounded-2xl border border-[#d8e2ee] inline-flex items-center gap-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] max-w-full"
+          >
+            {CATEGORY_META.filter((c) => (allowed as string[]).includes(c.id)).map((c) => {
+              const active = pathname === c.href || pathname.startsWith(`${c.href}/`);
+              return (
+                <Link
+                  key={c.id}
+                  href={c.href}
+                  aria-current={active ? 'page' : undefined}
+                  className={`h-[38px] px-3.5 rounded-xl text-[13px] font-semibold flex items-center gap-2 whitespace-nowrap select-none transition-all duration-150 ${
+                    active
+                      ? 'bg-white text-[#063b78] border border-[#d0deee] font-bold shadow-[0_1px_3px_rgba(0,0,0,0.06)]'
+                      : 'text-[#55637a] hover:text-[#063b78] hover:bg-white/60 border border-transparent'
+                  }`}
+                >
+                  <Icon name={c.icon} size={15} />
+                  <span>{(R.categories as Record<string, string>)[c.id]}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
       )}
 
       {children}
@@ -190,12 +204,28 @@ export function ViewTabs({ views, current, onChange }: { views: string[]; curren
   const { lang } = useApp();
   const V = DICTIONARY[lang].reports.views as Record<string, string>;
   return (
-    <div className="no-print flex items-center gap-1.5 overflow-x-auto hs pb-1" role="tablist">
-      {views.map((v) => (
-        <button key={v} type="button" role="tab" aria-selected={v === current} aria-pressed={v === current} className="chip shrink-0" onClick={() => onChange(v)}>
-          {V[v] ?? v}
-        </button>
-      ))}
+    <div className="no-print w-full overflow-x-auto hs">
+      <div
+        role="tablist"
+        className="bg-slate-100/80 p-1 rounded-xl border border-[#e2e8f0] inline-flex items-center gap-1 max-w-full"
+      >
+        {views.map((v) => (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={v === current}
+            className={`h-[30px] px-3 rounded-lg text-[12.5px] font-semibold whitespace-nowrap select-none transition-all duration-150 ${
+              v === current
+                ? 'bg-[#063b78] text-white shadow-[0_1px_3px_rgba(6,59,120,0.25)] font-bold'
+                : 'text-[#64748b] hover:text-[#063b78] hover:bg-white/70'
+            }`}
+            onClick={() => onChange(v)}
+          >
+            {V[v] ?? v}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
