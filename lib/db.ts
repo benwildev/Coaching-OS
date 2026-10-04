@@ -28,4 +28,5 @@ if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
 }
 
+// Singleton Prisma Client instance
 export default prisma;

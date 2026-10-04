@@ -788,19 +788,37 @@ export async function listExpenseCategories(
     throw new Error('EXPENSE_ACCESS_DENIED: You do not have permission to view expense categories');
   }
 
-  const count = await prisma.expenseCategory.count({
-    where: { coachingCenterId, code: { not: TEACHER_SALARY_CATEGORY_CODE } },
+  const nonSalaryCount = await prisma.expenseCategory.count({
+    where: {
+      coachingCenterId,
+      OR: [
+        { code: null },
+        { code: { not: TEACHER_SALARY_CATEGORY_CODE } },
+      ],
+    },
   });
-  if (count === 0) {
-    await prisma.expenseCategory.createMany({
-      data: DEFAULT_EXPENSE_CATEGORIES.map((c) => ({
-        coachingCenterId,
-        name: c.name,
-        banglaName: c.banglaName,
-        isActive: true,
-      })),
-      skipDuplicates: true,
+
+  if (nonSalaryCount === 0) {
+    const existing = await prisma.expenseCategory.findMany({
+      where: { coachingCenterId },
+      select: { name: true },
     });
+    const existingNames = new Set(existing.map((e) => e.name.toLowerCase().trim()));
+    const toInsert = DEFAULT_EXPENSE_CATEGORIES.filter(
+      (c) => !existingNames.has(c.name.toLowerCase().trim())
+    );
+
+    if (toInsert.length > 0) {
+      await prisma.expenseCategory.createMany({
+        data: toInsert.map((c) => ({
+          coachingCenterId,
+          name: c.name,
+          banglaName: c.banglaName,
+          isActive: true,
+        })),
+        skipDuplicates: true,
+      });
+    }
   }
 
   const categories = await prisma.expenseCategory.findMany({

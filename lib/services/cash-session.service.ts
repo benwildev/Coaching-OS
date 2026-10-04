@@ -41,6 +41,7 @@ export async function getCashExpensesForDate(coachingCenterId: string, branchId:
   return n(agg._sum.amount);
 }
 
+
 export async function computeExpectedCash(coachingCenterId: string, branchId: string, businessDate: Date, openingCash: Prisma.Decimal | number): Promise<number> {
   const ymd = businessDate.toISOString().slice(0, 10);
   const dayStart = dhakaDayStart(ymd);
